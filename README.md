@@ -13,7 +13,7 @@ Multi-agent SDLC: Claude Code (architect) + Codex CLI (developer) + openclaw (Te
 | 1.3 | Task complexity estimation (часы «как без ИИ») — для time-saved метрики | in progress |
 | 1.4 | Sentiment / emotion tracking — frustration counter, маты, благодарности per session | pending |
 | 2 | Aggregator backend ($ saved + hours saved + productivity multiplier + emotion index) | pending |
-| 3 | Live cyberpunk dashboard (графики time/$ saved, big-number widget «×N» множитель) | pending |
+| 3 | Live cyberpunk dashboard (графики time/$ saved, big-number widget «×N» множитель, **5h-budget remaining widget real-time**) | pending |
 | 4 | Public stats на androman.pro (wow-метрика «N дней сэкономлено за месяц») | pending |
 | 5 | Conversation graph viz (human↔AI как граф) | pending |
 | 6 | AR overlay (Xreal/Quest/Vision Pro) — синий неон-HUD статуса агентов в углу зрения, голосовые команды через гарнитуру: «start phase X», «status», «merge PR» — управление multi-agent системой не отрываясь от повседневных дел | future / sci-fi |

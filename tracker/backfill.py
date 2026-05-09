@@ -137,6 +137,9 @@ def usage_dict(event: dict) -> tuple[dict, dict] | None:
     if not isinstance(message, dict):
         return None
 
+    if message.get("model") == "<synthetic>":
+        return None
+
     usage = message.get("usage")
     if not isinstance(usage, dict):
         return None
@@ -172,6 +175,15 @@ def build_tracker_event(
     output_tokens = as_int(usage.get("output_tokens"))
     cache_creation_tokens = as_int(usage.get("cache_creation_input_tokens"))
     cache_read_tokens = as_int(usage.get("cache_read_input_tokens"))
+    cost_estimate_usd = None
+    if HOOK.pricing_for_model(model) is not None:
+        cost_estimate_usd = HOOK.estimate_cost(
+            model,
+            input_tokens,
+            output_tokens,
+            cache_creation_tokens,
+            cache_read_tokens,
+        )
 
     event = {
         "ts": timestamp,
@@ -182,13 +194,7 @@ def build_tracker_event(
         "output_tokens": output_tokens,
         "cache_creation_tokens": cache_creation_tokens,
         "cache_read_tokens": cache_read_tokens,
-        "cost_estimate_usd": HOOK.estimate_cost(
-            model,
-            input_tokens,
-            output_tokens,
-            cache_creation_tokens,
-            cache_read_tokens,
-        ),
+        "cost_estimate_usd": cost_estimate_usd,
         "duration_ms": 0,
         "working_dir": working_dir,
         "tool_uses": count_tool_uses(message.get("content")),
