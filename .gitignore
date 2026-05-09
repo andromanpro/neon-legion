@@ -1,0 +1,10 @@
+tracker/*.jsonl
+tracker/*.lock
+tracker/.last-uuids.json
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
+*.tmp
+.~lock.*
+~$*

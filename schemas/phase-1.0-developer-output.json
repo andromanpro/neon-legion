@@ -1,0 +1,38 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "files_created": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "path": {"type": "string"},
+          "purpose": {"type": "string"},
+          "loc": {"type": "integer"}
+        },
+        "required": ["path", "purpose", "loc"]
+      }
+    },
+    "summary": {"type": "string"},
+    "tested": {"type": "boolean"},
+    "test_results": {"type": "string"},
+    "open_questions": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "deviations_from_spec": {
+      "type": "array",
+      "items": {"type": "string"}
+    }
+  },
+  "required": [
+    "files_created",
+    "summary",
+    "tested",
+    "test_results",
+    "open_questions",
+    "deviations_from_spec"
+  ]
+}
