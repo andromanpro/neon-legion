@@ -8,6 +8,7 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 EVENTS_FILE = PROJECT_ROOT / "tracker" / "claude-events.jsonl"
+TASKS_FILE = PROJECT_ROOT / "tracker" / "tasks.json"
 MONTHLY_SUBSCRIPTION_USD = 200.0
 PRORATE_DAYS = 30.0
 
@@ -96,6 +97,18 @@ def read_events(start: date, end: date) -> list[dict]:
     return events
 
 
+def read_tasks() -> dict:
+    if not TASKS_FILE.exists():
+        return {}
+
+    try:
+        with TASKS_FILE.open("r", encoding="utf-8") as source:
+            data = json.load(source)
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
 def empty_stats() -> dict:
     return {
         "calls": 0,
@@ -170,6 +183,100 @@ def summarize_by_day(events: list[dict]) -> dict[str, dict]:
     return by_day
 
 
+def effective_task_hours(entry: dict) -> float | None:
+    corrected = entry.get("human_corrected_hours")
+    if corrected is not None:
+        try:
+            return float(corrected)
+        except (TypeError, ValueError):
+            return None
+
+    baseline = entry.get("ai_baseline_hours")
+    if baseline is None:
+        return None
+    try:
+        return float(baseline)
+    except (TypeError, ValueError):
+        return None
+
+
+def summarize_productivity(events: list[dict]) -> dict | None:
+    tasks = read_tasks()
+    if not tasks:
+        return None
+
+    session_ranges: dict[str, tuple[datetime, datetime]] = {}
+    for event in events:
+        session_id = event.get("session_id")
+        if not isinstance(session_id, str) or not session_id:
+            continue
+
+        ts = parse_event_ts(event.get("ts"))
+        if ts is None:
+            continue
+
+        current = session_ranges.get(session_id)
+        if current is None:
+            session_ranges[session_id] = (ts, ts)
+        else:
+            session_ranges[session_id] = (min(current[0], ts), max(current[1], ts))
+
+    if not session_ranges:
+        return None
+
+    covered_session_ids = [session_id for session_id in session_ranges if session_id in tasks]
+    if not covered_session_ids:
+        return None
+
+    hours_with_ai = sum(
+        max((last_ts - first_ts).total_seconds(), 0) / 3600
+        for first_ts, last_ts in session_ranges.values()
+    )
+    hours_without_ai = 0.0
+    for session_id in covered_session_ids:
+        entry = tasks.get(session_id)
+        if not isinstance(entry, dict):
+            continue
+        hours = effective_task_hours(entry)
+        if hours is not None:
+            hours_without_ai += hours
+
+    return {
+        "hours_with_ai": hours_with_ai,
+        "hours_without_ai": hours_without_ai,
+        "sessions_covered": len(covered_session_ids),
+        "sessions_total": len(session_ranges),
+    }
+
+
+def print_productivity(productivity: dict | None) -> None:
+    if productivity is None:
+        return
+
+    hours_with_ai = productivity["hours_with_ai"]
+    hours_without_ai = productivity["hours_without_ai"]
+    hours_saved = hours_without_ai - hours_with_ai
+    sessions_covered = productivity["sessions_covered"]
+    sessions_total = productivity["sessions_total"]
+    sessions_pending = sessions_total - sessions_covered
+
+    multiplier = f"×{hours_without_ai / hours_with_ai:.1f}" if hours_with_ai > 0 else "n/a"
+    saved_suffix = " ✅" if hours_saved >= 0 else ""
+
+    print()
+    print("## Productivity (Phase 1.3)")
+    print()
+    print(f"**Hours with AI** (wall clock): {hours_with_ai:.1f}")
+    print(f"**Hours without AI** (estimated): {hours_without_ai:.1f}")
+    print(f"**Hours saved**: {hours_saved:.1f}{saved_suffix}")
+    print(f"**Productivity multiplier**: {multiplier}")
+    print()
+    print(
+        f"Sessions covered: {sessions_covered} of {sessions_total} "
+        f"({sessions_pending} pending complexity estimation)"
+    )
+
+
 def period_title(start: date, end: date) -> str:
     days = (end - start).days + 1
     if start == end:
@@ -201,6 +308,8 @@ def print_summary(start: date, end: date, events: list[dict]) -> None:
         print(f"**Savings**: ${fmt_cost(delta)} ✅")
     else:
         print(f"**Доплата**: ${fmt_cost(abs(delta))}")
+
+    print_productivity(summarize_productivity(events))
 
     if days > 1:
         print()
