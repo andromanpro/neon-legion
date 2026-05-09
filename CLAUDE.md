@@ -36,6 +36,8 @@ Pet-проект про peer-to-peer и Telegram-bridge оркестрацию �
 | 3 | Live cyberpunk dashboard (time/$ saved графики, «×N» множитель big-number) |
 | 4 | Public stats на androman.pro (wow-метрика «N дней сэкономлено») |
 | 5 | Conversation graph viz (human↔AI как граф) |
+| 6 | AR overlay для контроля агентов (Xreal/Quest/Vision Pro + voice headset) — киберпанк HUD в углу зрения, голос через openclaw bridge |
+| 7 | Productization — competitor research, packaging (OSS / SaaS / hybrid), pricing, distribution для AI productivity audience |
 
 ## Метрики
 
