@@ -116,6 +116,7 @@ def empty_stats() -> dict:
         "output_tokens": 0,
         "cache_read_tokens": 0,
         "cost_estimate_usd": 0.0,
+        "unknown_pricing_events": 0,
     }
 
 
@@ -125,6 +126,8 @@ def add_event(stats: dict, event: dict) -> None:
     stats["output_tokens"] += as_int(event.get("output_tokens"))
     stats["cache_read_tokens"] += as_int(event.get("cache_read_tokens"))
     stats["cost_estimate_usd"] += as_float(event.get("cost_estimate_usd"))
+    if event.get("cost_estimate_usd") is None:
+        stats["unknown_pricing_events"] += 1
 
 
 def cache_hit_percent(stats: dict) -> int:
@@ -183,6 +186,20 @@ def summarize_by_day(events: list[dict]) -> dict[str, dict]:
     return by_day
 
 
+def unknown_pricing_note(by_model: dict[str, dict]) -> str | None:
+    unknown_by_model = {
+        model: stats["unknown_pricing_events"]
+        for model, stats in by_model.items()
+        if stats["unknown_pricing_events"] > 0
+    }
+    if not unknown_by_model:
+        return None
+
+    total_unknown = sum(unknown_by_model.values())
+    breakdown = ", ".join(f"{model}: {count}" for model, count in sorted(unknown_by_model.items()))
+    return f"{total_unknown} events have unknown pricing and are counted as $0 in totals ({breakdown})."
+
+
 def effective_task_hours(entry: dict) -> float | None:
     corrected = entry.get("human_corrected_hours")
     if corrected is not None:
@@ -200,12 +217,27 @@ def effective_task_hours(entry: dict) -> float | None:
         return None
 
 
+def merged_interval_hours(intervals: list[tuple[float, float]]) -> float:
+    if not intervals:
+        return 0.0
+
+    merged: list[tuple[float, float]] = []
+    for start, end in sorted(intervals):
+        if not merged or start > merged[-1][1]:
+            merged.append((start, end))
+            continue
+
+        merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+
+    return sum(max(end - start, 0.0) for start, end in merged) / 3600
+
+
 def summarize_productivity(events: list[dict]) -> dict | None:
     tasks = read_tasks()
     if not tasks:
         return None
 
-    session_ranges: dict[str, tuple[datetime, datetime]] = {}
+    session_ranges: dict[str, tuple[float, float]] = {}
     for event in events:
         session_id = event.get("session_id")
         if not isinstance(session_id, str) or not session_id:
@@ -214,12 +246,13 @@ def summarize_productivity(events: list[dict]) -> dict | None:
         ts = parse_event_ts(event.get("ts"))
         if ts is None:
             continue
+        event_time = ts.timestamp()
 
         current = session_ranges.get(session_id)
         if current is None:
-            session_ranges[session_id] = (ts, ts)
+            session_ranges[session_id] = (event_time, event_time)
         else:
-            session_ranges[session_id] = (min(current[0], ts), max(current[1], ts))
+            session_ranges[session_id] = (min(current[0], event_time), max(current[1], event_time))
 
     if not session_ranges:
         return None
@@ -228,10 +261,7 @@ def summarize_productivity(events: list[dict]) -> dict | None:
     if not covered_session_ids:
         return None
 
-    hours_with_ai = sum(
-        max((last_ts - first_ts).total_seconds(), 0) / 3600
-        for first_ts, last_ts in session_ranges.values()
-    )
+    hours_with_ai = merged_interval_hours(list(session_ranges.values()))
     hours_without_ai = 0.0
     for session_id in covered_session_ids:
         entry = tasks.get(session_id)
@@ -266,7 +296,7 @@ def print_productivity(productivity: dict | None) -> None:
     print()
     print("## Productivity (Phase 1.3)")
     print()
-    print(f"**Hours with AI** (wall clock): {hours_with_ai:.1f}")
+    print(f"**Hours with AI** (wall clock total period): {hours_with_ai:.1f}")
     print(f"**Hours without AI** (estimated): {hours_without_ai:.1f}")
     print(f"**Hours saved**: {hours_saved:.1f}{saved_suffix}")
     print(f"**Productivity multiplier**: {multiplier}")
@@ -292,7 +322,7 @@ def print_summary(start: date, end: date, events: list[dict]) -> None:
     by_model, total = summarize_by_model(events)
     days = (end - start).days + 1
     prorated = MONTHLY_SUBSCRIPTION_USD / PRORATE_DAYS * days
-    delta = prorated - total["cost_estimate_usd"]
+    delta = total["cost_estimate_usd"] - prorated
 
     print(period_title(start, end))
     print()
@@ -301,13 +331,27 @@ def print_summary(start: date, end: date, events: list[dict]) -> None:
     for model in sorted(by_model):
         print(stats_row(model, by_model[model]))
     print(stats_row("**Total**", total))
+    note = unknown_pricing_note(by_model)
+    if note is not None:
+        print()
+        print(f"Unknown pricing note: {note}")
     print()
     print(f"**Period API cost**: ${fmt_cost(total['cost_estimate_usd'])}")
     print(f"**Max prorated** ($200/mo for this period): ${fmt_cost(prorated)}")
     if delta >= 0:
-        print(f"**Savings**: ${fmt_cost(delta)} ✅")
+        print(f"**Savings vs API rates**: ${fmt_cost(delta)} ✅")
+        print(
+            f"If paid by API rates would owe ${fmt_cost(total['cost_estimate_usd'])}; "
+            f"subscription costs ${fmt_cost(prorated)} for this period; "
+            f"saved ${fmt_cost(delta)}."
+        )
     else:
-        print(f"**Доплата**: ${fmt_cost(abs(delta))}")
+        print(f"**Subscription not fully used**: ${fmt_cost(abs(delta))}")
+        print(
+            f"If paid by API rates would owe ${fmt_cost(total['cost_estimate_usd'])}; "
+            f"subscription costs ${fmt_cost(prorated)} for this period; "
+            f"unused subscription value ${fmt_cost(abs(delta))}."
+        )
 
     print_productivity(summarize_productivity(events))
 

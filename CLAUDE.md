@@ -33,7 +33,7 @@ Pet-проект про peer-to-peer и Telegram-bridge оркестрацию �
 | 1.3 | Task complexity estimation (часы «как без ИИ») для time-saved метрики |
 | 1.4 | Sentiment / emotion tracking per session (профанити, frustration, благодарности) |
 | 2 | Aggregator backend ($ saved + hours saved + productivity multiplier + emotion index) |
-| 3 | Live cyberpunk dashboard (time/$ saved графики, «×N» множитель big-number) |
+| 3 | Live cyberpunk dashboard (time/$ saved графики, «×N» множитель big-number, real-time 5h-budget remaining widget — wedge: ни у одного multi-tool конкурента такого нет) |
 | 4 | Public stats на androman.pro (wow-метрика «N дней сэкономлено») |
 | 5 | Conversation graph viz (human↔AI как граф) |
 | 6 | AR overlay для контроля агентов (Xreal/Quest/Vision Pro + voice headset) — киберпанк HUD в углу зрения, голос через openclaw bridge |

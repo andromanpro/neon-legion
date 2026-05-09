@@ -16,6 +16,7 @@ TASKS_LOCK_FILE = TRACKER_DIR / ".tasks.lock"
 LOG_DIR = TRACKER_DIR / ".estimation-logs"
 RECENT_WINDOW = timedelta(hours=24)
 INFLIGHT_TTL_SECONDS = 10 * 60
+MAX_DISPATCH_PER_FIRE = 5
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
@@ -65,6 +66,8 @@ def read_recent_session_ids(new_session_id: str) -> set[str]:
 
             session_id = event.get("session_id")
             if not isinstance(session_id, str) or not session_id or session_id == new_session_id:
+                continue
+            if event.get("model") == "<synthetic>":
                 continue
 
             ts = parse_event_ts(event.get("ts"))
@@ -222,6 +225,7 @@ def main() -> int:
 
         tasks = read_tasks()
         pending = sorted(session_id for session_id in recent_session_ids if session_id not in tasks)
+        pending = pending[:MAX_DISPATCH_PER_FIRE]
         if not pending:
             return 0
 

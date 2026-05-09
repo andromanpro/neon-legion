@@ -13,13 +13,21 @@ LAST_UUIDS_FILE = TRACKER_DIR / ".last-uuids.json"
 LOCK_FILE = TRACKER_DIR / ".claude-events.lock"
 
 # Pricing as of 2026-05-09. Values are USD per 1M tokens.
-PRICING = {
-    "claude-opus-4-7": {"in": 15.00, "out": 75.00, "cache_read": 1.50, "cache_write": 18.75},
-    "claude-opus-4-7[1m]": {"in": 15.00, "out": 75.00, "cache_read": 1.50, "cache_write": 18.75},
-    "claude-sonnet-4-6": {"in": 3.00, "out": 15.00, "cache_read": 0.30, "cache_write": 3.75},
-    "claude-haiku-4-5": {"in": 1.00, "out": 5.00, "cache_read": 0.10, "cache_write": 1.25},
-    "claude-haiku-4-5-20251001": {"in": 1.00, "out": 5.00, "cache_read": 0.10, "cache_write": 1.25},
-}
+OPUS_PRICING = {"in": 15.00, "out": 75.00, "cache_read": 1.50, "cache_write": 18.75}
+SONNET_PRICING = {"in": 3.00, "out": 15.00, "cache_read": 0.30, "cache_write": 3.75}
+HAIKU_PRICING = {"in": 1.00, "out": 5.00, "cache_read": 0.10, "cache_write": 1.25}
+
+
+def pricing_for_model(model: str) -> dict | None:
+    if not model:
+        return None
+    if model.startswith("claude-opus-4"):
+        return OPUS_PRICING
+    if model.startswith("claude-sonnet-4"):
+        return SONNET_PRICING
+    if model.startswith("claude-haiku-4"):
+        return HAIKU_PRICING
+    return None
 
 
 def read_hook_input() -> dict | None:
@@ -63,6 +71,9 @@ def read_latest_assistant(transcript_path: str) -> tuple[dict, dict, dict] | Non
             if not isinstance(message, dict):
                 continue
 
+            if message.get("model") == "<synthetic>":
+                continue
+
             usage = message.get("usage")
             model = message.get("model")
             if not isinstance(usage, dict) or not isinstance(model, str) or not model:
@@ -80,11 +91,16 @@ def as_int(value: object) -> int:
         return 0
 
 
-def estimate_cost(model: str, input_tokens: int, output_tokens: int, cache_creation_tokens: int, cache_read_tokens: int) -> float:
-    pricing = PRICING.get(model)
+def estimate_cost(
+    model: str,
+    input_tokens: int,
+    output_tokens: int,
+    cache_creation_tokens: int,
+    cache_read_tokens: int,
+) -> float | None:
+    pricing = pricing_for_model(model)
     if pricing is None:
-        pricing = PRICING["claude-opus-4-7"]
-        print(f"Warning: unknown Claude model {model!r}; using claude-opus-4-7 pricing", file=sys.stderr)
+        return None
 
     cost = (
         input_tokens * pricing["in"]
