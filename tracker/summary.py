@@ -23,6 +23,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--days", type=int, default=1, help="Number of local calendar days to include.")
     parser.add_argument("--from", dest="from_date", help="Start date, inclusive, in YYYY-MM-DD format.")
     parser.add_argument("--to", dest="to_date", help="End date, inclusive, in YYYY-MM-DD format.")
+    parser.add_argument(
+        "--gap-minutes",
+        type=int,
+        default=2,
+        help="Maximum gap between consecutive turns counted as active AI time.",
+    )
     return parser.parse_args(argv)
 
 
@@ -232,7 +238,40 @@ def merged_interval_hours(intervals: list[tuple[float, float]]) -> float:
     return sum(max(end - start, 0.0) for start, end in merged) / 3600
 
 
-def summarize_productivity(events: list[dict]) -> dict | None:
+def active_time_hours(events: list[dict], gap_minutes: int = 2) -> float:
+    if gap_minutes <= 0:
+        raise ValueError("gap_minutes must be greater than 0")
+
+    session_timestamps: dict[str, list[datetime]] = {}
+    for event in events:
+        session_id = event.get("session_id")
+        if not isinstance(session_id, str) or not session_id:
+            continue
+
+        ts = parse_event_ts(event.get("ts"))
+        if ts is None:
+            continue
+
+        session_timestamps.setdefault(session_id, []).append(ts)
+
+    max_gap = timedelta(minutes=gap_minutes)
+    total_seconds = 0.0
+    for timestamps in session_timestamps.values():
+        if len(timestamps) < 2:
+            continue
+
+        timestamps.sort()
+        previous = timestamps[0]
+        for current in timestamps[1:]:
+            gap = current - previous
+            if gap <= max_gap:
+                total_seconds += gap.total_seconds()
+            previous = current
+
+    return total_seconds / 3600
+
+
+def summarize_productivity(events: list[dict], gap_minutes: int = 2) -> dict | None:
     tasks = read_tasks()
     if not tasks:
         return None
@@ -272,7 +311,9 @@ def summarize_productivity(events: list[dict]) -> dict | None:
             hours_without_ai += hours
 
     return {
-        "hours_with_ai": hours_with_ai,
+        "active_hours_with_ai": active_time_hours(events, gap_minutes),
+        "calendar_hours_with_ai": hours_with_ai,
+        "gap_minutes": gap_minutes,
         "hours_without_ai": hours_without_ai,
         "sessions_covered": len(covered_session_ids),
         "sessions_total": len(session_ranges),
@@ -283,23 +324,26 @@ def print_productivity(productivity: dict | None) -> None:
     if productivity is None:
         return
 
-    hours_with_ai = productivity["hours_with_ai"]
+    active_hours_with_ai = productivity["active_hours_with_ai"]
+    calendar_hours_with_ai = productivity["calendar_hours_with_ai"]
+    gap_minutes = productivity["gap_minutes"]
     hours_without_ai = productivity["hours_without_ai"]
-    hours_saved = hours_without_ai - hours_with_ai
+    hours_saved = hours_without_ai - active_hours_with_ai
     sessions_covered = productivity["sessions_covered"]
     sessions_total = productivity["sessions_total"]
     sessions_pending = sessions_total - sessions_covered
 
-    multiplier = f"×{hours_without_ai / hours_with_ai:.1f}" if hours_with_ai > 0 else "n/a"
+    multiplier = f"×{hours_without_ai / active_hours_with_ai:.1f}" if active_hours_with_ai > 0 else "n/a"
     saved_suffix = " ✅" if hours_saved >= 0 else ""
 
     print()
     print("## Productivity (Phase 1.3)")
     print()
-    print(f"**Hours with AI** (wall clock total period): {hours_with_ai:.1f}")
+    print(f"**Hours with AI (active, ≤{gap_minutes}min gaps)**: {active_hours_with_ai:.1f}")
+    print(f"**Hours with AI (calendar span)**: {calendar_hours_with_ai:.1f}")
     print(f"**Hours without AI** (estimated): {hours_without_ai:.1f}")
     print(f"**Hours saved**: {hours_saved:.1f}{saved_suffix}")
-    print(f"**Productivity multiplier**: {multiplier}")
+    print(f"**Productivity multiplier**: {multiplier} (active-based)")
     print()
     print(
         f"Sessions covered: {sessions_covered} of {sessions_total} "
@@ -314,7 +358,7 @@ def period_title(start: date, end: date) -> str:
     return f"## Claude Code stats: {start.isoformat()}..{end.isoformat()} ({days} days)"
 
 
-def print_summary(start: date, end: date, events: list[dict]) -> None:
+def print_summary(start: date, end: date, events: list[dict], gap_minutes: int = 2) -> None:
     if not events:
         print("No events in period")
         return
@@ -353,7 +397,7 @@ def print_summary(start: date, end: date, events: list[dict]) -> None:
             f"unused subscription value ${fmt_cost(abs(delta))}."
         )
 
-    print_productivity(summarize_productivity(events))
+    print_productivity(summarize_productivity(events, gap_minutes))
 
     if days > 1:
         print()
@@ -373,11 +417,18 @@ def main(argv: list[str]) -> int:
         print(f"Invalid date: {exc}", file=sys.stderr)
         return 2
 
+    try:
+        if args.gap_minutes <= 0:
+            raise ValueError("--gap-minutes must be greater than 0")
+    except ValueError as exc:
+        print(f"Invalid argument: {exc}", file=sys.stderr)
+        return 2
+
     if start > end:
         print("Invalid period: --from must be earlier than or equal to --to", file=sys.stderr)
         return 2
 
-    print_summary(start, end, read_events(start, end))
+    print_summary(start, end, read_events(start, end), args.gap_minutes)
     return 0
 
 
