@@ -11,6 +11,13 @@ EVENTS_FILE = PROJECT_ROOT / "tracker" / "claude-events.jsonl"
 TASKS_FILE = PROJECT_ROOT / "tracker" / "tasks.json"
 MONTHLY_SUBSCRIPTION_USD = 200.0
 PRORATE_DAYS = 30.0
+SENTIMENT_KEYS = {
+    "profanity_count",
+    "frustration_score",
+    "appreciation_score",
+    "mood_arc",
+    "sentiment_intensity",
+}
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
@@ -74,6 +81,10 @@ def as_float(value: object) -> float:
         return float(value or 0)
     except (TypeError, ValueError):
         return 0.0
+
+
+def clamp_score(value: object) -> float:
+    return max(0.0, min(1.0, as_float(value)))
 
 
 def read_events(start: date, end: date) -> list[dict]:
@@ -320,6 +331,136 @@ def summarize_productivity(events: list[dict], gap_minutes: int = 2) -> dict | N
     }
 
 
+def has_sentiment_data(entry: dict) -> bool:
+    return any(key in entry for key in SENTIMENT_KEYS)
+
+
+def sentiment_label(value: float) -> str:
+    if value < 0.2:
+        return "low"
+    if value < 0.4:
+        return "medium-low"
+    if value < 0.6:
+        return "medium"
+    if value < 0.8:
+        return "medium-high"
+    return "high"
+
+
+def average(values: list[float]) -> float:
+    if not values:
+        return 0.0
+    return sum(values) / len(values)
+
+
+def session_timestamp_ranges(events: list[dict]) -> dict[str, tuple[float, float]]:
+    session_ranges: dict[str, tuple[float, float]] = {}
+
+    for event in events:
+        session_id = event.get("session_id")
+        if not isinstance(session_id, str) or not session_id:
+            continue
+
+        ts = parse_event_ts(event.get("ts"))
+        if ts is None:
+            continue
+        event_time = ts.timestamp()
+
+        current = session_ranges.get(session_id)
+        if current is None:
+            session_ranges[session_id] = (event_time, event_time)
+        else:
+            session_ranges[session_id] = (min(current[0], event_time), max(current[1], event_time))
+
+    return session_ranges
+
+
+def stress_trend(first_half: list[float], second_half: list[float]) -> str:
+    if not first_half or not second_half:
+        return "n/a (need both halves)"
+
+    delta = average(second_half) - average(first_half)
+    if delta <= -0.05:
+        return "↘ improving"
+    if delta >= 0.05:
+        return "↗ worsening"
+    return "→ stable"
+
+
+def summarize_sentiment(events: list[dict], start: date, end: date) -> dict | None:
+    tasks = read_tasks()
+    if not tasks:
+        return None
+
+    session_ranges = session_timestamp_ranges(events)
+    if not session_ranges:
+        return None
+
+    covered: list[tuple[str, dict, float]] = []
+    for session_id, (first_ts, _last_ts) in session_ranges.items():
+        entry = tasks.get(session_id)
+        if isinstance(entry, dict) and has_sentiment_data(entry):
+            covered.append((session_id, entry, first_ts))
+
+    if not covered:
+        return None
+
+    profanity_total = 0
+    frustration_values = []
+    appreciation_values = []
+    first_half_frustration = []
+    second_half_frustration = []
+    mood_counts: dict[str, int] = {}
+    day_stats: dict[str, dict[str, int]] = {}
+    days = (end - start).days + 1
+
+    for _session_id, entry, first_ts in covered:
+        profanity = max(as_int(entry.get("profanity_count")), 0)
+        frustration = clamp_score(entry.get("frustration_score"))
+        appreciation = clamp_score(entry.get("appreciation_score"))
+        session_day = datetime.fromtimestamp(first_ts).astimezone().date()
+        day_key = session_day.isoformat()
+
+        profanity_total += profanity
+        frustration_values.append(frustration)
+        appreciation_values.append(appreciation)
+
+        day_entry = day_stats.setdefault(day_key, {"profanity": 0, "sessions": 0})
+        day_entry["profanity"] += profanity
+        day_entry["sessions"] += 1
+
+        if (session_day - start).days < days / 2:
+            first_half_frustration.append(frustration)
+        else:
+            second_half_frustration.append(frustration)
+
+        mood_arc = entry.get("mood_arc")
+        if isinstance(mood_arc, str) and mood_arc.strip():
+            mood_arc = mood_arc.strip()[:30]
+            mood_counts[mood_arc] = mood_counts.get(mood_arc, 0) + 1
+
+    top_day = max(day_stats.items(), key=lambda item: (item[1]["profanity"], item[1]["sessions"], item[0]))
+
+    return {
+        "profanity_total": profanity_total,
+        "frustration_avg": average(frustration_values),
+        "appreciation_avg": average(appreciation_values),
+        "stress_trend": stress_trend(first_half_frustration, second_half_frustration),
+        "top_day": top_day,
+        "mood_counts": mood_counts,
+        "sessions_covered": len(covered),
+        "sessions_total": len(session_ranges),
+    }
+
+
+def format_mood_counts(mood_counts: dict[str, int]) -> str:
+    if not mood_counts:
+        return "n/a"
+
+    top_arcs = sorted(mood_counts.items(), key=lambda item: (-item[1], item[0]))[:3]
+    return ", ".join(f"'{arc.replace(chr(39), '')}' ({count})" for arc, count in top_arcs)
+
+
 def print_productivity(productivity: dict | None) -> None:
     if productivity is None:
         return
@@ -348,6 +489,41 @@ def print_productivity(productivity: dict | None) -> None:
     print(
         f"Sessions covered: {sessions_covered} of {sessions_total} "
         f"({sessions_pending} pending complexity estimation)"
+    )
+
+
+def print_sentiment(sentiment: dict | None) -> None:
+    if sentiment is None:
+        return
+
+    profanity_total = sentiment["profanity_total"]
+    frustration_avg = sentiment["frustration_avg"]
+    appreciation_avg = sentiment["appreciation_avg"]
+    sessions_covered = sentiment["sessions_covered"]
+    sessions_total = sentiment["sessions_total"]
+    sessions_pending = sessions_total - sessions_covered
+    avg_profanity = profanity_total / sessions_covered if sessions_covered else 0.0
+    top_day, top_day_stats = sentiment["top_day"]
+
+    print()
+    print("## Sentiment (Phase 1.4)")
+    print()
+    print(
+        f"**Profanity total**: {profanity_total} across {sessions_covered} "
+        f"sessions (avg {avg_profanity:.1f}/session)"
+    )
+    print(f"**Frustration avg**: {frustration_avg:.2f} ({sentiment_label(frustration_avg)})")
+    print(f"**Appreciation avg**: {appreciation_avg:.2f} ({sentiment_label(appreciation_avg)})")
+    print(f"**Stress trend**: {sentiment['stress_trend']}")
+    print(
+        f"**Top day**: {top_day} "
+        f"({top_day_stats['profanity']} profanity hits in {top_day_stats['sessions']} sessions)"
+    )
+    print(f"**Mood arcs (top-3)**: {format_mood_counts(sentiment['mood_counts'])}")
+    print()
+    print(
+        f"Sessions covered: {sessions_covered} of {sessions_total} "
+        f"({sessions_pending} pending sentiment estimation)"
     )
 
 
@@ -398,6 +574,7 @@ def print_summary(start: date, end: date, events: list[dict], gap_minutes: int =
         )
 
     print_productivity(summarize_productivity(events, gap_minutes))
+    print_sentiment(summarize_sentiment(events, start, end))
 
     if days > 1:
         print()

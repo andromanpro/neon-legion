@@ -2,6 +2,7 @@
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -16,6 +17,29 @@ TASKS_LOCK_FILE = TRACKER_DIR / ".tasks.lock"
 LOG_DIR = TRACKER_DIR / ".estimation-logs"
 ORACLE_PROMPT_FILE = TRACKER_DIR / "oracle-prompt.txt"
 MAX_CONTEXT_CHARS = 15_000
+
+PROFANITY_RU_PATTERNS = [
+    re.compile(r"\bбля[а-яё]*", re.IGNORECASE),
+    re.compile(r"\bёб[а-яё]*", re.IGNORECASE),
+    re.compile(r"\bеб[а-яё]+", re.IGNORECASE),
+    re.compile(r"\bхуй[а-яё]*|\bхрен[а-яё]*|\bхер[а-яё]*", re.IGNORECASE),
+    re.compile(r"\bпизд[а-яё]*", re.IGNORECASE),
+    re.compile(r"\bсук[а-яё]*", re.IGNORECASE),
+    re.compile(r"\bговн[а-яё]*", re.IGNORECASE),
+    re.compile(r"\bжоп[а-яё]*", re.IGNORECASE),
+    re.compile(r"\bнах(уй|ер|рен)[а-яё]*", re.IGNORECASE),
+    re.compile(r"\bпошёл\s+на\b|\bпошел\s+на\b", re.IGNORECASE),
+]
+
+PROFANITY_EN_PATTERNS = [
+    re.compile(r"\bfuck[a-z]*", re.IGNORECASE),
+    re.compile(r"\bshit[a-z]*", re.IGNORECASE),
+    re.compile(r"\bdamn[a-z]*", re.IGNORECASE),
+    re.compile(r"\bbitch[a-z]*", re.IGNORECASE),
+    re.compile(r"\bcrap[a-z]*", re.IGNORECASE),
+]
+
+ALL_PROFANITY = PROFANITY_RU_PATTERNS + PROFANITY_EN_PATTERNS
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
@@ -166,7 +190,16 @@ def read_transcript(path: Path) -> tuple[list[str], list[str]]:
             elif role == "assistant":
                 assistant_messages.append(text)
 
-    return user_messages[:3], assistant_messages[-5:]
+    return user_messages, assistant_messages
+
+
+def count_profanity(user_messages: list[str]) -> int:
+    """Count profanity matches across user messages without storing raw examples."""
+    total = 0
+    for message in user_messages:
+        for pattern in ALL_PROFANITY:
+            total += len(pattern.findall(message))
+    return total
 
 
 def clip_text(text: str, limit: int) -> str:
@@ -202,12 +235,16 @@ def render_context(user_messages: list[str], assistant_messages: list[str], per_
     return "\n\n".join(sections)
 
 
+def build_truncated_context_from_messages(user_messages: list[str], assistant_messages: list[str]) -> str:
+    context = render_context(user_messages[:3], assistant_messages[-5:], 2_500)
+    if len(context) > MAX_CONTEXT_CHARS:
+        context = render_context(user_messages[:3], assistant_messages[-5:], 1_200)
+    return clip_middle(context, MAX_CONTEXT_CHARS)
+
+
 def build_truncated_context(transcript_path: str) -> str:
     user_messages, assistant_messages = read_transcript(Path(transcript_path))
-    context = render_context(user_messages, assistant_messages, 2_500)
-    if len(context) > MAX_CONTEXT_CHARS:
-        context = render_context(user_messages, assistant_messages, 1_200)
-    return clip_middle(context, MAX_CONTEXT_CHARS)
+    return build_truncated_context_from_messages(user_messages, assistant_messages)
 
 
 def parse_json_text(text: str) -> object:
@@ -269,6 +306,27 @@ def normalize_oracle_payload(payload: dict) -> dict:
     else:
         needs_manual_review = bool(review_flag)
 
+    try:
+        frustration = float(payload.get("frustration_score", 0))
+    except (TypeError, ValueError):
+        frustration = 0.0
+    frustration = max(0.0, min(1.0, frustration))
+
+    try:
+        appreciation = float(payload.get("appreciation_score", 0))
+    except (TypeError, ValueError):
+        appreciation = 0.0
+    appreciation = max(0.0, min(1.0, appreciation))
+
+    mood_arc = payload.get("mood_arc", "")
+    if not isinstance(mood_arc, str):
+        mood_arc = ""
+    mood_arc = mood_arc[:30]
+
+    intensity = payload.get("sentiment_intensity", "low")
+    if intensity not in {"low", "medium", "high"}:
+        intensity = "low"
+
     return {
         "ai_baseline_hours": hours,
         "human_corrected_hours": None,
@@ -276,6 +334,10 @@ def normalize_oracle_payload(payload: dict) -> dict:
         "estimated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
         "estimation_confidence": confidence,
         "needs_manual_review": needs_manual_review,
+        "frustration_score": frustration,
+        "appreciation_score": appreciation,
+        "mood_arc": mood_arc,
+        "sentiment_intensity": intensity,
     }
 
 
@@ -310,11 +372,14 @@ def failure_entry(transcript_path: str, reason: str) -> dict:
 
 
 def estimate_session(session_id: str, transcript_path: str) -> None:
-    context = build_truncated_context(transcript_path)
+    user_messages, assistant_messages = read_transcript(Path(transcript_path))
+    profanity = count_profanity(user_messages)
+    context = build_truncated_context_from_messages(user_messages, assistant_messages)
     oracle_prompt = ORACLE_PROMPT_FILE.read_text(encoding="utf-8")
     prompt = oracle_prompt + "\n\n=== TRANSCRIPT (truncated) ===\n" + context
     entry = run_oracle(prompt)
     entry["transcript_path"] = transcript_path
+    entry["profanity_count"] = profanity
     update_task_entry(session_id, entry)
 
 
