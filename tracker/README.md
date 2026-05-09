@@ -51,6 +51,14 @@ Task complexity estimates are stored locally in:
 tracker/tasks.json
 ```
 
+### tasks.json fields (Phase 1.4 extended)
+
+- `profanity_count` — int, regex match count of swear words in user messages
+- `frustration_score` — float 0-1, AI assessment
+- `appreciation_score` — float 0-1, AI assessment
+- `mood_arc` — string (max 30 chars), brief emotional trajectory
+- `sentiment_intensity` — "low"|"medium"|"high"
+
 Estimator logs are written to:
 
 ```text

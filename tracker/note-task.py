@@ -151,14 +151,23 @@ def fmt_hours(value: object) -> str:
         return ""
 
 
+def fmt_profanity(value: object) -> str:
+    if value is None:
+        return ""
+    try:
+        return str(max(int(value), 0))
+    except (TypeError, ValueError):
+        return ""
+
+
 def markdown_cell(value: object) -> str:
     text = "" if value is None else str(value)
     return text.replace("|", "\\|").replace("\n", " ")
 
 
 def list_entries(tasks: dict) -> None:
-    print("| Session ID (short) | Description | AI baseline (h) | Human corrected (h) | Effective (h) |")
-    print("|---|---|---:|---:|---:|")
+    print("| Session ID | Description | AI baseline (h) | Profanity | Mood |")
+    print("|---|---|---:|---:|---|")
     for session_id, entry in sorted(tasks.items()):
         if not isinstance(entry, dict):
             continue
@@ -169,8 +178,8 @@ def list_entries(tasks: dict) -> None:
                     markdown_cell(session_id[:8]),
                     markdown_cell(entry.get("brief_description", "")),
                     fmt_hours(entry.get("ai_baseline_hours")),
-                    fmt_hours(entry.get("human_corrected_hours")),
-                    fmt_hours(effective_hours(entry)),
+                    fmt_profanity(entry.get("profanity_count")),
+                    markdown_cell(entry.get("mood_arc", "")),
                 ]
             )
             + " |"

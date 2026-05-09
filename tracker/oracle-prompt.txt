@@ -7,7 +7,11 @@ Output schema:
   "brief_description": "<1 line — what was accomplished>",
   "ai_baseline_hours": <float>,
   "estimation_confidence": "<high|medium|low>",
-  "needs_manual_review": <bool>
+  "needs_manual_review": <bool>,
+  "frustration_score": <float 0-1>,
+  "appreciation_score": <float 0-1>,
+  "mood_arc": "<calm|frustrated→calm|stable→joyful|exhausted|mixed>",
+  "sentiment_intensity": "<low|medium|high>"
 }
 
 Hours guidance (without AI assistance):
@@ -20,3 +24,11 @@ Hours guidance (without AI assistance):
 Set needs_manual_review=true ONLY if transcript is too truncated, off-topic, or unintelligible. Otherwise set false.
 
 Set estimation_confidence based on transcript clarity (low if many tools were used but final outcome unclear).
+
+Sentiment guidance (analyze user messages tone):
+- frustration_score: 0-1, scale based on signs of impatience, capslock, swearing, repeated demands
+- appreciation_score: 0-1, scale based on signs of thanks, acknowledgment of progress, positive emoji
+- mood_arc: brief arc describing emotional trajectory (max 30 chars)
+- sentiment_intensity: how strongly the emotional signal is present overall
+
+Don't quote specific user phrases. Output scores only.
