@@ -27,10 +27,12 @@ Pet-проект про peer-to-peer и Telegram-bridge оркестрацию �
 | Phase | Что |
 |---|---|
 | 1.0 | Claude Code tracking hook + summary ($ tracking) — done 2026-05-09 |
+| 1.0.1 | Retroactive backfill из `~/.claude/projects/*/*.jsonl` (дедуп по session_id+message_uuid) |
 | 1.1 | Codex CLI tracking |
 | 1.2 | openclaw call tracking |
 | 1.3 | Task complexity estimation (часы «как без ИИ») для time-saved метрики |
-| 2 | Aggregator backend ($ saved + hours saved + productivity multiplier) |
+| 1.4 | Sentiment / emotion tracking per session (профанити, frustration, благодарности) |
+| 2 | Aggregator backend ($ saved + hours saved + productivity multiplier + emotion index) |
 | 3 | Live cyberpunk dashboard (time/$ saved графики, «×N» множитель big-number) |
 | 4 | Public stats на androman.pro (wow-метрика «N дней сэкономлено») |
 | 5 | Conversation graph viz (human↔AI как граф) |
@@ -54,6 +56,16 @@ Pet-проект про peer-to-peer и Telegram-bridge оркестрацию �
 - **Cost tracking** — JSONL в `tracker/`, локально (gitignore — не публикуем сырые данные с путями и метаданными).
 - **Без `Co-Authored-By:` в commit messages** — пользователь единственный автор. Инструменты не авторы.
 - **Trust boundaries обкатываются постепенно** — сначала human-approve каждой фазы; автоматизация цепочек только когда стабильно.
+
+## Privacy hardening для Phase 4 (публикация на androman.pro)
+
+OpenAI policy позволяет наш Codex headless под ChatGPT-auth (compliant в trusted private infra), но для публикации метрик на публичный блог — **обезличить данные**:
+
+- ❌ Не публиковать сырые transcript'ы / output Codex'а verbatim
+- ✅ Только агрегированные метрики (числа, графики, дашборды без raw payload)
+- ✅ `working_dir` обезличить или хешировать (сейчас раскрывает FS-структуру + имена проектов; плюс там mojibake кириллицы который тоже надо чинить)
+- ✅ `session_id` укоротить до short-hash при публикации, не raw UUID
+- См. `reference_openai_codex_policy.md` в memory для деталей policy-research
 
 ## Внешние ссылки
 

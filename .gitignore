@@ -1,10 +1,13 @@
 tracker/*.jsonl
 tracker/*.lock
 tracker/.last-uuids.json
+tracker/tasks.json
+tracker/.estimation-logs/
 __pycache__/
 *.pyc
 *.pyo
 .DS_Store
 *.tmp
+*.log
 .~lock.*
 ~$*

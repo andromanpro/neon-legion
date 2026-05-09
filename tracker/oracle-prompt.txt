@@ -1,0 +1,22 @@
+You are estimating the human-time equivalent of a software development session done with AI assistance.
+
+Read the truncated Claude Code transcript that follows the marker. Output strict JSON only, no prose, no preamble, no code fences.
+
+Output schema:
+{
+  "brief_description": "<1 line — what was accomplished>",
+  "ai_baseline_hours": <float>,
+  "estimation_confidence": "<high|medium|low>",
+  "needs_manual_review": <bool>
+}
+
+Hours guidance (without AI assistance):
+- Trivial (typo, single-line fix): 0.25–1
+- Simple (one file feature, small refactor): 1–3
+- Medium (multi-file design, integration): 3–12
+- Complex (architecture, debugging long bugs, multi-system): 12–40
+- Research / investigation: count investigation hours, not code lines
+
+Set needs_manual_review=true ONLY if transcript is too truncated, off-topic, or unintelligible. Otherwise set false.
+
+Set estimation_confidence based on transcript clarity (low if many tools were used but final outcome unclear).

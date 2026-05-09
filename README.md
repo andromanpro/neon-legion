@@ -7,10 +7,12 @@ Multi-agent SDLC: Claude Code (architect) + Codex CLI (developer) + openclaw (Te
 | Phase | Описание | Status |
 |---|---|---|
 | **1.0** | Claude Code tracking hook + summary ($ tracking) | ✅ done (2026-05-09) |
+| **1.0.1** | Retroactive backfill — обход всех `~/.claude/projects/*/*.jsonl` за прошлые месяцы, дедупликация по `(session_id, message_uuid)` | pending |
 | 1.1 | Codex CLI tracking layer | pending |
 | 1.2 | openclaw call tracking | pending |
-| 1.3 | Task complexity estimation (часы «как без ИИ») — для time-saved метрики | pending |
-| 2 | Aggregator backend ($ saved + hours saved + productivity multiplier) | pending |
+| 1.3 | Task complexity estimation (часы «как без ИИ») — для time-saved метрики | in progress |
+| 1.4 | Sentiment / emotion tracking — frustration counter, маты, благодарности per session | pending |
+| 2 | Aggregator backend ($ saved + hours saved + productivity multiplier + emotion index) | pending |
 | 3 | Live cyberpunk dashboard (графики time/$ saved, big-number widget «×N» множитель) | pending |
 | 4 | Public stats на androman.pro (wow-метрика «N дней сэкономлено за месяц») | pending |
 | 5 | Conversation graph viz (human↔AI как граф) | pending |
