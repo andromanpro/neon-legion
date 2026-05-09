@@ -16,6 +16,8 @@ Multi-agent SDLC: Claude Code (architect) + Codex CLI (developer) + openclaw (Te
 | 3 | Live cyberpunk dashboard (графики time/$ saved, big-number widget «×N» множитель) | pending |
 | 4 | Public stats на androman.pro (wow-метрика «N дней сэкономлено за месяц») | pending |
 | 5 | Conversation graph viz (human↔AI как граф) | pending |
+| 6 | AR overlay (Xreal/Quest/Vision Pro) — синий неон-HUD статуса агентов в углу зрения, голосовые команды через гарнитуру: «start phase X», «status», «merge PR» — управление multi-agent системой не отрываясь от повседневных дел | future / sci-fi |
+| 7 | Productization track — competitor research, market validation, packaging (open-source release / SaaS / hybrid), pricing model, onboarding, distribution. Цель: продаваемый продукт для AI productivity audience | research |
 
 ## Активные задачи
 
