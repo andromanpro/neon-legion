@@ -1,0 +1,1262 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Multi-Agent Tracker · Live</title>
+  <style>
+    :root {
+      --bg: #030712;
+      --bg-alt: #0a1628;
+      --panel: rgba(3, 12, 25, 0.78);
+      --panel-strong: rgba(8, 22, 42, 0.9);
+      --line: rgba(34, 211, 238, 0.24);
+      --line-hot: rgba(236, 72, 153, 0.5);
+      --cyan: #06b6d4;
+      --cyan-bright: #22d3ee;
+      --cyan-soft: #67e8f9;
+      --violet: #a855f7;
+      --magenta: #ec4899;
+      --pink: #f472b6;
+      --body: #cbd5e1;
+      --number: #dbeafe;
+      --muted: #64748b;
+      --danger: #fb7185;
+      --ok: #2dd4bf;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      min-height: 100%;
+      background: var(--bg);
+    }
+
+    body {
+      min-height: 100vh;
+      margin: 0;
+      overflow-x: hidden;
+      color: var(--body);
+      font-family: "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
+      background:
+        radial-gradient(circle at 16% 8%, rgba(34, 211, 238, 0.17), transparent 30rem),
+        radial-gradient(circle at 82% 2%, rgba(168, 85, 247, 0.16), transparent 26rem),
+        radial-gradient(circle at 72% 86%, rgba(236, 72, 153, 0.12), transparent 28rem),
+        linear-gradient(135deg, var(--bg), var(--bg-alt) 62%, #050816);
+    }
+
+    body::before,
+    body::after {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      content: "";
+    }
+
+    body::before {
+      z-index: 0;
+      opacity: 0.3;
+      background-image:
+        linear-gradient(rgba(22, 78, 99, 0.6) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(22, 78, 99, 0.6) 1px, transparent 1px);
+      background-size: 24px 24px;
+      mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.9), transparent 92%);
+    }
+
+    body::after {
+      z-index: 5;
+      background: linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 0 2px, transparent 2px 4px);
+      mix-blend-mode: screen;
+    }
+
+    .hud {
+      position: relative;
+      z-index: 1;
+      width: min(1440px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 20px 0 28px;
+    }
+
+    .topbar,
+    .panel {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: linear-gradient(180deg, rgba(8, 22, 42, 0.86), rgba(3, 12, 25, 0.72));
+      box-shadow:
+        0 0 0 1px rgba(6, 182, 212, 0.05) inset,
+        0 0 32px rgba(6, 182, 212, 0.08),
+        0 18px 42px rgba(0, 0, 0, 0.38);
+      backdrop-filter: blur(10px);
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      min-height: 58px;
+      padding: 13px 16px;
+      text-transform: uppercase;
+    }
+
+    .brand,
+    .status-line,
+    .kicker,
+    .panel-title,
+    .hero-label,
+    .mini-label,
+    .session-head th {
+      color: var(--cyan-soft);
+      font-size: 0.75rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .brand {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: baseline;
+    }
+
+    .brand strong {
+      color: var(--number);
+      font-size: 1rem;
+      text-shadow: 0 0 18px rgba(34, 211, 238, 0.42);
+    }
+
+    .status-line {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      justify-content: flex-end;
+      color: var(--body);
+    }
+
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      color: var(--pink);
+    }
+
+    .status-light {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--pink);
+      box-shadow: 0 0 12px var(--pink);
+    }
+
+    .status-pill.online {
+      color: var(--ok);
+    }
+
+    .status-pill.online .status-light {
+      background: var(--ok);
+      box-shadow: 0 0 14px var(--ok);
+    }
+
+    .status-pill.degraded {
+      color: var(--violet);
+    }
+
+    .status-pill.degraded .status-light {
+      background: var(--violet);
+      box-shadow: 0 0 14px var(--violet);
+    }
+
+    .hero-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 16px;
+      margin-top: 16px;
+    }
+
+    .panel {
+      position: relative;
+      overflow: hidden;
+      padding: 18px;
+    }
+
+    .panel::before {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      content: "";
+      border-top: 1px solid rgba(103, 232, 249, 0.28);
+      background: linear-gradient(90deg, rgba(6, 182, 212, 0.08), transparent 28%, rgba(236, 72, 153, 0.07));
+      opacity: 0.82;
+    }
+
+    .panel > * {
+      position: relative;
+      z-index: 1;
+    }
+
+    .hero-card {
+      min-height: 168px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+
+    .kicker {
+      color: var(--violet);
+    }
+
+    .metric-value {
+      position: relative;
+      display: inline-block;
+      color: var(--number);
+      font-size: 3.65rem;
+      font-weight: 800;
+      line-height: 1;
+      text-shadow:
+        0 0 20px rgba(34, 211, 238, 0.76),
+        0 0 42px rgba(168, 85, 247, 0.28);
+      white-space: nowrap;
+    }
+
+    .metric-value::before,
+    .metric-value::after {
+      position: absolute;
+      inset: 0;
+      color: var(--number);
+      pointer-events: none;
+      opacity: 0;
+      content: attr(data-text);
+    }
+
+    .metric-value::before {
+      transform: translate(2px, 0);
+      text-shadow: 2px 0 var(--magenta);
+    }
+
+    .metric-value::after {
+      transform: translate(-2px, 0);
+      text-shadow: -2px 0 var(--cyan);
+    }
+
+    .metric-value.glitch-play::before,
+    .metric-value.glitch-play::after {
+      animation: glitch 0.32s steps(2, end);
+    }
+
+    .metric-value.glitch-play {
+      animation: glitch-main 0.32s steps(2, end);
+    }
+
+    @keyframes glitch {
+      0% { clip-path: inset(8% 0 78% 0); opacity: 0.92; }
+      18% { clip-path: inset(46% 0 36% 0); transform: translate(4px, -1px); }
+      36% { clip-path: inset(74% 0 8% 0); transform: translate(-3px, 1px); }
+      54% { clip-path: inset(18% 0 58% 0); transform: translate(2px, 0); }
+      72% { clip-path: inset(64% 0 20% 0); transform: translate(-4px, 0); }
+      100% { clip-path: inset(0 0 0 0); opacity: 0; transform: translate(0, 0); }
+    }
+
+    @keyframes glitch-main {
+      0%, 100% { transform: translate(0, 0); }
+      34% { transform: translate(1px, 0); }
+      68% { transform: translate(-1px, 0); }
+    }
+
+    .hero-label {
+      margin-top: 8px;
+    }
+
+    .hero-detail {
+      margin-top: 12px;
+      color: var(--muted);
+      font-size: 0.82rem;
+      line-height: 1.5;
+    }
+
+    .budget-panel {
+      margin-top: 16px;
+      padding: 20px 18px 18px;
+    }
+
+    .budget-head,
+    .panel-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      margin-bottom: 15px;
+    }
+
+    .panel-title {
+      color: var(--cyan-soft);
+    }
+
+    .budget-percent {
+      color: var(--number);
+      font-size: 1.15rem;
+      font-weight: 800;
+      text-shadow: 0 0 16px rgba(236, 72, 153, 0.55);
+    }
+
+    .progress-shell {
+      height: 18px;
+      overflow: hidden;
+      border: 1px solid rgba(34, 211, 238, 0.3);
+      border-radius: 999px;
+      background:
+        linear-gradient(90deg, rgba(8, 47, 73, 0.9), rgba(15, 23, 42, 0.9)),
+        repeating-linear-gradient(90deg, transparent 0 18px, rgba(203, 213, 225, 0.08) 18px 20px);
+      box-shadow: 0 0 20px rgba(6, 182, 212, 0.12) inset;
+    }
+
+    .progress-fill {
+      width: 0%;
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, var(--cyan), var(--cyan-bright));
+      box-shadow: 0 0 20px rgba(34, 211, 238, 0.8);
+      transition: width 420ms ease, background 420ms ease, box-shadow 420ms ease;
+    }
+
+    .progress-fill.warning {
+      background: linear-gradient(90deg, var(--cyan), var(--violet));
+      box-shadow: 0 0 22px rgba(168, 85, 247, 0.8);
+    }
+
+    .progress-fill.burst {
+      background: linear-gradient(90deg, var(--violet), var(--magenta), var(--pink));
+      box-shadow: 0 0 26px rgba(236, 72, 153, 0.86);
+      animation: pulse-hot 1.1s ease-in-out infinite alternate;
+    }
+
+    @keyframes pulse-hot {
+      from { filter: saturate(1); opacity: 0.82; }
+      to { filter: saturate(1.35); opacity: 1; }
+    }
+
+    .budget-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px 18px;
+      margin-top: 12px;
+      color: var(--muted);
+      font-size: 0.83rem;
+    }
+
+    .content-grid,
+    .bottom-grid {
+      display: grid;
+      gap: 16px;
+      margin-top: 16px;
+    }
+
+    .content-grid {
+      grid-template-columns: minmax(320px, 0.9fr) minmax(420px, 1.6fr);
+    }
+
+    .bottom-grid {
+      grid-template-columns: minmax(320px, 0.95fr) minmax(520px, 1.55fr);
+    }
+
+    .stress-stack {
+      display: grid;
+      gap: 14px;
+    }
+
+    .meter-row {
+      display: grid;
+      grid-template-columns: 132px 1fr 54px;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .mini-label {
+      color: var(--body);
+      text-transform: none;
+      letter-spacing: 0;
+    }
+
+    .thin-shell {
+      height: 9px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: rgba(15, 23, 42, 0.88);
+      border: 1px solid rgba(103, 232, 249, 0.18);
+    }
+
+    .thin-fill {
+      width: 0%;
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, var(--cyan), var(--violet));
+      box-shadow: 0 0 14px rgba(34, 211, 238, 0.7);
+      transition: width 420ms ease;
+    }
+
+    .thin-fill.hot {
+      background: linear-gradient(90deg, var(--violet), var(--magenta));
+      box-shadow: 0 0 14px rgba(236, 72, 153, 0.65);
+    }
+
+    .meter-value,
+    .trend-value,
+    .model-percent,
+    .session-cost {
+      color: var(--number);
+      font-weight: 800;
+      text-shadow: 0 0 12px rgba(34, 211, 238, 0.25);
+    }
+
+    .stress-facts {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 2px;
+    }
+
+    .fact {
+      border: 1px solid rgba(103, 232, 249, 0.14);
+      border-radius: 8px;
+      padding: 10px;
+      background: rgba(2, 6, 23, 0.42);
+    }
+
+    .fact span {
+      display: block;
+      color: var(--muted);
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .fact strong {
+      display: block;
+      margin-top: 6px;
+      color: var(--number);
+      font-size: 1.1rem;
+    }
+
+    .timeline-panel {
+      min-height: 286px;
+    }
+
+    .chart-wrap {
+      min-height: 210px;
+      border: 1px solid rgba(103, 232, 249, 0.14);
+      border-radius: 8px;
+      background: rgba(2, 6, 23, 0.34);
+      padding: 10px 10px 4px;
+    }
+
+    #timeline-chart {
+      display: block;
+      width: 100%;
+      height: 210px;
+    }
+
+    .chart-axis {
+      stroke: rgba(103, 232, 249, 0.22);
+      stroke-width: 1;
+    }
+
+    .chart-bar {
+      fill: url(#barGradient);
+      filter: drop-shadow(0 0 5px rgba(34, 211, 238, 0.42));
+      transition: opacity 160ms ease, transform 160ms ease;
+    }
+
+    .chart-bar:hover {
+      opacity: 0.72;
+      transform: translateY(-2px);
+    }
+
+    .empty-chart,
+    .muted {
+      color: var(--muted);
+    }
+
+    .models-list {
+      display: grid;
+      gap: 13px;
+    }
+
+    .model-row {
+      display: grid;
+      grid-template-columns: minmax(104px, 0.7fr) minmax(120px, 1fr) 58px;
+      align-items: center;
+      gap: 10px;
+      min-height: 28px;
+    }
+
+    .model-name,
+    .session-desc {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .model-bar-shell {
+      height: 12px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: rgba(15, 23, 42, 0.88);
+      border: 1px solid rgba(103, 232, 249, 0.18);
+    }
+
+    .model-bar {
+      width: 0%;
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, var(--cyan), var(--violet), var(--magenta));
+      box-shadow: 0 0 16px rgba(168, 85, 247, 0.65);
+    }
+
+    .sessions-panel {
+      min-width: 0;
+    }
+
+    .sessions-table {
+      width: 100%;
+      border-collapse: collapse;
+      table-layout: fixed;
+      font-size: 0.83rem;
+    }
+
+    .sessions-table th,
+    .sessions-table td {
+      padding: 10px 8px;
+      border-bottom: 1px solid rgba(103, 232, 249, 0.12);
+      text-align: left;
+      vertical-align: middle;
+    }
+
+    .sessions-table th:nth-child(1),
+    .sessions-table td:nth-child(1) {
+      width: 124px;
+    }
+
+    .sessions-table th:nth-child(3),
+    .sessions-table td:nth-child(3) {
+      width: 72px;
+      text-align: right;
+    }
+
+    .sessions-table th:nth-child(4),
+    .sessions-table td:nth-child(4) {
+      width: 110px;
+    }
+
+    .session-model {
+      color: var(--cyan-soft);
+    }
+
+    .footer-line {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      gap: 10px;
+      margin-top: 16px;
+      color: var(--muted);
+      font-size: 0.74rem;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+
+    .offline-text {
+      color: var(--pink);
+    }
+
+    @media (max-width: 1080px) {
+      .content-grid,
+      .bottom-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .metric-value {
+        font-size: 3rem;
+      }
+    }
+
+    @media (max-width: 760px) {
+      .hud {
+        width: min(100% - 20px, 720px);
+        padding-top: 10px;
+      }
+
+      .topbar,
+      .budget-head,
+      .panel-head {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+
+      .status-line {
+        justify-content: flex-start;
+      }
+
+      .hero-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .metric-value {
+        font-size: 2.55rem;
+      }
+
+      .meter-row {
+        grid-template-columns: 110px 1fr 48px;
+      }
+
+      .stress-facts {
+        grid-template-columns: 1fr;
+      }
+
+      .sessions-table {
+        font-size: 0.78rem;
+      }
+
+      .sessions-table th:nth-child(1),
+      .sessions-table td:nth-child(1) {
+        width: 98px;
+      }
+
+      .sessions-table th:nth-child(4),
+      .sessions-table td:nth-child(4) {
+        display: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="hud">
+    <header class="topbar">
+      <div class="brand">
+        <span>// MULTI-AGENT TRACKER</span>
+        <strong>LIVE</strong>
+      </div>
+      <div class="status-line">
+        <span id="api-status" class="status-pill degraded"><span class="status-light"></span>API BOOT</span>
+        <span id="agent-status" class="status-pill"><span class="status-light"></span>agent OFFLINE</span>
+        <span><strong id="events-total">0</strong> events</span>
+      </div>
+    </header>
+
+    <section class="hero-grid" aria-label="Live economy metrics">
+      <article class="panel hero-card">
+        <div class="kicker">// MONEY</div>
+        <div>
+          <div id="money-saved" class="metric-value glitch" data-text="$0.00">$0.00</div>
+          <div class="hero-label">saved vs API</div>
+          <div id="money-detail" class="hero-detail">waiting for /api/summary</div>
+        </div>
+      </article>
+
+      <article class="panel hero-card">
+        <div class="kicker">// TIME</div>
+        <div>
+          <div id="productivity-multiplier" class="metric-value glitch" data-text="×0.0">×0.0</div>
+          <div class="hero-label">productivity</div>
+          <div id="productivity-detail" class="hero-detail">waiting for /api/productivity</div>
+        </div>
+      </article>
+
+      <article class="panel hero-card">
+        <div class="kicker">// ACTIVE</div>
+        <div>
+          <div id="active-hours" class="metric-value glitch" data-text="0.0h">0.0h</div>
+          <div class="hero-label">active time</div>
+          <div id="active-detail" class="hero-detail">covered sessions: 0 / 0</div>
+        </div>
+      </article>
+    </section>
+
+    <section class="panel budget-panel" aria-label="Five hour budget remaining">
+      <div class="budget-head">
+        <div>
+          <div class="panel-title">// 5H BUDGET REMAINING</div>
+          <div id="budget-window" class="hero-detail">waiting for /api/budget</div>
+        </div>
+        <div id="budget-percent" class="budget-percent">0%</div>
+      </div>
+      <div class="progress-shell" aria-hidden="true">
+        <div id="budget-fill" class="progress-fill"></div>
+      </div>
+      <div class="budget-meta">
+        <span id="budget-tokens">tokens: 0 / 88k (Max 5x estimate)</span>
+        <span id="budget-cache">cache: 0</span>
+        <span id="budget-24h">24h: 0 calls · $0.00</span>
+      </div>
+    </section>
+
+    <section class="content-grid">
+      <article class="panel">
+        <div class="panel-head">
+          <div class="panel-title">// STRESS METER</div>
+          <div id="sentiment-status" class="muted">sentiment: idle</div>
+        </div>
+        <div class="stress-stack">
+          <div class="meter-row">
+            <div class="mini-label">frustration</div>
+            <div class="thin-shell"><div id="frustration-fill" class="thin-fill hot"></div></div>
+            <div id="frustration-value" class="meter-value">0.00</div>
+          </div>
+          <div class="meter-row">
+            <div class="mini-label">appreciation</div>
+            <div class="thin-shell"><div id="appreciation-fill" class="thin-fill"></div></div>
+            <div id="appreciation-value" class="meter-value">0.00</div>
+          </div>
+          <div class="stress-facts">
+            <div class="fact">
+              <span>profanity</span>
+              <strong id="profanity-total">0</strong>
+            </div>
+            <div class="fact">
+              <span>stress trend</span>
+              <strong id="stress-trend" class="trend-value">→ stable</strong>
+            </div>
+          </div>
+          <div id="mood-arcs" class="hero-detail">mood arcs: none</div>
+        </div>
+      </article>
+
+      <article class="panel timeline-panel">
+        <div class="panel-head">
+          <div>
+            <div class="panel-title">// ACTIVITY TIMELINE</div>
+            <div id="timeline-period" class="hero-detail">60 days · cost/day</div>
+          </div>
+          <div id="timeline-max" class="meter-value">$0.00 max</div>
+        </div>
+        <div class="chart-wrap">
+          <svg id="timeline-chart" viewBox="0 0 640 180" preserveAspectRatio="none" role="img" aria-label="Daily cost timeline"></svg>
+        </div>
+      </article>
+    </section>
+
+    <section class="bottom-grid">
+      <article class="panel">
+        <div class="panel-head">
+          <div>
+            <div class="panel-title">// MODELS BREAKDOWN</div>
+            <div id="models-basis" class="hero-detail">basis: cost</div>
+          </div>
+        </div>
+        <div id="models-list" class="models-list">
+          <div class="muted">waiting for /api/summary</div>
+        </div>
+      </article>
+
+      <article class="panel sessions-panel">
+        <div class="panel-head">
+          <div>
+            <div class="panel-title">// RECENT SESSIONS</div>
+            <div id="sessions-status" class="hero-detail">last 10 sessions</div>
+          </div>
+        </div>
+        <table class="sessions-table">
+          <thead class="session-head">
+            <tr>
+              <th>time</th>
+              <th>task</th>
+              <th>cost</th>
+              <th>model</th>
+            </tr>
+          </thead>
+          <tbody id="sessions-body">
+            <tr>
+              <td colspan="4" class="muted">waiting for /api/sessions</td>
+            </tr>
+          </tbody>
+        </table>
+      </article>
+    </section>
+
+    <div class="footer-line">
+      <span>// LOCAL HUD</span>
+      <span id="last-updated">last update: never</span>
+    </div>
+  </main>
+
+  <script>
+    (() => {
+      "use strict";
+
+      const POLL_FAST = 5000;
+      const POLL_MEDIUM = 30000;
+      const POLL_SLOW = 60000;
+      const DAYS = 60;
+
+      const endpointState = new Map();
+      const nf0 = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
+      const nf1 = new Intl.NumberFormat("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+      const moneyFmt = new Intl.NumberFormat("en-US", {
+        style: "currency",
+        currency: "USD",
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      });
+
+      const svgNs = "http://www.w3.org/2000/svg";
+      const $ = (id) => document.getElementById(id);
+
+      function number(value) {
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? parsed : 0;
+      }
+
+      function integer(value) {
+        return Math.max(0, Math.round(number(value)));
+      }
+
+      function money(value) {
+        return moneyFmt.format(number(value));
+      }
+
+      function one(value) {
+        return nf1.format(number(value));
+      }
+
+      function pct(value) {
+        return `${nf0.format(number(value))}%`;
+      }
+
+      function compact(value) {
+        const n = integer(value);
+        if (n >= 1000000) {
+          const m = n / 1000000;
+          return Number.isInteger(m) ? `${nf0.format(m)}M` : `${one(m)}M`;
+        }
+        if (n >= 1000) {
+          const k = n / 1000;
+          return Number.isInteger(k) ? `${nf0.format(k)}k` : `${one(k)}k`;
+        }
+        return nf0.format(n);
+      }
+
+      function escapeHtml(value) {
+        return String(value ?? "")
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#39;");
+      }
+
+      function setText(id, value) {
+        const el = $(id);
+        if (el) {
+          el.textContent = value;
+        }
+      }
+
+      function setMetric(id, value) {
+        const el = $(id);
+        if (!el) {
+          return;
+        }
+        el.textContent = value;
+        el.dataset.text = value;
+      }
+
+      function setStatus(el, state, text) {
+        if (!el) {
+          return;
+        }
+        el.classList.toggle("online", state === "online");
+        el.classList.toggle("degraded", state === "degraded");
+        el.innerHTML = `<span class="status-light"></span>${escapeHtml(text)}`;
+      }
+
+      function renderEndpointState() {
+        const values = Array.from(endpointState.values());
+        const apiStatus = $("api-status");
+        if (!values.length) {
+          setStatus(apiStatus, "degraded", "API BOOT");
+          return;
+        }
+        if (values.every(Boolean)) {
+          setStatus(apiStatus, "online", "API OK");
+          return;
+        }
+        setStatus(apiStatus, "degraded", "API DEGRADED");
+      }
+
+      function markEndpoint(name, ok) {
+        endpointState.set(name, Boolean(ok));
+        renderEndpointState();
+      }
+
+      function markUpdated() {
+        setText("last-updated", `last update: ${new Date().toLocaleTimeString("en-US", { hour12: false })}`);
+      }
+
+      async function apiFetch(name, url) {
+        try {
+          const response = await fetch(url, { cache: "no-store" });
+          if (!response.ok) {
+            throw new Error(`${response.status} ${response.statusText}`);
+          }
+          const payload = await response.json();
+          markEndpoint(name, true);
+          markUpdated();
+          return payload;
+        } catch (error) {
+          markEndpoint(name, false);
+          console.error(`[dashboard] ${name} poll failed`, error);
+          throw error;
+        }
+      }
+
+      async function pollHealth() {
+        try {
+          const data = await apiFetch("health", "/api/health");
+          const ok = data && data.status === "ok";
+          setStatus($("agent-status"), ok ? "online" : "degraded", ok ? "agent ONLINE" : "agent OFFLINE");
+          setText("events-total", nf0.format(integer(data.events_total)));
+        } catch (_error) {
+          setStatus($("agent-status"), "offline", "agent OFFLINE");
+        }
+      }
+
+      async function pollSummary() {
+        try {
+          const data = await apiFetch("summary", `/api/summary?days=${DAYS}`);
+          const totals = data.totals || {};
+          const saved = number(totals.savings_usd);
+          const cost = number(totals.cost_usd);
+          const subscription = number(totals.subscription_usd);
+          setMetric("money-saved", money(saved));
+          setText("money-detail", `API ${money(cost)} · subscription ${money(subscription)} · ${integer(totals.calls)} calls`);
+          renderModels(data.by_model || []);
+        } catch (_error) {
+          setText("money-detail", "summary endpoint offline");
+        }
+      }
+
+      async function pollProductivity() {
+        try {
+          const data = await apiFetch("productivity", `/api/productivity?days=${DAYS}&gap_minutes=2`);
+          const multiplier = number(data.multiplier);
+          const activeHours = number(data.active_hours);
+          const hoursSaved = number(data.hours_saved);
+          setMetric("productivity-multiplier", `×${one(multiplier)}`);
+          setText("productivity-detail", `${one(hoursSaved)}h saved · ${one(number(data.hours_without_ai_estimate))}h baseline`);
+          setMetric("active-hours", `${one(activeHours)}h`);
+          setText("active-detail", `covered sessions: ${integer(data.sessions_covered)} / ${integer(data.sessions_total)}`);
+        } catch (_error) {
+          setText("productivity-detail", "productivity endpoint offline");
+        }
+      }
+
+      async function pollSentiment() {
+        try {
+          const data = await apiFetch("sentiment", `/api/sentiment?days=${DAYS}`);
+          if (!data) {
+            renderSentiment(null);
+            return;
+          }
+          renderSentiment(data);
+        } catch (_error) {
+          setText("sentiment-status", "sentiment: offline");
+        }
+      }
+
+      async function pollBudget() {
+        try {
+          const data = await apiFetch("budget", "/api/budget");
+          const window5h = data.window_5h || {};
+          const window24h = data.window_24h || {};
+          const tokens = integer(window5h.tokens_used);
+          const limit = integer(window5h.estimated_limit_max5x) || 88000;
+          const percent = number(window5h.percent_max5x);
+          const fill = $("budget-fill");
+          const visualWidth = Math.max(0, Math.min(percent, 100));
+          fill.style.width = `${visualWidth}%`;
+          fill.classList.toggle("warning", percent >= 50 && percent <= 100);
+          fill.classList.toggle("burst", percent > 100);
+          const mode = percent > 100 ? "burst mode active" : percent >= 50 ? "high burn" : "normal";
+          setText("budget-percent", `${pct(percent)} (${mode})`);
+          setText("budget-window", `since ${formatSince(window5h.since)} · Max 20x ${pct(window5h.percent_max20x)}`);
+          setText("budget-tokens", `tokens: ${nf0.format(tokens)} / ${compact(limit)} (Max 5x estimate)`);
+          setText("budget-cache", `cache: ${compact(window5h.cache_tokens)}`);
+          setText("budget-24h", `24h: ${integer(window24h.calls)} calls · ${money(window24h.cost_usd)}`);
+        } catch (_error) {
+          setText("budget-window", "budget endpoint offline");
+        }
+      }
+
+      async function pollTimeseries() {
+        try {
+          const data = await apiFetch("timeseries", `/api/timeseries?metric=cost&days=${DAYS}`);
+          renderTimeline(data.data || []);
+          const period = data.period || {};
+          setText("timeline-period", `${period.days || DAYS} days · cost/day`);
+        } catch (_error) {
+          renderTimeline([]);
+          setText("timeline-period", "timeseries endpoint offline");
+        }
+      }
+
+      async function pollSessions() {
+        try {
+          const data = await apiFetch("sessions", "/api/sessions?limit=10");
+          renderSessions(data.sessions || []);
+        } catch (_error) {
+          setText("sessions-status", "sessions endpoint offline");
+        }
+      }
+
+      function renderSentiment(data) {
+        if (!data) {
+          setProgress("frustration-fill", 0);
+          setProgress("appreciation-fill", 0);
+          setText("frustration-value", "0.00");
+          setText("appreciation-value", "0.00");
+          setText("profanity-total", "0");
+          setText("stress-trend", "→ stable");
+          setText("mood-arcs", "mood arcs: no sentiment data");
+          setText("sentiment-status", "sentiment: no data");
+          return;
+        }
+        const frustration = clamp01(data.frustration_avg);
+        const appreciation = clamp01(data.appreciation_avg);
+        setProgress("frustration-fill", frustration * 100);
+        setProgress("appreciation-fill", appreciation * 100);
+        setText("frustration-value", frustration.toFixed(2));
+        setText("appreciation-value", appreciation.toFixed(2));
+        setText("profanity-total", nf0.format(integer(data.profanity_total)));
+        setText("stress-trend", trendText(data.stress_trend));
+        setText("mood-arcs", moodArcText(data.mood_arcs_top || []));
+        setText("sentiment-status", `sentiment: ${integer(data.sessions_covered)} sessions`);
+      }
+
+      function setProgress(id, percentValue) {
+        const el = $(id);
+        if (el) {
+          el.style.width = `${Math.max(0, Math.min(number(percentValue), 100))}%`;
+        }
+      }
+
+      function clamp01(value) {
+        return Math.max(0, Math.min(number(value), 1));
+      }
+
+      function trendText(value) {
+        if (value === "improving") {
+          return "↘ improving";
+        }
+        if (value === "worsening") {
+          return "↗ worsening";
+        }
+        return "→ stable";
+      }
+
+      function moodArcText(arcs) {
+        if (!arcs.length) {
+          return "mood arcs: none";
+        }
+        const text = arcs
+          .slice(0, 3)
+          .map((item) => `${item.arc || "unknown"} ×${integer(item.count)}`)
+          .join(" · ");
+        return `mood arcs: ${text}`;
+      }
+
+      function formatSince(iso) {
+        if (!iso) {
+          return "unknown";
+        }
+        const date = new Date(iso);
+        if (Number.isNaN(date.getTime())) {
+          return String(iso);
+        }
+        return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+      }
+
+      function formatDateTime(iso) {
+        const date = new Date(iso);
+        if (Number.isNaN(date.getTime())) {
+          return "unknown";
+        }
+        return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+      }
+
+      function pad(value) {
+        return String(value).padStart(2, "0");
+      }
+
+      function svg(name, attrs = {}) {
+        const el = document.createElementNS(svgNs, name);
+        Object.entries(attrs).forEach(([key, value]) => el.setAttribute(key, String(value)));
+        return el;
+      }
+
+      function clear(el) {
+        while (el.firstChild) {
+          el.removeChild(el.firstChild);
+        }
+      }
+
+      function renderTimeline(points) {
+        const chart = $("timeline-chart");
+        clear(chart);
+
+        const width = 640;
+        const height = 180;
+        const padX = 12;
+        const padY = 12;
+        const usableWidth = width - padX * 2;
+        const usableHeight = height - padY * 2;
+
+        const defs = svg("defs");
+        const gradient = svg("linearGradient", { id: "barGradient", x1: "0", x2: "0", y1: "0", y2: "1" });
+        gradient.appendChild(svg("stop", { offset: "0%", "stop-color": "#22d3ee" }));
+        gradient.appendChild(svg("stop", { offset: "58%", "stop-color": "#a855f7" }));
+        gradient.appendChild(svg("stop", { offset: "100%", "stop-color": "#ec4899" }));
+        defs.appendChild(gradient);
+        chart.appendChild(defs);
+
+        [0, 0.25, 0.5, 0.75, 1].forEach((ratio) => {
+          const y = padY + usableHeight * ratio;
+          chart.appendChild(svg("line", { class: "chart-axis", x1: padX, x2: width - padX, y1: y, y2: y }));
+        });
+
+        if (!points.length) {
+          const text = svg("text", { x: width / 2, y: height / 2, fill: "#64748b", "text-anchor": "middle" });
+          text.textContent = "waiting for cost/day";
+          chart.appendChild(text);
+          setText("timeline-max", "$0.00 max");
+          return;
+        }
+
+        const values = points.map((point) => Math.max(0, number(point.value)));
+        const max = Math.max(...values, 1);
+        const slot = usableWidth / points.length;
+        const barWidth = Math.max(2, slot * 0.62);
+
+        points.forEach((point, index) => {
+          const value = Math.max(0, number(point.value));
+          const barHeight = value === 0 ? 2 : Math.max(3, usableHeight * (value / max));
+          const x = padX + index * slot + (slot - barWidth) / 2;
+          const y = padY + usableHeight - barHeight;
+          const rect = svg("rect", {
+            class: "chart-bar",
+            x: x.toFixed(2),
+            y: y.toFixed(2),
+            width: barWidth.toFixed(2),
+            height: barHeight.toFixed(2),
+            rx: "2"
+          });
+          const title = svg("title");
+          title.textContent = `${point.date || "unknown"} · ${money(value)}`;
+          rect.appendChild(title);
+          chart.appendChild(rect);
+        });
+
+        setText("timeline-max", `${money(max)} max`);
+      }
+
+      function renderModels(models) {
+        const list = $("models-list");
+        const rows = models.map((model) => ({
+          name: String(model.model || "unknown"),
+          cost: number(model.cost_usd),
+          calls: integer(model.calls)
+        }));
+        const totalCost = rows.reduce((sum, row) => sum + row.cost, 0);
+        const totalCalls = rows.reduce((sum, row) => sum + row.calls, 0);
+        const basis = totalCost > 0 ? "cost" : "calls";
+        const total = basis === "cost" ? totalCost : totalCalls;
+
+        setText("models-basis", `basis: ${basis}`);
+        if (!total || !rows.length) {
+          list.innerHTML = '<div class="muted">no model data</div>';
+          return;
+        }
+
+        rows.sort((a, b) => {
+          const av = basis === "cost" ? a.cost : a.calls;
+          const bv = basis === "cost" ? b.cost : b.calls;
+          return bv - av || a.name.localeCompare(b.name);
+        });
+
+        list.innerHTML = rows.slice(0, 5).map((row) => {
+          const value = basis === "cost" ? row.cost : row.calls;
+          const share = total > 0 ? (value / total) * 100 : 0;
+          const detail = basis === "cost" ? money(row.cost) : `${nf0.format(row.calls)} calls`;
+          return `
+            <div class="model-row">
+              <div class="model-name" title="${escapeHtml(row.name)}">${escapeHtml(friendlyModel(row.name))}</div>
+              <div class="model-bar-shell"><div class="model-bar" style="width: ${Math.max(2, Math.min(share, 100)).toFixed(2)}%"></div></div>
+              <div class="model-percent" title="${escapeHtml(detail)}">${pct(share)}</div>
+            </div>
+          `;
+        }).join("");
+      }
+
+      function friendlyModel(value) {
+        return String(value)
+          .replace(/^claude-/, "")
+          .replace(/-/g, " ")
+          .replace(/\bopus\b/gi, "Opus")
+          .replace(/\bsonnet\b/gi, "Sonnet")
+          .replace(/\bhaiku\b/gi, "Haiku");
+      }
+
+      function renderSessions(sessions) {
+        const body = $("sessions-body");
+        setText("sessions-status", `last ${Math.min(sessions.length, 10)} sessions`);
+        if (!sessions.length) {
+          body.innerHTML = '<tr><td colspan="4" class="muted">no sessions yet</td></tr>';
+          return;
+        }
+        body.innerHTML = sessions.slice(0, 10).map((session) => {
+          const task = session.task || {};
+          const description = task.brief_description || shortSession(session.session_id);
+          const cost = money(session.cost_usd);
+          const calls = integer(session.calls);
+          return `
+            <tr>
+              <td>${escapeHtml(formatDateTime(session.last_ts))}</td>
+              <td class="session-desc" title="${escapeHtml(description)}">${escapeHtml(description)} <span class="muted">· ${calls} calls</span></td>
+              <td class="session-cost">${escapeHtml(cost)}</td>
+              <td class="session-model">${escapeHtml(friendlyModel(session.model_primary || "unknown"))}</td>
+            </tr>
+          `;
+        }).join("");
+      }
+
+      function shortSession(value) {
+        const text = String(value || "session");
+        return `session ${text.slice(0, 8)}`;
+      }
+
+      function triggerGlitch() {
+        document.querySelectorAll(".metric-value").forEach((el) => {
+          el.classList.remove("glitch-play");
+          void el.offsetWidth;
+          el.classList.add("glitch-play");
+          window.setTimeout(() => el.classList.remove("glitch-play"), 360);
+        });
+      }
+
+      function schedule(fn, interval) {
+        fn();
+        window.setInterval(fn, interval);
+      }
+
+      schedule(pollHealth, POLL_FAST);
+      schedule(pollBudget, POLL_FAST);
+      schedule(pollSummary, POLL_MEDIUM);
+      schedule(pollProductivity, POLL_MEDIUM);
+      schedule(pollSentiment, POLL_MEDIUM);
+      schedule(pollTimeseries, POLL_SLOW);
+      schedule(pollSessions, POLL_SLOW);
+      window.setTimeout(triggerGlitch, 180);
+      window.setInterval(triggerGlitch, 30000);
+    })();
+  </script>
+</body>
+</html>
