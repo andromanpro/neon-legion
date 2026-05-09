@@ -9,6 +9,7 @@ from pathlib import Path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DASHBOARD_DIR = PROJECT_ROOT / "dashboard"
 sys.path.insert(0, str(PROJECT_ROOT / "tracker"))
 import summary  # noqa: E402
 
@@ -76,6 +77,33 @@ def period_payload(start, end):
 
 def rounded(value, digits=4):
     return round(float(value), digits)
+
+
+def static_content_type(file_path):
+    suffix = file_path.suffix.lower()
+    if suffix == ".html":
+        return "text/html; charset=utf-8"
+    if suffix == ".css":
+        return "text/css"
+    if suffix == ".js":
+        return "application/javascript"
+    return "application/octet-stream"
+
+
+def path_is_relative_to(path, directory):
+    try:
+        path.relative_to(directory)
+    except ValueError:
+        return False
+    return True
+
+
+def dashboard_static_path(path):
+    if path in {"/", "/dashboard", "/dashboard/"}:
+        return DASHBOARD_DIR / "index.html"
+    if path.startswith("/dashboard/"):
+        return DASHBOARD_DIR / path[len("/dashboard/"):]
+    return None
 
 
 def stats_payload(stats):
@@ -461,7 +489,13 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
 
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
-        path = parsed.path.rstrip("/") or "/"
+        raw_path = urllib.parse.unquote(parsed.path)
+        static_path = dashboard_static_path(raw_path)
+        if static_path is not None:
+            self.serve_static(static_path)
+            return
+
+        path = raw_path.rstrip("/") or "/"
         query = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
 
         try:
@@ -492,10 +526,44 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
 
         self.send_json(payload)
 
+    def serve_static(self, file_path):
+        dashboard_root = DASHBOARD_DIR.resolve()
+
+        try:
+            resolved_path = file_path.resolve(strict=False)
+        except (OSError, RuntimeError):
+            self.send_error_json(404, "static file not found")
+            return
+
+        if resolved_path != dashboard_root and not path_is_relative_to(resolved_path, dashboard_root):
+            self.send_error_json(404, "static file not found")
+            return
+
+        if not resolved_path.exists() or not resolved_path.is_file():
+            self.send_error_json(404, "static file not found")
+            return
+
+        try:
+            content = resolved_path.read_bytes()
+        except OSError as exc:
+            print(f"static file read error: {exc}", file=sys.stderr)
+            self.send_error_json(500, "static file read failed")
+            return
+
+        self.send_response(200)
+        self.send_cors_headers()
+        self.send_header("Content-Type", static_content_type(resolved_path))
+        self.send_header("Content-Length", str(len(content)))
+        self.end_headers()
+        self.wfile.write(content)
+
     def send_cors_headers(self):
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
+
+    def send_error_json(self, status, message):
+        self.send_json({"error": message}, status=status)
 
     def send_json(self, payload, status=200):
         body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
