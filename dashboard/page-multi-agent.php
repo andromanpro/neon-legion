@@ -59,6 +59,10 @@ $providers = array(
         'calls'    => 0,
         'cost_usd' => 0.00,
     ),
+    'opencode_openrouter' => array(
+        'calls'    => 0,
+        'cost_usd' => 0.00,
+    ),
 );
 
 $combined = array(
@@ -591,6 +595,11 @@ get_header();
             <span class="prov-name">OpenClaw (OpenRouter)</span>
             <span><span class="prov-calls" data-base-int="<?php echo esc_attr( $providers['openrouter_openclaw']['calls'] ); ?>"><?php echo number_format( $providers['openrouter_openclaw']['calls'], 0, '.', ' ' ); ?></span> calls</span>
             <span class="prov-cost" data-base-usd="<?php echo esc_attr( $providers['openrouter_openclaw']['cost_usd'] ); ?>"></span>
+          </div>
+          <div class="prov-row" data-snap-provider="opencode_openrouter">
+            <span class="prov-name">OpenCode (OpenRouter)</span>
+            <span><span class="prov-calls" data-base-int="<?php echo esc_attr( $providers['opencode_openrouter']['calls'] ); ?>"><?php echo number_format( $providers['opencode_openrouter']['calls'], 0, '.', ' ' ); ?></span> calls</span>
+            <span class="prov-cost" data-base-usd="<?php echo esc_attr( $providers['opencode_openrouter']['cost_usd'] ); ?>"></span>
           </div>
         </div>
       </div>
@@ -1193,8 +1202,8 @@ get_header();
   function timelineLabels() {
     const lang = (typeof getCurrentLang === 'function') ? getCurrentLang() : 'ru';
     return (lang === 'en')
-      ? { calls: 'calls', cost: 'API equiv.', active: 'active', input: 'input', output: 'output', cache: 'cache', claude: 'Claude', codex: 'Codex', openclaw: 'OpenClaw' }
-      : { calls: 'вызовы', cost: 'API-эквив.', active: 'активно', input: 'input', output: 'output', cache: 'кэш', claude: 'Claude', codex: 'Codex', openclaw: 'OpenClaw' };
+      ? { calls: 'calls', cost: 'API equiv.', active: 'active', input: 'input', output: 'output', cache: 'cache', claude: 'Claude', codex: 'Codex', openclaw: 'OpenClaw', opencode: 'OpenCode' }
+      : { calls: 'вызовы', cost: 'API-эквив.', active: 'активно', input: 'input', output: 'output', cache: 'кэш', claude: 'Claude', codex: 'Codex', openclaw: 'OpenClaw', opencode: 'OpenCode' };
   }
 
   function timelineProviderCalls(day, key) {
@@ -1215,7 +1224,8 @@ get_header();
       + '<div class="tt-row"><span class="tt-k">' + escapeHtml(l.cache) + '</span><span class="tt-v">' + fmtIntRu(day.cache_tokens || 0) + '</span></div>'
       + '<div class="tt-row"><span class="tt-k">' + escapeHtml(l.claude) + '</span><span class="tt-v">' + fmtIntRu(timelineProviderCalls(day, 'anthropic_claude')) + '</span></div>'
       + '<div class="tt-row"><span class="tt-k">' + escapeHtml(l.codex) + '</span><span class="tt-v">' + fmtIntRu(timelineProviderCalls(day, 'openai_codex')) + '</span></div>'
-      + '<div class="tt-row"><span class="tt-k">' + escapeHtml(l.openclaw) + '</span><span class="tt-v">' + fmtIntRu(timelineProviderCalls(day, 'openrouter_openclaw')) + '</span></div>';
+      + '<div class="tt-row"><span class="tt-k">' + escapeHtml(l.openclaw) + '</span><span class="tt-v">' + fmtIntRu(timelineProviderCalls(day, 'openrouter_openclaw')) + '</span></div>'
+      + '<div class="tt-row"><span class="tt-k">' + escapeHtml(l.opencode) + '</span><span class="tt-v">' + fmtIntRu(timelineProviderCalls(day, 'opencode_openrouter')) + '</span></div>';
   }
 
   function timelineTooltipTitle(day) {

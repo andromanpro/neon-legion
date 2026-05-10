@@ -227,6 +227,7 @@ def providers_payload(events):
         "anthropic_claude": provider_payload(by_provider.get("anthropic_claude", summary.empty_stats())),
         "openai_codex": provider_payload(by_provider.get("openai_codex", summary.empty_stats())),
         "openrouter_openclaw": provider_payload(by_provider.get("openrouter_openclaw", summary.empty_stats())),
+        "opencode_openrouter": provider_payload(by_provider.get("opencode_openrouter", summary.empty_stats())),
     }
 
 
@@ -938,6 +939,9 @@ def _timeline_days_for(start, end, events):
                 ),
                 "openrouter_openclaw": _provider_compact_payload(
                     by_provider.get("openrouter_openclaw", summary.empty_stats())
+                ),
+                "opencode_openrouter": _provider_compact_payload(
+                    by_provider.get("opencode_openrouter", summary.empty_stats())
                 ),
             },
         })
