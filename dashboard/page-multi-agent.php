@@ -306,6 +306,67 @@ get_header();
     font-weight: 700;
     box-shadow: 0 0 20px rgba(0, 212, 255, 0.55);
   }
+  .ma-methodology {
+    margin: 0 0 14px;
+    border: 1px solid rgba(0, 212, 255, 0.18);
+    border-radius: 8px;
+    background: rgba(0, 212, 255, 0.025);
+    color: var(--text-dim);
+    font-family: 'Inter', sans-serif;
+  }
+  .ma-methodology summary {
+    cursor: pointer;
+    color: var(--cyan);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    list-style: none;
+    padding: 12px 14px;
+    text-transform: uppercase;
+  }
+  .ma-methodology summary::-webkit-details-marker { display: none; }
+  .ma-methodology summary::before {
+    content: '+';
+    display: inline-block;
+    margin-right: 10px;
+    color: var(--signal);
+  }
+  .ma-methodology[open] summary::before { content: '−'; }
+  .ma-method-body {
+    border-top: 1px dashed rgba(0, 212, 255, 0.14);
+    padding: 14px;
+  }
+  .ma-method-grid {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 10px;
+  }
+  .ma-method-card {
+    min-width: 0;
+    border: 1px solid rgba(0, 212, 255, 0.1);
+    border-radius: 5px;
+    background: rgba(0, 212, 255, 0.025);
+    padding: 10px;
+  }
+  .ma-method-card .k {
+    color: var(--text-muted);
+    display: block;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    margin-bottom: 6px;
+    text-transform: uppercase;
+  }
+  .ma-method-card .v {
+    color: var(--text-dim);
+    font-size: 12px;
+    line-height: 1.45;
+  }
+  .ma-method-card code {
+    color: var(--cyan);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+  }
 
   .big-number {
     font-family: 'Manrope', sans-serif; font-weight: 800;
@@ -488,12 +549,14 @@ get_header();
     .ops-panel { grid-column: span 6 !important; grid-row: auto !important; }
     .p-today, .p-combined, .p-budget, .p-timeline { grid-column: span 12 !important; }
     .combined-body { grid-template-columns: 1fr; }
+    .ma-method-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   }
   @media (max-width: 640px) {
     .ma-grid { grid-template-columns: 1fr; gap: 8px; }
     .ops-panel { grid-column: span 1 !important; }
     .big-number { font-size: 32px; }
     .today-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .ma-method-grid { grid-template-columns: 1fr; }
     .prov-row { grid-template-columns: 1fr; gap: 4px; }
     .prov-calls, .prov-cost { text-align: left; }
   }
@@ -504,7 +567,7 @@ get_header();
   <section class="ma-hero">
     <div class="ma-hero-meta">
       <span class="ma-status"><span class="dot"></span><span data-ma-i18n="status">ТРЕКЕР · LIVE SNAPSHOT · ЛОКАЛЬНЫЕ ДАННЫЕ</span></span>
-      <span data-ma-i18n="meta">62 ДНЯ · 79,7 ТЫС. СОБЫТИЙ · 3 ОСИ ЭКОНОМИИ</span>
+      <span data-ma-i18n="meta">4 ИСТОЧНИКА · 3 ОСИ ОЦЕНКИ · СНИМОК ДЛЯ ПУБЛИКАЦИИ</span>
     </div>
     <div class="ma-hero-title">Multi-Agent Tracker</div>
     <div class="ma-hero-sub" data-ma-i18n-html="hero_sub">
@@ -530,6 +593,34 @@ get_header();
     <button class="ma-period-btn" type="button" data-period="60d" data-ma-i18n="period_60d" aria-pressed="false">60 дней</button>
     <button class="ma-period-btn ma-active" type="button" data-period="all" data-ma-i18n="period_all" aria-pressed="true">всё время</button>
   </div>
+
+  <details class="ma-methodology">
+    <summary data-ma-i18n="method_summary">методология и приватность</summary>
+    <div class="ma-method-body">
+      <div class="ma-method-grid">
+        <div class="ma-method-card">
+          <span class="k" data-ma-i18n="method_sources_title">источники</span>
+          <span class="v" data-ma-i18n-html="method_sources_body">Claude Code hook, Codex local sessions/wrapper, OpenClaw JSONL и OpenCode SQLite. В snapshot попадает только учётная метаинформация: модель, токены, стоимость, время и агрегаты.</span>
+        </div>
+        <div class="ma-method-card">
+          <span class="k" data-ma-i18n="method_money_title">деньги</span>
+          <span class="v" data-ma-i18n-html="method_money_body">API-эквивалент считается по фактической стоимости провайдера или тарифам API. Подписки делятся на 30 дней. Чистая экономия = <code>API-эквивалент − подписки</code>.</span>
+        </div>
+        <div class="ma-method-card">
+          <span class="k" data-ma-i18n="method_time_title">время</span>
+          <span class="v" data-ma-i18n-html="method_time_body">Активное время — промежутки между событиями до 2 минут. «Без ИИ» — оценка трудоёмкости сессии через отдельный estimator плюс ручные правки. Codex/OpenClaw/OpenCode не удваивают productivity.</span>
+        </div>
+        <div class="ma-method-card">
+          <span class="k" data-ma-i18n="method_stress_title">стресс</span>
+          <span class="v" data-ma-i18n-html="method_stress_body">Мат считается только в пользовательских сообщениях. Недовольство и благодарность — агрегированная оценка сессий; тексты сообщений на страницу не выводятся.</span>
+        </div>
+        <div class="ma-method-card">
+          <span class="k" data-ma-i18n="method_privacy_title">публикация</span>
+          <span class="v" data-ma-i18n-html="method_privacy_body">Публичный режим хеширует session id, вырезает пути, email, токены и слова из blocklist. Перед публикацией snapshot дополнительно проверяется на персональные строки.</span>
+        </div>
+      </div>
+    </div>
+  </details>
 
   <div class="ma-grid">
 
@@ -583,22 +674,22 @@ get_header();
         <div class="combined-provider-list">
           <div class="prov-row" data-snap-provider="anthropic_claude">
             <span class="prov-name">Claude (Anthropic)</span>
-            <span><span class="prov-calls" data-base-int="<?php echo esc_attr( $providers['anthropic_claude']['calls'] ); ?>"><?php echo number_format( $providers['anthropic_claude']['calls'], 0, '.', ' ' ); ?></span> calls</span>
+            <span><span class="prov-calls" data-base-int="<?php echo esc_attr( $providers['anthropic_claude']['calls'] ); ?>"><?php echo number_format( $providers['anthropic_claude']['calls'], 0, '.', ' ' ); ?></span> <span data-ma-i18n="calls_short">вызовов</span></span>
             <span class="prov-cost" data-base-usd="<?php echo esc_attr( $providers['anthropic_claude']['cost_usd'] ); ?>"></span>
           </div>
           <div class="prov-row" data-snap-provider="openai_codex">
             <span class="prov-name">Codex (OpenAI)</span>
-            <span><span class="prov-calls" data-base-int="<?php echo esc_attr( $providers['openai_codex']['calls'] ); ?>"><?php echo number_format( $providers['openai_codex']['calls'], 0, '.', ' ' ); ?></span> calls</span>
+            <span><span class="prov-calls" data-base-int="<?php echo esc_attr( $providers['openai_codex']['calls'] ); ?>"><?php echo number_format( $providers['openai_codex']['calls'], 0, '.', ' ' ); ?></span> <span data-ma-i18n="calls_short">вызовов</span></span>
             <span class="prov-cost" data-base-usd="<?php echo esc_attr( $providers['openai_codex']['cost_usd'] ); ?>"></span>
           </div>
           <div class="prov-row" data-snap-provider="openrouter_openclaw">
             <span class="prov-name">OpenClaw (OpenRouter)</span>
-            <span><span class="prov-calls" data-base-int="<?php echo esc_attr( $providers['openrouter_openclaw']['calls'] ); ?>"><?php echo number_format( $providers['openrouter_openclaw']['calls'], 0, '.', ' ' ); ?></span> calls</span>
+            <span><span class="prov-calls" data-base-int="<?php echo esc_attr( $providers['openrouter_openclaw']['calls'] ); ?>"><?php echo number_format( $providers['openrouter_openclaw']['calls'], 0, '.', ' ' ); ?></span> <span data-ma-i18n="calls_short">вызовов</span></span>
             <span class="prov-cost" data-base-usd="<?php echo esc_attr( $providers['openrouter_openclaw']['cost_usd'] ); ?>"></span>
           </div>
           <div class="prov-row" data-snap-provider="opencode_openrouter">
             <span class="prov-name">OpenCode (OpenRouter)</span>
-            <span><span class="prov-calls" data-base-int="<?php echo esc_attr( $providers['opencode_openrouter']['calls'] ); ?>"><?php echo number_format( $providers['opencode_openrouter']['calls'], 0, '.', ' ' ); ?></span> calls</span>
+            <span><span class="prov-calls" data-base-int="<?php echo esc_attr( $providers['opencode_openrouter']['calls'] ); ?>"><?php echo number_format( $providers['opencode_openrouter']['calls'], 0, '.', ' ' ); ?></span> <span data-ma-i18n="calls_short">вызовов</span></span>
             <span class="prov-cost" data-base-usd="<?php echo esc_attr( $providers['opencode_openrouter']['cost_usd'] ); ?>"></span>
           </div>
         </div>
@@ -797,20 +888,21 @@ get_header();
 
   const TRANSLATIONS = {
     ru: {
-      status: 'ТРЕКЕР · LIVE SNAPSHOT · ЛОКАЛЬНЫЕ ДАННЫЕ',
+      status: 'ТРЕКЕР · ЖИВОЙ СНИМОК · ЛОКАЛЬНЫЕ ДАННЫЕ',
       status_live: 'ЛАЙВ',
       unit_hours_short: ' ч',
       mode_burst: 'ПЕРЕРАСХОД',
       mode_normal: 'НОРМА',
       phase_short: 'Ф',
       calls_unit: 'событий',
+      calls_short: 'вызовов',
       cap_max5x_title: 'лимит подписки Max 5×',
       cap_max20x_title: 'лимит подписки Max 20×',
       mood_stable: 'стабильно',
       mood_calm: 'спокойно',
       mood_frustrated_calm: 'недовольство → спокойствие',
-      meta: '62 ДНЯ · 79,7 ТЫС. СОБЫТИЙ · 3 ОСИ ЭКОНОМИИ',
-      hero_sub: 'ОПЕРАЦИОННЫЙ ЖУРНАЛ. После каждой сессии остаются три цифры: <code>деньги</code> — цена API-токенов, если бы не подписка, <code>часы</code> — ручной маршрут без ИИ, <code>стресс</code> — мат и закипание в стенограммах. Живой поток шуршит локально на 8089. На экране — только снимок, чтобы видеть масштаб.',
+      meta: '4 ИСТОЧНИКА · 3 ОСИ ОЦЕНКИ · СНИМОК ДЛЯ ПУБЛИКАЦИИ',
+      hero_sub: 'ОПЕРАЦИОННЫЙ ЖУРНАЛ. После каждой сессии остаются три цифры: <code>деньги</code> — API-эквивалент и стоимость подписок, <code>часы</code> — активное время против ручной оценки, <code>стресс</code> — агрегированный эмоциональный след. На странице только обезличенный snapshot без текстов переписок.',
       rate_label: 'Курс ЦБ РФ:',
       rate_note: '(используется для конвертации в рублях; обновляется раз в 12 часов)',
       ds_loading: 'проверяю снимок…',
@@ -823,6 +915,17 @@ get_header();
       period_30d: '30 дней',
       period_60d: '60 дней',
       period_all: 'всё время',
+      method_summary: 'методология и приватность',
+      method_sources_title: 'источники',
+      method_sources_body: 'Claude Code hook, Codex local sessions/wrapper, OpenClaw JSONL и OpenCode SQLite. В snapshot попадает только учётная метаинформация: модель, токены, стоимость, время и агрегаты.',
+      method_money_title: 'деньги',
+      method_money_body: 'API-эквивалент считается по фактической стоимости провайдера или тарифам API. Подписки делятся на 30 дней. Чистая экономия = <code>API-эквивалент − подписки</code>.',
+      method_time_title: 'время',
+      method_time_body: 'Активное время — промежутки между событиями до 2 минут. «Без ИИ» — оценка трудоёмкости сессии через отдельный estimator плюс ручные правки. Codex/OpenClaw/OpenCode не удваивают productivity.',
+      method_stress_title: 'стресс',
+      method_stress_body: 'Мат считается только в пользовательских сообщениях. Недовольство и благодарность — агрегированная оценка сессий; тексты сообщений на страницу не выводятся.',
+      method_privacy_title: 'публикация',
+      method_privacy_body: 'Публичный режим хеширует session id, вырезает пути, email, токены и слова из blocklist. Перед публикацией snapshot дополнительно проверяется на персональные строки.',
       p_today: 'СЕГОДНЯ',
       today_calls: 'вызовов',
       today_cost: 'API-эквив.',
@@ -881,13 +984,14 @@ get_header();
       mode_normal: 'WITHIN LIMITS',
       phase_short: 'P',
       calls_unit: 'calls',
+      calls_short: 'calls',
       cap_max5x_title: 'subscription cap: Max 5×',
       cap_max20x_title: 'subscription cap: Max 20×',
       mood_stable: 'stable',
       mood_calm: 'calm',
       mood_frustrated_calm: 'annoyed → calm',
-      meta: '62 DAYS · 79.7K EVENTS · 3 SAVINGS AXES',
-      hero_sub: 'OPERATIONS LOG. Every session leaves three numbers: <code>money</code> — API token cost without the subscription, <code>hours</code> — the manual route without AI, <code>stress</code> — profanity and boiling points in transcripts. The live stream hums locally on 8089. The screen shows a snapshot of the scale.',
+      meta: '4 SOURCES · 3 MEASUREMENT AXES · PUBLIC-READY SNAPSHOT',
+      hero_sub: 'OPERATIONS LOG. Every session leaves three numbers: <code>money</code> — API equivalent and subscription cost, <code>hours</code> — active time versus manual estimate, <code>stress</code> — aggregated emotional trace. The page shows an anonymized snapshot without prompt or response text.',
       rate_label: 'CBR rate:',
       rate_note: '(used for RUB conversion; refreshed every 12 hours)',
       ds_loading: 'checking snapshot…',
@@ -900,6 +1004,17 @@ get_header();
       period_30d: '30 days',
       period_60d: '60 days',
       period_all: 'all time',
+      method_summary: 'methodology and privacy',
+      method_sources_title: 'sources',
+      method_sources_body: 'Claude Code hook, Codex local sessions/wrapper, OpenClaw JSONL, and OpenCode SQLite. The snapshot stores accounting metadata only: model, tokens, cost, timestamps, and aggregates.',
+      method_money_title: 'money',
+      method_money_body: 'API equivalent uses actual provider cost when available or API rate estimates. Subscriptions are prorated over 30 days. Net savings = <code>API equivalent − subscriptions</code>.',
+      method_time_title: 'time',
+      method_time_body: 'Active time is built from event gaps up to 2 minutes. “Without AI” is a per-session baseline from a separate estimator plus manual corrections. Codex/OpenClaw/OpenCode do not double-count productivity.',
+      method_stress_title: 'stress',
+      method_stress_body: 'Profanity is counted only in user messages. Frustration and appreciation are aggregate session estimates; message text is never rendered on this page.',
+      method_privacy_title: 'publishing',
+      method_privacy_body: 'Public mode hashes session ids and strips paths, emails, tokens, and blocklist terms. Before publishing, the snapshot is scanned again for personal strings.',
       p_today: 'TODAY',
       today_calls: 'calls',
       today_cost: 'API equiv.',
@@ -1202,8 +1317,8 @@ get_header();
   function timelineLabels() {
     const lang = (typeof getCurrentLang === 'function') ? getCurrentLang() : 'ru';
     return (lang === 'en')
-      ? { calls: 'calls', cost: 'API equiv.', active: 'active', input: 'input', output: 'output', cache: 'cache', claude: 'Claude', codex: 'Codex', openclaw: 'OpenClaw', opencode: 'OpenCode' }
-      : { calls: 'вызовы', cost: 'API-эквив.', active: 'активно', input: 'input', output: 'output', cache: 'кэш', claude: 'Claude', codex: 'Codex', openclaw: 'OpenClaw', opencode: 'OpenCode' };
+      ? { calls: 'calls', cost: 'API equiv.', active: 'active', input: 'input', output: 'output', cache: 'cache', hours: 'h', claude: 'Claude', codex: 'Codex', openclaw: 'OpenClaw', opencode: 'OpenCode' }
+      : { calls: 'вызовы', cost: 'API-эквив.', active: 'активно', input: 'вход', output: 'выход', cache: 'кэш', hours: 'ч', claude: 'Claude', codex: 'Codex', openclaw: 'OpenClaw', opencode: 'OpenCode' };
   }
 
   function timelineProviderCalls(day, key) {
@@ -1218,7 +1333,7 @@ get_header();
     return '<div class="tt-date">' + escapeHtml(day.date || '') + '</div>'
       + '<div class="tt-row"><span class="tt-k">' + escapeHtml(l.calls) + '</span><span class="tt-v">' + fmtIntRu(day.calls || 0) + '</span></div>'
       + '<div class="tt-row"><span class="tt-k">' + escapeHtml(l.cost) + '</span><span class="tt-v">' + escapeHtml(cost) + '</span></div>'
-      + '<div class="tt-row"><span class="tt-k">' + escapeHtml(l.active) + '</span><span class="tt-v">' + fmtNumberRu(Number(day.active_hours || 0), 1) + ' ч</span></div>'
+      + '<div class="tt-row"><span class="tt-k">' + escapeHtml(l.active) + '</span><span class="tt-v">' + fmtNumberRu(Number(day.active_hours || 0), 1) + ' ' + escapeHtml(l.hours) + '</span></div>'
       + '<div class="tt-row"><span class="tt-k">' + escapeHtml(l.input) + '</span><span class="tt-v">' + fmtIntRu(day.input_tokens || 0) + '</span></div>'
       + '<div class="tt-row"><span class="tt-k">' + escapeHtml(l.output) + '</span><span class="tt-v">' + fmtIntRu(day.output_tokens || 0) + '</span></div>'
       + '<div class="tt-row"><span class="tt-k">' + escapeHtml(l.cache) + '</span><span class="tt-v">' + fmtIntRu(day.cache_tokens || 0) + '</span></div>'
@@ -1229,7 +1344,8 @@ get_header();
   }
 
   function timelineTooltipTitle(day) {
-    return String(day.date || '') + ': ' + fmtIntRu(day.calls || 0) + ' calls, '
+    const l = timelineLabels();
+    return String(day.date || '') + ': ' + fmtIntRu(day.calls || 0) + ' ' + l.calls + ', '
       + fmtMoney(Number(day.cost_usd || 0), getCurrentLang(), 2);
   }
 
