@@ -4,6 +4,10 @@
 
 `hooks/claude-session-start.py` is a `SessionStart` hook for Phase 1.3. On each new Claude Code session it looks for recent sessions in `tracker/claude-events.jsonl` that do not yet have complexity estimates in `tracker/tasks.json`, then starts detached estimator workers. The hook exits immediately; real estimation runs in the background through `tracker/estimate-task.py`.
 
+`tracker/codex-track.py` is a Codex CLI wrapper for Phase 1.1. It forwards calls to the real `codex` binary, injects `--json` for `codex exec`, parses NDJSON line-by-line, captures `thread_id` and final `usage`, and appends OpenAI/Codex usage events to `tracker/codex-events.jsonl`. Non-zero exits, Ctrl-C, and missing usage still write an event with `partial: true`.
+
+`tracker/backfill-codex-sessions.py` imports historical Codex Desktop/TUI token usage from `~/.codex/sessions/**/*.jsonl`. It reads only `token_count.info.last_token_usage` plus session metadata, not prompt/response text, and appends deterministic `event_id` values so repeated runs are idempotent.
+
 ## Register the hooks
 
 Add this to `~/.claude/settings.json`:
@@ -43,6 +47,7 @@ Events are stored locally in:
 
 ```text
 tracker/claude-events.jsonl
+tracker/codex-events.jsonl
 ```
 
 Task complexity estimates are stored locally in:
@@ -125,6 +130,44 @@ py -3.14 tracker/summary.py --from 2026-05-01 --to 2026-05-09
 ```
 
 When the selected period contains task estimates, the summary adds a Phase 1.3 Productivity block with wall-clock AI time, estimated without-AI hours, saved hours, and multiplier.
+
+Codex events are included in token/cost/call totals and provider/model breakdowns. Task, productivity, and sentiment metrics intentionally use Claude sessions only because `tasks.json` is keyed by Claude orchestrator sessions; this avoids counting the same work twice when Codex took over part of a Claude-led task.
+
+Subscription defaults:
+
+```bash
+CLAUDE_MONTHLY_SUBSCRIPTION_USD=200
+OPENAI_MONTHLY_SUBSCRIPTION_USD=200
+```
+
+`OPENAI_MONTHLY_SUBSCRIPTION_USD=200` matches ChatGPT Pro. Override it to `20` for Plus or `100` for Pro $100 before running summaries/snapshots if the plan changes.
+
+## Codex wrapper
+
+Manual smoke run:
+
+```bash
+py -3.14 tracker/codex-track.py exec --sandbox read-only --skip-git-repo-check "Output JSON {\"ok\":1}"
+```
+
+Optional Windows cmd wrapper:
+
+```cmd
+tracker\codex-track.cmd exec --sandbox read-only "prompt"
+```
+
+Optional shell alias:
+
+```bash
+alias codex='py -3.14 F:/WorkAI/multi-agent/tracker/codex-track.py'
+```
+
+Backfill historical desktop sessions:
+
+```bash
+py -3.14 tracker/backfill-codex-sessions.py --dry-run
+py -3.14 tracker/backfill-codex-sessions.py
+```
 
 ## Verify the hooks
 

@@ -1,16 +1,39 @@
 #!/usr/bin/env python
 import argparse
 import json
+import os
 import sys
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-EVENTS_FILE = PROJECT_ROOT / "tracker" / "claude-events.jsonl"
+CLAUDE_EVENTS_FILE = PROJECT_ROOT / "tracker" / "claude-events.jsonl"
+CODEX_EVENTS_FILE = PROJECT_ROOT / "tracker" / "codex-events.jsonl"
+EVENTS_FILE = CLAUDE_EVENTS_FILE
 TASKS_FILE = PROJECT_ROOT / "tracker" / "tasks.json"
-MONTHLY_SUBSCRIPTION_USD = 200.0
+
+
+def env_float(name: str, default: float) -> float:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        return default
+
+
+CLAUDE_MONTHLY_SUBSCRIPTION_USD = env_float("CLAUDE_MONTHLY_SUBSCRIPTION_USD", 200.0)
+# ChatGPT Pro $200/month by default. Override with
+# OPENAI_MONTHLY_SUBSCRIPTION_USD=20 for Plus or 100 for Pro $100.
+OPENAI_MONTHLY_SUBSCRIPTION_USD = env_float("OPENAI_MONTHLY_SUBSCRIPTION_USD", 200.0)
+MONTHLY_SUBSCRIPTION_USD = CLAUDE_MONTHLY_SUBSCRIPTION_USD
 PRORATE_DAYS = 30.0
+PROVIDER_KEYS = {
+    "anthropic": "anthropic_claude",
+    "openai": "openai_codex",
+}
 SENTIMENT_KEYS = {
     "profanity_count",
     "frustration_score",
@@ -87,12 +110,55 @@ def clamp_score(value: object) -> float:
     return max(0.0, min(1.0, as_float(value)))
 
 
-def read_events(start: date, end: date) -> list[dict]:
-    if not EVENTS_FILE.exists():
+def event_provider(event: dict) -> str:
+    provider = event.get("provider")
+    if provider in {"openai", "openai_codex", "codex"}:
+        return "openai"
+    return "anthropic"
+
+
+def is_synthetic_event(event: dict) -> bool:
+    return event.get("model") == "<synthetic>"
+
+
+def provider_key(provider: str) -> str:
+    return PROVIDER_KEYS.get(provider, provider)
+
+
+def codex_origin(event: dict) -> str:
+    origin = event.get("codex_origin")
+    if isinstance(origin, str) and origin:
+        return origin
+
+    model = str(event.get("model") or "").lower()
+    originator = str(event.get("originator") or "").lower()
+    source = str(event.get("codex_source") or event.get("source") or "").lower()
+    if model == "codex-auto-review" or "subagent" in source:
+        return "auto_review"
+    if originator == "codex_exec" or source == "exec":
+        return "headless"
+    if originator == "codex-tui" or source == "cli":
+        return "tui"
+    if originator == "codex desktop" or source in {"vscode", "desktop"}:
+        return "desktop"
+    if event_provider(event) == "openai":
+        return "headless"
+    return "unknown"
+
+
+def provider_model_key(provider: str, model: str) -> str:
+    lower = model.lower()
+    if lower.startswith(("anthropic/", "openai/")):
+        return model
+    return f"{provider}/{model}"
+
+
+def read_event_file(path: Path, start: date, end: date, provider: str) -> list[dict]:
+    if not path.exists():
         return []
 
     events = []
-    with EVENTS_FILE.open("r", encoding="utf-8") as source:
+    with path.open("r", encoding="utf-8") as source:
         for line in source:
             if not line.strip():
                 continue
@@ -102,6 +168,8 @@ def read_events(start: date, end: date) -> list[dict]:
                 continue
             if not isinstance(event, dict):
                 continue
+            if is_synthetic_event(event):
+                continue
 
             ts = parse_event_ts(event.get("ts"))
             if ts is None:
@@ -109,9 +177,76 @@ def read_events(start: date, end: date) -> list[dict]:
 
             event_date = ts.astimezone().date()
             if start <= event_date <= end:
+                event = dict(event)
+                event.setdefault("provider", provider)
                 events.append(event)
 
     return events
+
+
+def read_claude_events(start: date, end: date) -> list[dict]:
+    return read_event_file(CLAUDE_EVENTS_FILE, start, end, "anthropic")
+
+
+def read_codex_events(start: date, end: date) -> list[dict]:
+    return read_event_file(CODEX_EVENTS_FILE, start, end, "openai")
+
+
+def event_sort_ts(event: dict) -> float:
+    ts = parse_event_ts(event.get("ts"))
+    return ts.timestamp() if ts is not None else 0.0
+
+
+def read_events(start: date, end: date) -> list[dict]:
+    events = read_claude_events(start, end) + read_codex_events(start, end)
+    events = dedupe_events(events)
+    events.sort(key=event_sort_ts)
+    return events
+
+
+def event_legacy_dedupe_key(event: dict) -> tuple:
+    return (
+        event_provider(event),
+        event.get("session_id"),
+        event.get("ts"),
+        event.get("model"),
+        event.get("input_tokens"),
+        event.get("cached_input_tokens"),
+        event.get("output_tokens"),
+        event.get("reasoning_tokens"),
+        event.get("total_tokens"),
+        event.get("exit_code"),
+    )
+
+
+def dedupe_events(events: list[dict]) -> list[dict]:
+    deduped = []
+    seen_event_ids = set()
+    seen_legacy = set()
+    for event in events:
+        event_id = event.get("event_id") or event.get("tracking_run_id")
+        if isinstance(event_id, str) and event_id:
+            if event_id in seen_event_ids:
+                continue
+            seen_event_ids.add(event_id)
+        else:
+            legacy_key = event_legacy_dedupe_key(event)
+            if legacy_key in seen_legacy:
+                continue
+            seen_legacy.add(legacy_key)
+        deduped.append(event)
+    return deduped
+
+
+def events_for_provider(events: list[dict], provider: str) -> list[dict]:
+    return [event for event in events if event_provider(event) == provider]
+
+
+def events_for_task_metrics(events: list[dict]) -> list[dict]:
+    # tasks.json is keyed by Claude Code sessions. Codex calls are counted in
+    # usage/cost, but not in task/productivity metrics to avoid double counting
+    # work that was already estimated from the Claude orchestrator session.
+    return events_for_provider(events, "anthropic")
 
 
 def read_tasks() -> dict:
@@ -132,17 +267,35 @@ def empty_stats() -> dict:
         "input_tokens": 0,
         "output_tokens": 0,
         "cache_read_tokens": 0,
+        "cache_creation_tokens": 0,
+        "cached_input_tokens": 0,
+        "reasoning_tokens": 0,
+        "total_tokens": 0,
         "cost_estimate_usd": 0.0,
+        "api_equivalent_cost_usd": 0.0,
         "unknown_pricing_events": 0,
     }
 
 
 def add_event(stats: dict, event: dict) -> None:
+    cached_input_tokens = as_int(event.get("cached_input_tokens"))
+    cache_read_tokens = as_int(event.get("cache_read_tokens"))
+    input_tokens = as_int(event.get("input_tokens"))
+    output_tokens = as_int(event.get("output_tokens"))
+    reasoning_tokens = as_int(event.get("reasoning_tokens"))
+    total_tokens = as_int(event.get("total_tokens"))
+
     stats["calls"] += 1
-    stats["input_tokens"] += as_int(event.get("input_tokens"))
-    stats["output_tokens"] += as_int(event.get("output_tokens"))
-    stats["cache_read_tokens"] += as_int(event.get("cache_read_tokens"))
-    stats["cost_estimate_usd"] += as_float(event.get("cost_estimate_usd"))
+    stats["input_tokens"] += input_tokens
+    stats["output_tokens"] += output_tokens
+    stats["cache_read_tokens"] += cache_read_tokens + cached_input_tokens
+    stats["cache_creation_tokens"] += as_int(event.get("cache_creation_tokens"))
+    stats["cached_input_tokens"] += cached_input_tokens
+    stats["reasoning_tokens"] += reasoning_tokens
+    stats["total_tokens"] += total_tokens or (input_tokens + cached_input_tokens + output_tokens + reasoning_tokens)
+    api_equivalent_cost = as_float(event.get("cost_estimate_usd"))
+    stats["cost_estimate_usd"] += api_equivalent_cost
+    stats["api_equivalent_cost_usd"] += api_equivalent_cost
     if event.get("cost_estimate_usd") is None:
         stats["unknown_pricing_events"] += 1
 
@@ -164,6 +317,18 @@ def fmt_cost(value: float) -> str:
     return f"{value:.2f}"
 
 
+def subscription_prorated_usd(events: list[dict], days: int) -> float:
+    providers = {event_provider(event) for event in events}
+    monthly = 0.0
+    if "anthropic" in providers:
+        monthly += CLAUDE_MONTHLY_SUBSCRIPTION_USD
+    if "openai" in providers:
+        monthly += OPENAI_MONTHLY_SUBSCRIPTION_USD
+    if monthly <= 0:
+        monthly = CLAUDE_MONTHLY_SUBSCRIPTION_USD
+    return monthly / PRORATE_DAYS * days
+
+
 def stats_row(label: str, stats: dict) -> str:
     return (
         f"| {label} | {stats['calls']:,} | {fmt_int(stats['input_tokens'])} | "
@@ -177,15 +342,52 @@ def summarize_by_model(events: list[dict]) -> tuple[dict[str, dict], dict]:
     total = empty_stats()
 
     for event in events:
+        provider = event_provider(event)
         model = event.get("model")
         if not isinstance(model, str) or not model:
             model = "unknown"
-        if model not in by_model:
-            by_model[model] = empty_stats()
-        add_event(by_model[model], event)
+        key = provider_model_key(provider, model)
+        if key not in by_model:
+            by_model[key] = empty_stats()
+            by_model[key]["provider"] = provider
+            by_model[key]["model"] = model
+        add_event(by_model[key], event)
         add_event(total, event)
 
     return by_model, total
+
+
+def summarize_codex_by_model(events: list[dict]) -> tuple[dict[str, dict], dict]:
+    return summarize_by_model(events_for_provider(events, "openai"))
+
+
+def summarize_by_provider(events: list[dict]) -> dict[str, dict]:
+    by_provider: dict[str, dict] = {}
+
+    for event in events:
+        provider = event_provider(event)
+        key = provider_key(provider)
+        if key not in by_provider:
+            by_provider[key] = empty_stats()
+            by_provider[key]["provider"] = provider
+            by_provider[key]["models"] = {}
+            by_provider[key]["origins"] = {}
+        add_event(by_provider[key], event)
+
+        model = event.get("model")
+        if not isinstance(model, str) or not model:
+            model = "unknown"
+        models = by_provider[key]["models"]
+        models[model] = models.get(model, 0) + 1
+
+        if provider == "openai":
+            origin = codex_origin(event)
+            origins = by_provider[key]["origins"]
+            if origin not in origins:
+                origins[origin] = empty_stats()
+            add_event(origins[origin], event)
+
+    return by_provider
 
 
 def summarize_by_day(events: list[dict]) -> dict[str, dict]:
@@ -283,6 +485,7 @@ def active_time_hours(events: list[dict], gap_minutes: int = 2) -> float:
 
 
 def summarize_productivity(events: list[dict], gap_minutes: int = 2) -> dict | None:
+    events = events_for_task_metrics(events)
     tasks = read_tasks()
     if not tasks:
         return None
@@ -307,23 +510,37 @@ def summarize_productivity(events: list[dict], gap_minutes: int = 2) -> dict | N
     if not session_ranges:
         return None
 
-    covered_session_ids = [session_id for session_id in session_ranges if session_id in tasks]
-    if not covered_session_ids:
-        return None
-
-    hours_with_ai = merged_interval_hours(list(session_ranges.values()))
+    # "Covered" = sessions for which we have a real baseline estimate (not None).
+    # If we counted sessions whose entry exists in tasks.json but has no baseline
+    # (failed estimation), the hours_with_ai vs hours_without_ai comparison would
+    # be apples-to-oranges (active hours over all sessions vs baselines over a subset).
+    covered_session_ids = []
     hours_without_ai = 0.0
-    for session_id in covered_session_ids:
+    for session_id in session_ranges:
         entry = tasks.get(session_id)
         if not isinstance(entry, dict):
             continue
         hours = effective_task_hours(entry)
-        if hours is not None:
-            hours_without_ai += hours
+        if hours is None:
+            continue
+        covered_session_ids.append(session_id)
+        hours_without_ai += hours
+
+    if not covered_session_ids:
+        return None
+
+    # Only count active/calendar hours over the *same* covered subset, so
+    # the multiplier and saved hours are like-with-like.
+    covered_id_set = set(covered_session_ids)
+    covered_events = [
+        ev for ev in events
+        if isinstance(ev.get("session_id"), str) and ev.get("session_id") in covered_id_set
+    ]
+    covered_ranges = [session_ranges[sid] for sid in covered_session_ids]
 
     return {
-        "active_hours_with_ai": active_time_hours(events, gap_minutes),
-        "calendar_hours_with_ai": hours_with_ai,
+        "active_hours_with_ai": active_time_hours(covered_events, gap_minutes),
+        "calendar_hours_with_ai": merged_interval_hours(covered_ranges),
         "gap_minutes": gap_minutes,
         "hours_without_ai": hours_without_ai,
         "sessions_covered": len(covered_session_ids),
@@ -388,6 +605,7 @@ def stress_trend(first_half: list[float], second_half: list[float]) -> str:
 
 
 def summarize_sentiment(events: list[dict], start: date, end: date) -> dict | None:
+    events = events_for_task_metrics(events)
     tasks = read_tasks()
     if not tasks:
         return None
@@ -530,8 +748,8 @@ def print_sentiment(sentiment: dict | None) -> None:
 def period_title(start: date, end: date) -> str:
     days = (end - start).days + 1
     if start == end:
-        return f"## Claude Code stats: {start.isoformat()} (1 day)"
-    return f"## Claude Code stats: {start.isoformat()}..{end.isoformat()} ({days} days)"
+        return f"## Claude + Codex stats: {start.isoformat()} (1 day)"
+    return f"## Claude + Codex stats: {start.isoformat()}..{end.isoformat()} ({days} days)"
 
 
 def print_summary(start: date, end: date, events: list[dict], gap_minutes: int = 2) -> None:
@@ -541,7 +759,7 @@ def print_summary(start: date, end: date, events: list[dict], gap_minutes: int =
 
     by_model, total = summarize_by_model(events)
     days = (end - start).days + 1
-    prorated = MONTHLY_SUBSCRIPTION_USD / PRORATE_DAYS * days
+    prorated = subscription_prorated_usd(events, days)
     delta = total["cost_estimate_usd"] - prorated
 
     print(period_title(start, end))
@@ -557,7 +775,7 @@ def print_summary(start: date, end: date, events: list[dict], gap_minutes: int =
         print(f"Unknown pricing note: {note}")
     print()
     print(f"**Period API cost**: ${fmt_cost(total['cost_estimate_usd'])}")
-    print(f"**Max prorated** ($200/mo for this period): ${fmt_cost(prorated)}")
+    print(f"**Subscriptions prorated**: ${fmt_cost(prorated)}")
     if delta >= 0:
         print(f"**Savings vs API rates**: ${fmt_cost(delta)} ✅")
         print(
