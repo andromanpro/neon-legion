@@ -5,5 +5,5 @@ rem Safe to run repeatedly: backfill-openclaw-sessions.py uses deterministic eve
 cd /d "F:\WorkAI\multi-agent"
 echo [%date% %time%] openclaw backfill start >> tracker\openclaw-backfill.log
 py -3.14 tracker\backfill-openclaw-sessions.py >> tracker\openclaw-backfill.log 2>&1
-py -3.14 backend\server.py --snapshot-once --snapshot-path "H:\wordpress-androman\wp-data\wp-content\uploads\multi-agent\snapshot.json" >> tracker\openclaw-backfill.log 2>&1
+py -3.14 backend\server.py --snapshot-once --public --snapshot-path "H:\wordpress-androman\wp-data\wp-content\uploads\multi-agent\snapshot.json" >> tracker\openclaw-backfill.log 2>&1
 echo [%date% %time%] openclaw backfill end >> tracker\openclaw-backfill.log

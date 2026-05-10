@@ -602,6 +602,12 @@ _PATTERN_PATH_WIN = re.compile(r'(?<![\w/])[A-Za-z]:[\\/][\w\\/.\-+~]*', re.IGNO
 _PATTERN_PATH_UNIX = re.compile(r'(?<![\w/])(?:~|/(?:home|usr|opt|var|etc)(?:/[\w\-+./]*)?)', re.IGNORECASE)
 _PATTERN_EMAIL = re.compile(r'\b[\w.+\-]+@[\w\-]+\.[\w\-.]+\b')
 _PATTERN_TOKEN = re.compile(r'\b(sk_|pk_|ghp_|gho_|github_pat_)\w{16,}\b')
+_PUBLIC_TERM_REPLACEMENTS = (
+    (re.compile(r'\bWorkAI\b', re.IGNORECASE), "workspace"),
+    (re.compile(r'\bRoman\b', re.IGNORECASE), "the user"),
+    (re.compile(r'\bRoono\b', re.IGNORECASE), "the user"),
+    (re.compile(r'\bandroman\b', re.IGNORECASE), "site"),
+)
 
 
 def load_or_create_salt(path):
@@ -668,6 +674,8 @@ def _scrub_for_public(text, customer_pattern=None):
     text = _PATTERN_PATH_UNIX.sub("[path]", text)
     text = _PATTERN_EMAIL.sub("[email]", text)
     text = _PATTERN_TOKEN.sub("[token]", text)
+    for pattern, replacement in _PUBLIC_TERM_REPLACEMENTS:
+        text = pattern.sub(replacement, text)
     if customer_pattern is not None:
         text = customer_pattern.sub("[client]", text)
     return text

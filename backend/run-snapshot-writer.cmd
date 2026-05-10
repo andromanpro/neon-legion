@@ -9,4 +9,5 @@ py -3.14 backend\server.py ^
   --snapshot-path "H:\wordpress-androman\wp-data\wp-content\uploads\multi-agent\snapshot.json" ^
   --snapshot-interval 900 ^
   --snapshot-days 62 ^
+  --public ^
   >> backend\server.log 2>&1

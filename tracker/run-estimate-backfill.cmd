@@ -10,6 +10,6 @@ py -3.14 -u tracker\run-recent-estimates.py --limit %LIMIT% >> tracker\estimate-
 set EST_RC=%ERRORLEVEL%
 echo [%date% %time%] estimate backfill end rc=%EST_RC% >> tracker\estimate-backfill.log
 if "%EST_RC%"=="0" (
-  py -3.14 backend\server.py --snapshot-once --snapshot-path "H:\wordpress-androman\wp-data\wp-content\uploads\multi-agent\snapshot.json" >> tracker\estimate-backfill.log 2>&1
+  py -3.14 backend\server.py --snapshot-once --public --snapshot-path "H:\wordpress-androman\wp-data\wp-content\uploads\multi-agent\snapshot.json" >> tracker\estimate-backfill.log 2>&1
 )
 exit /b %EST_RC%
