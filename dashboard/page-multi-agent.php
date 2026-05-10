@@ -792,10 +792,9 @@ get_header();
         <div class="big-number-sub" data-ma-i18n="multi_sub">чистое время с ИИ против ручной оценки</div>
         <div class="big-number-detail">
           <?php
-          // Multi panel uses pro-rate (no data-today-hours override): for short
-          // periods like "today" the per-session AI baseline can be way larger
-          // than the few minutes of fresh activity, producing artefactual
-          // ratios like ×170. Pro-rate keeps the all-period multi stable.
+          // Snapshot v2 overrides this panel from productivity_periods so the
+          // multiplier reflects the selected period instead of a linear
+          // pro-rate of the all-time ratio.
           ?>
           <span data-ma-i18n="with_ai">С ИИ:</span> <span class="v"
                 data-base-hours="<?php echo esc_attr( $productivity['active_hours'] ); ?>"
@@ -1331,12 +1330,9 @@ get_header();
     // older sessions when user picked "today").
     filterSessionsByPeriod(periodKey);
 
-    // Multi-panel period awareness (Codex review D2 + user feedback):
-    // ratios from linear pro-rate are constant across periods, so the
-    // multiplier doesn't change. Show today-specific multi when today data
-    // is meaningful, otherwise label as "all-time" so the user knows the
-    // ×N is a stable cumulative metric.
-    updateMultiPanelLabel(periodKey);
+    // Period-aware productivity uses backend-computed session subsets when
+    // available, so the multiplier reflects the selected period.
+    updateProductivityPanelForPeriod(periodKey);
   }
 
   function bindPeriodSelector() {
@@ -1568,12 +1564,36 @@ get_header();
   }
 
   // Multi-panel period-aware metric & subtitle.
-  // Today: derive multi from snap.today.{active_hours_for_estimate,hours_saved}
-  // when the for-estimate active hours are >= 0.5h (otherwise per-session
-  // baselines vs few minutes of fresh activity gives noise like ×170).
-  // Other periods: keep linear pro-rate (constant ratio across periods);
-  // append "за весь период" to subtitle so user knows the ×N is cumulative.
+  // Prefer backend-computed productivity_periods: pro-rating active/saved hours
+  // makes the multiplier artificially constant. Fallback to legacy labels when
+  // an older snapshot is loaded.
   const MULTI_TODAY_MIN_ACTIVE_H = 0.5;
+
+  function finiteNumber(value) {
+    const n = parseFloat(value);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  function setHoursText(selector, value, decimals) {
+    const el = document.querySelector(selector);
+    if (!el) return;
+    const n = finiteNumber(value);
+    el.textContent = (n === null) ? '—' : fmtNumberRu(n, decimals);
+  }
+
+  function setPlainText(selector, value) {
+    const el = document.querySelector(selector);
+    if (el) el.textContent = value;
+  }
+
+  function productivityPeriodFor(periodKey) {
+    const periods = SNAPSHOT_DATA && SNAPSHOT_DATA.productivity_periods;
+    if (periods && periods[periodKey]) return periods[periodKey];
+    if (periodKey === 'all' && SNAPSHOT_DATA && SNAPSHOT_DATA.productivity) {
+      return SNAPSHOT_DATA.productivity;
+    }
+    return null;
+  }
 
   function updateMultiPanelLabel(periodKey) {
     const display = document.querySelector('[data-multi-display]');
@@ -1606,6 +1626,69 @@ get_header();
     } else {
       suffix = (lang === 'en') ? ' (cumulative)' : ' (за весь период)';
     }
+    sub.textContent = baseSubtitle + suffix;
+  }
+
+  function updateProductivityPanelForPeriod(periodKey) {
+    const p = productivityPeriodFor(periodKey);
+    if (!p) {
+      updateMultiPanelLabel(periodKey);
+      return;
+    }
+
+    const lang = (typeof getCurrentLang === 'function') ? getCurrentLang() : 'ru';
+    const dict = TRANSLATIONS[lang] || TRANSLATIONS.ru;
+    const days = Math.max(1, parseInt(p.days || periodToDays(periodKey), 10));
+    const activeDisplay = finiteNumber(p.active_hours);
+    const estimateActive = finiteNumber(
+      p.estimate_active_hours != null ? p.estimate_active_hours : p.active_hours
+    );
+    const saved = finiteNumber(p.hours_saved);
+    let estimated = finiteNumber(p.estimated_hours);
+    if (estimated === null && estimateActive !== null && saved !== null) {
+      estimated = estimateActive + saved;
+    }
+    let multiplier = finiteNumber(p.multiplier);
+    if ((multiplier === null || multiplier <= 0) && estimateActive !== null && estimateActive > 0 && estimated !== null) {
+      multiplier = estimated / estimateActive;
+    }
+
+    setHoursText('[data-snap-with-ai]', estimateActive, 1);
+    setHoursText('[data-snap-without-ai]', estimated, 1);
+    setHoursText('[data-snap-hours-saved]', saved, 1);
+    setHoursText('[data-snap-active-hours]', activeDisplay, 1);
+    setHoursText('[data-snap-calendar-hours]', p.calendar_hours, 0);
+
+    if (activeDisplay !== null) {
+      setPlainText('[data-avg-display]', fmtNumberRu(activeDisplay / days, 1));
+    }
+    if (p.sessions_covered != null) {
+      setPlainText('[data-snap-productivity="sessions_covered"]', fmtNumberRu(parseInt(p.sessions_covered, 10) || 0, 0));
+    }
+    if (p.sessions_total != null) {
+      setPlainText('[data-snap-productivity="sessions_total"]', fmtNumberRu(parseInt(p.sessions_total, 10) || 0, 0));
+    }
+
+    const display = document.querySelector('[data-multi-display]');
+    const sub = document.querySelector('.p-multi .big-number-sub');
+    if (!display || !sub) return;
+
+    const baseSubtitle = dict.multi_sub || 'чистое время с ИИ против ручной оценки';
+    const isUnstableToday = periodKey === 'today'
+      && (estimateActive === null || estimateActive < MULTI_TODAY_MIN_ACTIVE_H);
+
+    if (isUnstableToday || multiplier === null || multiplier <= 0) {
+      display.textContent = '—';
+      sub.textContent = baseSubtitle + (
+        lang === 'en' ? ' (not enough coverage)' : ' (мало оцененных данных)'
+      );
+      return;
+    }
+
+    display.textContent = fmtNumberRu(multiplier, 1);
+    const suffix = (lang === 'en')
+      ? (periodKey === 'today' ? ' (today)' : ' (selected period)')
+      : (periodKey === 'today' ? ' (за сегодня)' : ' (за выбранный период)');
     sub.textContent = baseSubtitle + suffix;
   }
 

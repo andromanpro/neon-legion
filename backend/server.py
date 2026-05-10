@@ -858,12 +858,73 @@ def _productivity_block(productivity_data):
 
     return {
         "active_hours": rounded(active, 1),
+        "estimate_active_hours": rounded(active, 1),
         "calendar_hours": rounded(calendar, 1),
         "multiplier": multiplier,
         "hours_saved": saved,
+        "estimated_hours": rounded(active + saved, 1),
         "sessions_total": int(productivity_data.get("sessions_total") or 0),
         "sessions_covered": int(productivity_data.get("sessions_covered") or 0),
     }
+
+
+def _today_productivity_block(today_payload):
+    """Productivity shape for the calendar-day Today filter.
+
+    The top "today active" tile intentionally shows full activity since
+    midnight. The multiplier, however, must compare like-with-like: estimated
+    manual hours only for sessions that have estimates vs active time from that
+    same estimated subset.
+    """
+    active_display = today_payload.get("active_hours") or 0
+    estimate_active = today_payload.get("active_hours_for_estimate") or 0
+    estimated = today_payload.get("estimated_hours") or 0
+    saved_raw = today_payload.get("hours_saved") or 0
+
+    multiplier_raw = (estimated / estimate_active) if estimate_active > 0 else 0.0
+    if multiplier_raw < 1 or saved_raw < 0:
+        multiplier = 0.0
+        saved = 0.0
+        estimated_hours = rounded(estimate_active, 1)
+    else:
+        multiplier = rounded(multiplier_raw, 3)
+        saved = rounded(saved_raw, 1)
+        estimated_hours = rounded(estimated, 1)
+
+    return {
+        "days": 1,
+        "active_hours": rounded(active_display, 1),
+        "estimate_active_hours": rounded(estimate_active, 1),
+        "calendar_hours": 24.0,
+        "multiplier": multiplier,
+        "hours_saved": saved,
+        "estimated_hours": estimated_hours,
+        "sessions_total": int(today_payload.get("sessions_total") or 0),
+        "sessions_covered": int(today_payload.get("estimated_sessions_covered") or 0),
+    }
+
+
+def _productivity_periods(total_days, base_productivity, today_payload):
+    """Precompute period-specific productivity.
+
+    The dashboard period selector should not pro-rate productivity ratios:
+    multiplying both active and saved hours by the same factor makes the
+    multiplier artificially constant. This payload lets the UI use real session
+    coverage for each period.
+    """
+    periods = {
+        "today": _today_productivity_block(today_payload),
+        "all": _productivity_block(base_productivity),
+    }
+    periods["all"]["days"] = int(total_days)
+
+    for key, requested_days in (("7d", 7), ("30d", 30), ("60d", 60)):
+        days = min(int(requested_days), int(total_days))
+        payload = build_productivity({"days": [str(days)]})
+        periods[key] = _productivity_block(payload)
+        periods[key]["days"] = days
+
+    return periods
 
 
 def _model_short(name):
@@ -1047,6 +1108,8 @@ def _today_payload(events_24h, sessions_recent, tasks, since_dt=None,
         "active_hours_for_estimate": rounded(active_hours_for_estimate, 1),
         "estimated_hours": rounded(estimated_hours_sum, 1),
         "hours_saved": hours_saved_today,
+        "sessions_total": len(today_session_ids),
+        "estimated_sessions_covered": len(estimated_session_ids),
         "profanity": today_profanity,
         "top_session": top_session or _TASK_DESCRIPTION_FALLBACK,
         "providers": providers_payload(events_24h),
@@ -1137,6 +1200,7 @@ def build_wp_snapshot(
         },
         "providers": providers,
         "productivity": _productivity_block(productivity_data),
+        "productivity_periods": _productivity_periods(period["days"], productivity_data, today_payload),
         "budget": {
             "tokens_used": int(budget_data["window_5h"].get("tokens_used") or 0),
             "limit_5h": ESTIMATED_LIMIT_MAX5X,
