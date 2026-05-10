@@ -3,6 +3,7 @@ tracker/*.lock
 tracker/.last-uuids.json
 tracker/tasks.json
 tracker/.estimation-logs/
+.serena/
 __pycache__/
 *.pyc
 *.pyo
