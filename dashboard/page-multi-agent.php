@@ -435,6 +435,58 @@ get_header();
   }
   .combined-foot .v { color: var(--cyan); }
 
+  .finance-sub {
+    color: var(--text-muted);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    line-height: 1.45;
+    margin-top: 8px;
+    text-transform: uppercase;
+  }
+  .finance-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 18px;
+  }
+  .finance-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 12px;
+    align-items: baseline;
+    padding-bottom: 9px;
+    border-bottom: 1px dashed rgba(0, 212, 255, 0.14);
+  }
+  .finance-row:last-child { border-bottom: 0; padding-bottom: 0; }
+  .finance-row .k {
+    color: var(--text-muted);
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    line-height: 1.35;
+    text-transform: uppercase;
+  }
+  .finance-row .v {
+    color: var(--cyan);
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .finance-row.primary .v { color: var(--signal); }
+  .finance-note {
+    border-top: 1px dashed rgba(0, 212, 255, 0.14);
+    color: var(--text-dim);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    line-height: 1.5;
+    margin-top: 16px;
+    padding-top: 12px;
+  }
+  .finance-note .v {
+    color: var(--cyan);
+    font-weight: 700;
+  }
+
   .budget-row { display: flex; flex-direction: column; gap: 8px; }
   .budget-meta {
     display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -697,21 +749,38 @@ get_header();
     </div>
 
     <div class="ops-panel p-savings">
-      <div class="pheader"><span class="ptitle" data-ma-i18n="p_savings">ЭКОНОМИЯ · СРАВНЕНИЕ С API</span><span class="pid">01</span></div>
+      <div class="pheader"><span class="ptitle" data-ma-i18n="p_savings">ФИНАНСОВАЯ ФОРМУЛА</span><span class="pid">01</span></div>
       <div class="pbody">
-        <div class="big-number"
-             data-base-usd="<?php echo esc_attr( $totals['savings_usd'] ); ?>"
-             data-today-usd="-6.16"></div>
-        <div class="big-number-sub"><span data-ma-i18n="savings_prefix">сэкономлено за</span> <span data-period-days><?php echo (int) $totals['days']; ?></span> <span data-period-days-noun>дней</span></div>
-        <div class="big-number-detail">
-          <span data-ma-i18n="api_eq">Эквивалент по API:</span> <span class="v"
-                data-base-usd="<?php echo esc_attr( $totals['cost_usd'] ); ?>"
-                data-today-usd="<?php echo esc_attr( $today['cost_usd'] ); ?>"
-                data-ratio-input="api"></span><br>
-          <span data-ma-i18n="subscription">Подписка:</span> <span class="v"
-                data-base-usd="<?php echo esc_attr( $totals['subscription_usd'] ); ?>"
-                data-ratio-input="sub"></span><br>
-          <span data-ma-i18n="ratio">Окупаемость:</span> <span class="v" data-ratio-display>×<?php echo round( $totals['cost_usd'] / max( $totals['subscription_usd'], 1 ) ); ?></span>
+        <div class="finance-sub">
+          <span data-ma-i18n="savings_formula_sub">расшифровка главного KPI за</span>
+          <span data-period-days><?php echo (int) $totals['days']; ?></span>
+          <span data-period-days-noun>дней</span>
+        </div>
+        <div class="finance-list">
+          <div class="finance-row">
+            <span class="k" data-ma-i18n="api_eq">Эквивалент по API:</span>
+            <span class="v"
+                  data-base-usd="<?php echo esc_attr( $totals['cost_usd'] ); ?>"
+                  data-today-usd="<?php echo esc_attr( $today['cost_usd'] ); ?>"
+                  data-ratio-input="api"></span>
+          </div>
+          <div class="finance-row">
+            <span class="k" data-ma-i18n="subscription">Подписка:</span>
+            <span class="v"
+                  data-base-usd="<?php echo esc_attr( $totals['subscription_usd'] ); ?>"
+                  data-ratio-input="sub"></span>
+          </div>
+          <div class="finance-row primary">
+            <span class="k" data-ma-i18n="net_savings">Чистая экономия:</span>
+            <span class="v"
+                  data-base-usd="<?php echo esc_attr( $totals['savings_usd'] ); ?>"
+                  data-today-usd="-6.16"
+                  data-savings-net></span>
+          </div>
+        </div>
+        <div class="finance-note">
+          <span data-ma-i18n="ratio">Окупаемость:</span>
+          <span class="v" data-ratio-display>×<?php echo round( $totals['cost_usd'] / max( $totals['subscription_usd'], 1 ) ); ?></span>
         </div>
       </div>
     </div>
@@ -936,10 +1005,11 @@ get_header();
       combined_sub: 'API-эквивалент минус подписки за',
       combined_api_eq: 'API-эквивалент:',
       combined_subscriptions: 'подписки:',
-      p_savings: 'ЭКОНОМИЯ · СРАВНЕНИЕ С API',
-      savings_prefix: 'сэкономлено за',
+      p_savings: 'ФИНАНСОВАЯ ФОРМУЛА',
+      savings_formula_sub: 'расшифровка главного KPI за',
       api_eq: 'Эквивалент по API:',
       subscription: 'Подписка:',
+      net_savings: 'Чистая экономия:',
       ratio: 'Окупаемость:',
       p_multi: 'МНОЖИТЕЛЬ ПРОИЗВОДИТЕЛЬНОСТИ',
       multi_sub: 'чистое время с ИИ против ручной оценки',
@@ -1025,10 +1095,11 @@ get_header();
       combined_sub: 'API equivalent minus subscriptions over',
       combined_api_eq: 'API equivalent:',
       combined_subscriptions: 'subscriptions:',
-      p_savings: 'SAVINGS · API COMPARISON',
-      savings_prefix: 'saved over',
+      p_savings: 'FINANCIAL FORMULA',
+      savings_formula_sub: 'main KPI breakdown over',
       api_eq: 'API equivalent:',
       subscription: 'Subscription:',
+      net_savings: 'Net savings:',
       ratio: 'Payoff ratio:',
       p_multi: 'PRODUCTIVITY MULTIPLIER',
       multi_sub: 'clean AI time vs manual estimate',
@@ -1717,7 +1788,7 @@ get_header();
       if (el) el.dataset.baseUsd = String(t.subscription_usd);
     }
     if (t.savings_usd != null) {
-      const el = document.querySelector('.p-savings .big-number');
+      const el = document.querySelector('[data-savings-net]');
       if (el) el.dataset.baseUsd = String(t.savings_usd);
     }
     if (t.cost_usd != null) {
@@ -1792,7 +1863,7 @@ get_header();
       todaySavings = Number((t.cost_usd - dailySub).toFixed(2));
     }
     if (todaySavings != null) {
-      const el = document.querySelector('.p-savings .big-number');
+      const el = document.querySelector('[data-savings-net]');
       if (el) el.dataset.todayUsd = String(todaySavings);
       const combined = document.querySelector('.p-combined .big-number');
       if (combined) combined.dataset.todayUsd = String(todaySavings);
