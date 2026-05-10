@@ -55,6 +55,10 @@ $providers = array(
         'calls'    => 1,
         'cost_usd' => 0.20,
     ),
+    'openrouter_openclaw' => array(
+        'calls'    => 0,
+        'cost_usd' => 0.00,
+    ),
 );
 
 $combined = array(
@@ -582,6 +586,11 @@ get_header();
             <span class="prov-name">Codex (OpenAI)</span>
             <span><span class="prov-calls" data-base-int="<?php echo esc_attr( $providers['openai_codex']['calls'] ); ?>"><?php echo number_format( $providers['openai_codex']['calls'], 0, '.', ' ' ); ?></span> calls</span>
             <span class="prov-cost" data-base-usd="<?php echo esc_attr( $providers['openai_codex']['cost_usd'] ); ?>"></span>
+          </div>
+          <div class="prov-row" data-snap-provider="openrouter_openclaw">
+            <span class="prov-name">OpenClaw (OpenRouter)</span>
+            <span><span class="prov-calls" data-base-int="<?php echo esc_attr( $providers['openrouter_openclaw']['calls'] ); ?>"><?php echo number_format( $providers['openrouter_openclaw']['calls'], 0, '.', ' ' ); ?></span> calls</span>
+            <span class="prov-cost" data-base-usd="<?php echo esc_attr( $providers['openrouter_openclaw']['cost_usd'] ); ?>"></span>
           </div>
         </div>
       </div>
@@ -1184,8 +1193,8 @@ get_header();
   function timelineLabels() {
     const lang = (typeof getCurrentLang === 'function') ? getCurrentLang() : 'ru';
     return (lang === 'en')
-      ? { calls: 'calls', cost: 'API equiv.', active: 'active', input: 'input', output: 'output', cache: 'cache', claude: 'Claude', codex: 'Codex' }
-      : { calls: 'вызовы', cost: 'API-эквив.', active: 'активно', input: 'input', output: 'output', cache: 'кэш', claude: 'Claude', codex: 'Codex' };
+      ? { calls: 'calls', cost: 'API equiv.', active: 'active', input: 'input', output: 'output', cache: 'cache', claude: 'Claude', codex: 'Codex', openclaw: 'OpenClaw' }
+      : { calls: 'вызовы', cost: 'API-эквив.', active: 'активно', input: 'input', output: 'output', cache: 'кэш', claude: 'Claude', codex: 'Codex', openclaw: 'OpenClaw' };
   }
 
   function timelineProviderCalls(day, key) {
@@ -1205,7 +1214,8 @@ get_header();
       + '<div class="tt-row"><span class="tt-k">' + escapeHtml(l.output) + '</span><span class="tt-v">' + fmtIntRu(day.output_tokens || 0) + '</span></div>'
       + '<div class="tt-row"><span class="tt-k">' + escapeHtml(l.cache) + '</span><span class="tt-v">' + fmtIntRu(day.cache_tokens || 0) + '</span></div>'
       + '<div class="tt-row"><span class="tt-k">' + escapeHtml(l.claude) + '</span><span class="tt-v">' + fmtIntRu(timelineProviderCalls(day, 'anthropic_claude')) + '</span></div>'
-      + '<div class="tt-row"><span class="tt-k">' + escapeHtml(l.codex) + '</span><span class="tt-v">' + fmtIntRu(timelineProviderCalls(day, 'openai_codex')) + '</span></div>';
+      + '<div class="tt-row"><span class="tt-k">' + escapeHtml(l.codex) + '</span><span class="tt-v">' + fmtIntRu(timelineProviderCalls(day, 'openai_codex')) + '</span></div>'
+      + '<div class="tt-row"><span class="tt-k">' + escapeHtml(l.openclaw) + '</span><span class="tt-v">' + fmtIntRu(timelineProviderCalls(day, 'openrouter_openclaw')) + '</span></div>';
   }
 
   function timelineTooltipTitle(day) {
