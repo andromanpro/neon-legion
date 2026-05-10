@@ -10,6 +10,8 @@
 
 `tracker/backfill-openclaw-sessions.py` imports OpenClaw assistant usage from `H:\openclaw\data\.openclaw\agents\main\sessions\*.jsonl`. It records OpenRouter/DeepSeek provider, model, token usage, exact cost, and channel origin without copying message text. These events are stored separately from Codex events so "OpenClaw thought" is not mixed with "OpenClaw launched Codex".
 
+`tracker/backfill-opencode-sessions.py` imports OpenCode assistant usage from `C:\Users\Roono\.local\share\opencode\opencode.db`. It reads assistant `message.data` accounting fields only (`providerID`, `modelID`, `tokens`, `cost`, `finish`) and stores them as a separate OpenCode provider.
+
 ## Register the hooks
 
 Add this to `~/.claude/settings.json`:
@@ -51,6 +53,7 @@ Events are stored locally in:
 tracker/claude-events.jsonl
 tracker/codex-events.jsonl
 tracker/openclaw-events.jsonl
+tracker/opencode-events.jsonl
 ```
 
 Task complexity estimates are stored locally in:
@@ -134,7 +137,7 @@ py -3.14 tracker/summary.py --from 2026-05-01 --to 2026-05-09
 
 When the selected period contains task estimates, the summary adds a Phase 1.3 Productivity block with wall-clock AI time, estimated without-AI hours, saved hours, and multiplier.
 
-Codex and OpenClaw events are included in token/cost/call totals and provider/model breakdowns. Task, productivity, and sentiment metrics intentionally use Claude sessions only because `tasks.json` is keyed by Claude orchestrator sessions; this avoids counting the same work twice when Codex or OpenClaw took over part of a Claude-led task.
+Codex, OpenClaw, and OpenCode events are included in token/cost/call totals and provider/model breakdowns. Task, productivity, and sentiment metrics intentionally use Claude sessions only because `tasks.json` is keyed by Claude orchestrator sessions; this avoids counting the same work twice when another agent took over part of a Claude-led task.
 
 Subscription defaults:
 
@@ -142,10 +145,12 @@ Subscription defaults:
 CLAUDE_MONTHLY_SUBSCRIPTION_USD=200
 OPENAI_MONTHLY_SUBSCRIPTION_USD=200
 OPENROUTER_MONTHLY_SUBSCRIPTION_USD=0
+OPENCODE_MONTHLY_SUBSCRIPTION_USD=0
 ```
 
 `OPENAI_MONTHLY_SUBSCRIPTION_USD=200` matches ChatGPT Pro. Override it to `20` for Plus or `100` for Pro $100 before running summaries/snapshots if the plan changes.
 `OPENROUTER_MONTHLY_SUBSCRIPTION_USD=0` is intentional: OpenClaw costs are imported as actual OpenRouter API spend, not a subscription.
+`OPENCODE_MONTHLY_SUBSCRIPTION_USD=0` is also intentional: OpenCode costs are imported from the local SQLite DB as actual provider spend.
 
 ## Codex wrapper
 
@@ -179,6 +184,13 @@ Backfill OpenClaw/OpenRouter sessions:
 ```bash
 py -3.14 tracker/backfill-openclaw-sessions.py --dry-run
 py -3.14 tracker/backfill-openclaw-sessions.py
+```
+
+Backfill OpenCode sessions:
+
+```bash
+py -3.14 tracker/backfill-opencode-sessions.py --dry-run
+py -3.14 tracker/backfill-opencode-sessions.py
 ```
 
 ## Verify the hooks
