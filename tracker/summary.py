@@ -10,6 +10,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CLAUDE_EVENTS_FILE = PROJECT_ROOT / "tracker" / "claude-events.jsonl"
 CODEX_EVENTS_FILE = PROJECT_ROOT / "tracker" / "codex-events.jsonl"
+OPENCLAW_EVENTS_FILE = PROJECT_ROOT / "tracker" / "openclaw-events.jsonl"
 EVENTS_FILE = CLAUDE_EVENTS_FILE
 TASKS_FILE = PROJECT_ROOT / "tracker" / "tasks.json"
 
@@ -28,11 +29,13 @@ CLAUDE_MONTHLY_SUBSCRIPTION_USD = env_float("CLAUDE_MONTHLY_SUBSCRIPTION_USD", 2
 # ChatGPT Pro $200/month by default. Override with
 # OPENAI_MONTHLY_SUBSCRIPTION_USD=20 for Plus or 100 for Pro $100.
 OPENAI_MONTHLY_SUBSCRIPTION_USD = env_float("OPENAI_MONTHLY_SUBSCRIPTION_USD", 200.0)
+OPENROUTER_MONTHLY_SUBSCRIPTION_USD = env_float("OPENROUTER_MONTHLY_SUBSCRIPTION_USD", 0.0)
 MONTHLY_SUBSCRIPTION_USD = CLAUDE_MONTHLY_SUBSCRIPTION_USD
 PRORATE_DAYS = 30.0
 PROVIDER_KEYS = {
     "anthropic": "anthropic_claude",
     "openai": "openai_codex",
+    "openrouter": "openrouter_openclaw",
 }
 SENTIMENT_KEYS = {
     "profanity_count",
@@ -111,9 +114,11 @@ def clamp_score(value: object) -> float:
 
 
 def event_provider(event: dict) -> str:
-    provider = event.get("provider")
+    provider = str(event.get("provider") or "").lower()
     if provider in {"openai", "openai_codex", "codex"}:
         return "openai"
+    if provider in {"openrouter", "openrouter_openclaw", "openclaw"}:
+        return "openrouter"
     return "anthropic"
 
 
@@ -148,7 +153,7 @@ def codex_origin(event: dict) -> str:
 
 def provider_model_key(provider: str, model: str) -> str:
     lower = model.lower()
-    if lower.startswith(("anthropic/", "openai/")):
+    if lower.startswith(("anthropic/", "openai/", "openrouter/")):
         return model
     return f"{provider}/{model}"
 
@@ -192,13 +197,21 @@ def read_codex_events(start: date, end: date) -> list[dict]:
     return read_event_file(CODEX_EVENTS_FILE, start, end, "openai")
 
 
+def read_openclaw_events(start: date, end: date) -> list[dict]:
+    return read_event_file(OPENCLAW_EVENTS_FILE, start, end, "openrouter")
+
+
 def event_sort_ts(event: dict) -> float:
     ts = parse_event_ts(event.get("ts"))
     return ts.timestamp() if ts is not None else 0.0
 
 
 def read_events(start: date, end: date) -> list[dict]:
-    events = read_claude_events(start, end) + read_codex_events(start, end)
+    events = (
+        read_claude_events(start, end)
+        + read_codex_events(start, end)
+        + read_openclaw_events(start, end)
+    )
     events = dedupe_events(events)
     events.sort(key=event_sort_ts)
     return events
@@ -243,9 +256,10 @@ def events_for_provider(events: list[dict], provider: str) -> list[dict]:
 
 
 def events_for_task_metrics(events: list[dict]) -> list[dict]:
-    # tasks.json is keyed by Claude Code sessions. Codex calls are counted in
-    # usage/cost, but not in task/productivity metrics to avoid double counting
-    # work that was already estimated from the Claude orchestrator session.
+    # tasks.json is keyed by Claude Code sessions. Codex/OpenClaw calls are
+    # counted in usage/cost, but not in task/productivity metrics to avoid
+    # double counting work that was already estimated from the Claude
+    # orchestrator session.
     return events_for_provider(events, "anthropic")
 
 
@@ -324,8 +338,8 @@ def subscription_prorated_usd(events: list[dict], days: int) -> float:
         monthly += CLAUDE_MONTHLY_SUBSCRIPTION_USD
     if "openai" in providers:
         monthly += OPENAI_MONTHLY_SUBSCRIPTION_USD
-    if monthly <= 0:
-        monthly = CLAUDE_MONTHLY_SUBSCRIPTION_USD
+    if "openrouter" in providers:
+        monthly += OPENROUTER_MONTHLY_SUBSCRIPTION_USD
     return monthly / PRORATE_DAYS * days
 
 
@@ -361,6 +375,10 @@ def summarize_codex_by_model(events: list[dict]) -> tuple[dict[str, dict], dict]
     return summarize_by_model(events_for_provider(events, "openai"))
 
 
+def summarize_openclaw_by_model(events: list[dict]) -> tuple[dict[str, dict], dict]:
+    return summarize_by_model(events_for_provider(events, "openrouter"))
+
+
 def summarize_by_provider(events: list[dict]) -> dict[str, dict]:
     by_provider: dict[str, dict] = {}
 
@@ -382,6 +400,12 @@ def summarize_by_provider(events: list[dict]) -> dict[str, dict]:
 
         if provider == "openai":
             origin = codex_origin(event)
+            origins = by_provider[key]["origins"]
+            if origin not in origins:
+                origins[origin] = empty_stats()
+            add_event(origins[origin], event)
+        elif provider == "openrouter":
+            origin = str(event.get("openclaw_source") or event.get("source") or "openclaw")
             origins = by_provider[key]["origins"]
             if origin not in origins:
                 origins[origin] = empty_stats()
@@ -748,8 +772,8 @@ def print_sentiment(sentiment: dict | None) -> None:
 def period_title(start: date, end: date) -> str:
     days = (end - start).days + 1
     if start == end:
-        return f"## Claude + Codex stats: {start.isoformat()} (1 day)"
-    return f"## Claude + Codex stats: {start.isoformat()}..{end.isoformat()} ({days} days)"
+        return f"## Claude + Codex + OpenClaw stats: {start.isoformat()} (1 day)"
+    return f"## Claude + Codex + OpenClaw stats: {start.isoformat()}..{end.isoformat()} ({days} days)"
 
 
 def print_summary(start: date, end: date, events: list[dict], gap_minutes: int = 2) -> None:
