@@ -101,14 +101,44 @@ def atomic_write_json(path: Path, data: dict) -> None:
     os.replace(temp_path, path)
 
 
+# Fields that must NEVER be overwritten by None from a failed estimation:
+# they are local-deterministic (profanity) or user-provided (corrections).
+_PROTECTED_NONE_FIELDS = frozenset({
+    "human_corrected_hours",
+    "profanity_count",
+})
+
+
 def update_task_entry(session_id: str, entry: dict) -> None:
+    """Merge `entry` into the existing record (if any).
+
+    B1 (Codex review): protected fields are not overwritten by None — when
+    a fresh `failure_entry` lacks `human_corrected_hours`, we keep the prior
+    value. profanity_count is handled the same way: a fresh oracle failure
+    that doesn't carry profanity should not zero out a previously-counted
+    value.
+
+    B3: if lock acquisition fails (timeout / OS error), do NOT proceed with
+    an unlocked write — refuse and let the caller log/retry.
+    """
     fd = acquire_tasks_lock()
+    if fd is None:
+        raise RuntimeError(
+            f"failed to acquire {TASKS_LOCK_FILE} within timeout; refusing unlocked write"
+        )
     try:
         tasks = read_tasks()
         previous = tasks.get(session_id)
-        if isinstance(previous, dict) and "human_corrected_hours" in previous:
-            entry["human_corrected_hours"] = previous.get("human_corrected_hours")
-        tasks[session_id] = entry
+        if isinstance(previous, dict):
+            merged = dict(previous)
+            for key, value in entry.items():
+                if value is None and key in _PROTECTED_NONE_FIELDS and key in merged:
+                    # keep previously-captured value
+                    continue
+                merged[key] = value
+            tasks[session_id] = merged
+        else:
+            tasks[session_id] = entry
         atomic_write_json(TASKS_FILE, tasks)
     finally:
         release_tasks_lock(fd)
@@ -341,26 +371,68 @@ def normalize_oracle_payload(payload: dict) -> dict:
     }
 
 
+def _resolve_codex_cli() -> str:
+    """Find the Codex CLI binary. On Windows the npm shim is `codex.cmd` —
+    shutil.which handles PATHEXT lookup correctly."""
+    import shutil
+    found = shutil.which("codex")
+    if found is None:
+        raise RuntimeError(
+            "codex CLI not found in PATH (looked for codex/.cmd/.exe). "
+            "Install: npm i -g @openai/codex-cli"
+        )
+    return found
+
+
 def run_oracle(prompt: str) -> dict:
-    completed = subprocess.run(
-        ["claude", "-p", "--bare", "--output-format", "json"],
-        input=prompt,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        timeout=60,
-    )
-    if completed.returncode != 0:
-        raise RuntimeError(f"claude exited with {completed.returncode}: {completed.stderr.strip()}")
+    """Run the oracle prompt through `codex exec` (ChatGPT-auth headless).
 
-    payload = unwrap_oracle_payload(parse_json_text(completed.stdout))
-    return normalize_oracle_payload(payload)
+    Why Codex and not Claude: `claude -p` headless requires an Anthropic API
+    key, which Max-subscription users don't have by default. Codex CLI under
+    ChatGPT-auth works headless from any subprocess without extra setup.
+    """
+    codex = _resolve_codex_cli()
+    import tempfile
+    tmp_out = tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False, suffix=".txt")
+    tmp_out.close()
+    try:
+        # Pass prompt via stdin — multi-line argv through codex.CMD shim on Windows
+        # gets eaten at the first newline (cmd.exe quirk). stdin is reliable.
+        completed = subprocess.run(
+            [
+                codex, "exec",
+                "--sandbox", "read-only",
+                "--skip-git-repo-check",
+                "--output-last-message", tmp_out.name,
+            ],
+            input=prompt,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=180,
+        )
+        if completed.returncode != 0:
+            raise RuntimeError(f"codex exited with {completed.returncode}: {completed.stderr.strip()[:300]}")
+
+        last_message = Path(tmp_out.name).read_text(encoding="utf-8").strip()
+        if not last_message:
+            raise RuntimeError("codex returned empty last message")
+
+        payload = unwrap_oracle_payload(parse_json_text(last_message))
+        return normalize_oracle_payload(payload)
+    finally:
+        try:
+            Path(tmp_out.name).unlink(missing_ok=True)
+        except Exception:
+            pass
 
 
-def failure_entry(transcript_path: str, reason: str) -> dict:
-    return {
+def failure_entry(transcript_path: str, reason: str, profanity: int | None = None) -> dict:
+    """Failure record. Preserves profanity counter when known — it's a local
+    deterministic count that doesn't depend on the oracle call succeeding."""
+    entry = {
         "ai_baseline_hours": None,
         "human_corrected_hours": None,
         "brief_description": f"estimation failed: {reason}",
@@ -369,11 +441,20 @@ def failure_entry(transcript_path: str, reason: str) -> dict:
         "needs_manual_review": True,
         "transcript_path": transcript_path,
     }
+    if profanity is not None:
+        entry["profanity_count"] = profanity
+    return entry
 
 
 def estimate_session(session_id: str, transcript_path: str) -> None:
     user_messages, assistant_messages = read_transcript(Path(transcript_path))
+    # Count profanity first — local, never fails. Persist it even if oracle dies later.
     profanity = count_profanity(user_messages)
+    update_task_entry(session_id, {
+        "transcript_path": transcript_path,
+        "profanity_count": profanity,
+    })
+
     context = build_truncated_context_from_messages(user_messages, assistant_messages)
     oracle_prompt = ORACLE_PROMPT_FILE.read_text(encoding="utf-8")
     prompt = oracle_prompt + "\n\n=== TRANSCRIPT (truncated) ===\n" + context
@@ -383,16 +464,27 @@ def estimate_session(session_id: str, transcript_path: str) -> None:
     update_task_entry(session_id, entry)
 
 
+def _safe_count_profanity(transcript_path: str) -> int | None:
+    """Best-effort profanity count for the failure path. Returns None on read errors."""
+    try:
+        user_messages, _ = read_transcript(Path(transcript_path))
+        return count_profanity(user_messages)
+    except Exception:
+        return None
+
+
 def main(argv: list[str]) -> int:
     args = parse_args(argv)
     try:
         estimate_session(args.session_id, args.transcript_path)
     except subprocess.TimeoutExpired:
-        print("estimation failed: claude timed out", file=sys.stderr)
-        update_task_entry(args.session_id, failure_entry(args.transcript_path, "claude timed out"))
+        print("estimation failed: codex timed out", file=sys.stderr)
+        prof = _safe_count_profanity(args.transcript_path)
+        update_task_entry(args.session_id, failure_entry(args.transcript_path, "codex timed out", prof))
     except Exception as exc:
         print(f"estimation failed: {exc}", file=sys.stderr)
-        update_task_entry(args.session_id, failure_entry(args.transcript_path, str(exc)))
+        prof = _safe_count_profanity(args.transcript_path)
+        update_task_entry(args.session_id, failure_entry(args.transcript_path, str(exc), prof))
     finally:
         remove_inflight_lock(args.session_id)
 
