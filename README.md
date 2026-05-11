@@ -1,9 +1,16 @@
-# ai-ops-journal · multi-agent
+# neon-legion
 
-> **Operational journal for personal AI usage.**
-> Tracks the money, hours, and stress that AI saves you across
-> Claude Code, Codex CLI, OpenClaw, and OpenCode — in one local-first
-> cyberpunk dashboard. No telemetry. No SaaS. No outbound calls.
+> **Your personal AI legion. Almost no swearing.**
+>
+> Wire up Claude Code, Codex CLI, OpenClaw, OpenCode, and DeepSeek into one
+> command-line legion with roles (architect / developer / reviewer /
+> approver), cross-machine bridges, and a side-effect cyberpunk dashboard
+> that proves it worked. Local-first. No telemetry. No SaaS. No outbound
+> calls.
+
+Yes, the name is on purpose. AI is allegedly your army. Mine spent a week
+sitting in a corner while I figured out how to count what it cost me.
+This tool is what came out of that.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 ![Python 3.11+](https://img.shields.io/badge/Python-3.11+-blue)
@@ -30,7 +37,7 @@ help. You feel the bill but you can't see the work it's doing. Existing
 trackers either lock you into a SaaS, only support one vendor, or focus on
 token math instead of "did this actually save me time?"
 
-`ai-ops-journal` answers three questions on one page:
+`neon-legion` answers three questions on one page:
 
 | Axis | Question | How |
 |---|---|---|
@@ -81,8 +88,8 @@ Full diagram + per-layer details: [docs/architecture.md](docs/architecture.md).
 
 ```bash
 # 1. Clone
-git clone https://github.com/andromanpro/ai-ops-journal.git
-cd ai-ops-journal
+git clone https://github.com/andromanpro/neon-legion.git
+cd neon-legion
 
 # 2. Register the Claude Code hooks
 #    Merge this into ~/.claude/settings.json (replace <PROJECT_ROOT>
@@ -139,7 +146,7 @@ Use Claude Code / Codex CLI as normal — events accumulate in
 
 | Tool | Multi-vendor | Sentiment | Self-host | Open source | Cost-aware |
 |---|---|---|---|---|---|
-| `ai-ops-journal` (this) | ✅ 4 providers | ✅ unique | ✅ | ✅ MIT | ✅ |
+| `neon-legion` (this) | ✅ 4 providers | ✅ unique | ✅ | ✅ MIT | ✅ |
 | ccusage | Claude only | ❌ | ✅ | ✅ MIT | ✅ |
 | WakaTime AI | 15+ tools | ❌ | ❌ ($14/mo) | partial | ✅ |
 | Claude Usage Tracker (PH) | Claude only | ❌ | ✅ | ✅ | ✅ |
@@ -185,24 +192,32 @@ sessions without their explicit consent.
 
 # 🇷🇺 По-русски
 
-`ai-ops-journal` — **операционный журнал** для твоей работы с ИИ.
+# neon-legion — твоя личная армия. Почти без мата.
 
-Считает три потери, которые забирает на себя AI:
-- 💰 **деньги** — что бы заплатил по API без подписок
-- ⏱ **часы** — что бы делал руками
-- 🌡 **стресс** — насколько бы ругался в темноту
+Связывает **Claude Code + Codex CLI + OpenClaw + OpenCode + DeepSeek** в
+один командный пункт с ролями (architect / developer / reviewer / approver),
+кросс-машинными мостами и побочным киберпанк-дашбордом, который доказывает
+что всё это работает. Локально. Без телеметрии, SaaS и outbound-вызовов.
 
-Поддерживает **Claude Code + Codex CLI + OpenClaw + OpenCode** в одном
-киберпанк-дашборде. Всё локально, на `127.0.0.1`. Никакого SaaS, никакой
-телеметрии, никаких outbound calls.
+Да, название — это шутка. AI типа твоя армия. Моя у меня неделю просидела
+в углу пока я разбирался как сосчитать что она стоила. Этот тул — то, что
+из этого вышло.
 
-### Зачем
+### Что делает
 
-Если ты платишь за **Claude Max + ChatGPT Pro** одновременно — это ~$400/мес.
-Счёт ты чувствуешь, но **видно ли что AI делает работу за эти деньги**?
+Связывает агентов и шпионит за ними. Три цифры на дашборде:
 
-Существующие трекеры либо закрытые SaaS, либо поддерживают одного вендора,
-либо считают токены вместо «реально ли это сэкономило мне время».
+- 💰 **деньги** — сколько ты бы заплатил по API без подписок
+- ⏱ **часы** — сколько бы делал руками
+- 🌡 **мат** — реально считает матерные слова в твоих сообщениях. Сейчас
+  у меня 91 за 62 дня, и я не горжусь
+
+### Чем не похож на остальные
+
+Существующие трекеры — закрытые SaaS, поддерживают одного вендора, либо
+считают токены вместо «реально ли это сэкономило мне время». Тут четыре
+вендора, оркестрация ролей, мост Codex↔OpenClaw между машинами без
+открытых портов, и встроенный счётчик матов. Зачем — см. предыдущий пункт.
 
 ### Как держим приватность
 
@@ -219,8 +234,8 @@ sessions without their explicit consent.
 ### Быстрый старт
 
 ```bash
-git clone https://github.com/andromanpro/ai-ops-journal.git
-cd ai-ops-journal
+git clone https://github.com/andromanpro/neon-legion.git
+cd neon-legion
 cp config.example.toml config.toml
 $EDITOR config.toml
 

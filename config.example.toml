@@ -1,4 +1,4 @@
-# ai-ops-journal configuration template
+# neon-legion configuration template
 #
 # Copy this file to `config.toml` (gitignored) and edit the paths for your
 # environment. Most defaults work out of the box if you have Claude Code +

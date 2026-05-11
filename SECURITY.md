@@ -2,7 +2,7 @@
 
 ## What this project handles
 
-`ai-ops-journal` (codename `multi-agent`) is a **local-first personal AI usage
+`neon-legion` (codename `multi-agent`) is a **local-first personal AI usage
 tracker**. It captures the following sensitive data classes:
 
 - AI conversation transcripts (under `~/.claude/projects/`, `~/.codex/`, etc.)
@@ -58,7 +58,7 @@ If you find a privacy leak, scrub bypass, or other security issue, please:
    → "Report a vulnerability". Private, indexed only after disclosure, lets
    us collaborate on the fix in a draft advisory.
 2. **Fallback — email** `andromanpro@gmail.com` with subject
-   `ai-ops-journal SECURITY:` if you can't use GitHub for some reason.
+   `neon-legion SECURITY:` if you can't use GitHub for some reason.
 3. **Never** open a public GitHub issue for a security topic — public issues
    are crawled and indexed within minutes.
 

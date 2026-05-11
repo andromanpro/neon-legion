@@ -10,7 +10,7 @@ template if you want to bootstrap your own local agent notes.
 
 ## Project identity
 
-**ai-ops-journal** (codename `multi-agent`) — a personal, local-first AI
+**neon-legion** (codename `multi-agent`) — a personal, local-first AI
 usage tracker and dashboard. It captures token/cost/time metrics across
 Claude Code, Codex CLI, OpenClaw, and OpenCode; runs a sentiment+productivity
 oracle; renders a cyberpunk dashboard locally and (optionally) on a
@@ -28,7 +28,7 @@ The multi-agent piece is twofold:
 ## Repo layout
 
 ```
-ai-ops-journal/
+neon-legion/
 ├── hooks/          # Claude Code Stop/SessionStart hooks
 ├── tracker/        # Event ingestion (wrappers + backfills) + summary.py
 ├── backend/        # HTTP API + snapshot writer (stdlib only)

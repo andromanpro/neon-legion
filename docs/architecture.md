@@ -1,6 +1,6 @@
 # Architecture
 
-`ai-ops-journal` is a 5-layer local-first pipeline. Each layer can run alone;
+`neon-legion` is a 5-layer local-first pipeline. Each layer can run alone;
 adding the next layer enables the next class of metrics.
 
 ## Data flow (high level)
