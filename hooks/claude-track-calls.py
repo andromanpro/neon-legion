@@ -5,6 +5,18 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+# Force UTF-8 on stdin/stdout/stderr (Windows default is cp1251).
+# Without this, Cyrillic paths in `cwd` come through as mojibake when
+# Claude Code's JSON arrives on a Windows console default codepage. Once
+# stored in JSONL as UTF-8, the mojibake is permanent (#20). The fallback
+# `errors='replace'` ensures malformed input doesn't crash the hook.
+try:
+    sys.stdin.reconfigure(encoding="utf-8", errors="replace")
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+except AttributeError:
+    pass
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 TRACKER_DIR = PROJECT_ROOT / "tracker"
