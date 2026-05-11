@@ -21,12 +21,23 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 TRACKER_DIR = PROJECT_ROOT / "tracker"
 EVENTS_FILE = TRACKER_DIR / "openclaw-events.jsonl"
-DEFAULT_SESSIONS_ROOT = Path(
-    os.environ.get(
-        "OPENCLAW_SESSIONS_ROOT",
-        r"H:\openclaw\data\.openclaw\agents\main\sessions",
-    )
-)
+def _default_openclaw_sessions() -> Path:
+    """OpenClaw session-store default. Override via OPENCLAW_SESSIONS_ROOT.
+
+    OpenClaw stores per-agent session JSONLs under:
+        <openclaw-data>/.openclaw/agents/<agent-name>/sessions/
+
+    If you run OpenClaw in Docker and mount its data dir on a SMB share,
+    set OPENCLAW_SESSIONS_ROOT to the mounted path. Otherwise this script
+    looks for a local fallback at ~/.openclaw/agents/main/sessions.
+    """
+    env = os.environ.get("OPENCLAW_SESSIONS_ROOT")
+    if env:
+        return Path(env)
+    return Path.home() / ".openclaw" / "agents" / "main" / "sessions"
+
+
+DEFAULT_SESSIONS_ROOT = _default_openclaw_sessions()
 BASE_SESSION_RE = re.compile(
     r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
     r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\.jsonl$"

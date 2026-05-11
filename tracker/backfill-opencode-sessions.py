@@ -20,12 +20,25 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 TRACKER_DIR = PROJECT_ROOT / "tracker"
 EVENTS_FILE = TRACKER_DIR / "opencode-events.jsonl"
-DEFAULT_DB_PATH = Path(
-    os.environ.get(
-        "OPENCODE_DB_PATH",
-        r"C:\Users\Roono\.local\share\opencode\opencode.db",
-    )
-)
+def _default_opencode_db() -> Path:
+    """OpenCode default DB path per OS. Override via OPENCODE_DB_PATH env var."""
+    env = os.environ.get("OPENCODE_DB_PATH")
+    if env:
+        return Path(env)
+    home = Path.home()
+    # Linux/macOS: XDG ~/.local/share/opencode/opencode.db
+    # Windows: %APPDATA%\opencode\opencode.db (recent) or %LOCALAPPDATA%\opencode\opencode.db
+    # Fall back to ~/.local/share which OpenCode also creates on cross-platform installs.
+    if os.name == "nt":
+        appdata = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA")
+        if appdata:
+            candidate = Path(appdata) / "opencode" / "opencode.db"
+            if candidate.exists():
+                return candidate
+    return home / ".local" / "share" / "opencode" / "opencode.db"
+
+
+DEFAULT_DB_PATH = _default_opencode_db()
 
 
 if hasattr(sys.stdout, "reconfigure"):
