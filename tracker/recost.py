@@ -79,6 +79,12 @@ def costs_equal(left: object, right: object) -> bool:
         return left == right
 
 
+def with_schema_version(event: dict) -> dict:
+    if "schema_version" in event:
+        return event
+    return {"schema_version": 1, **event}
+
+
 def atomic_write_text(path: Path, text: str) -> None:
     TRACKER_DIR.mkdir(parents=True, exist_ok=True)
     temp_path = path.with_name(f".{path.name}.tmp.{os.getpid()}")
@@ -134,7 +140,9 @@ def recost_events(cleanup_synthetic: bool) -> dict:
 
                 report["synthetic_skipped"] += 1
                 report["new_total_cost"] += as_float(old_cost)
-                report["rewritten_lines"].append(line)
+                report["rewritten_lines"].append(
+                    json.dumps(with_schema_version(event), ensure_ascii=False, separators=(",", ":")) + "\n"
+                )
                 continue
 
             new_cost = estimate_event_cost(event)
@@ -143,6 +151,7 @@ def recost_events(cleanup_synthetic: bool) -> dict:
                 event["cost_estimate_usd"] = new_cost
                 report["cost_changed"] += 1
 
+            event = with_schema_version(event)
             report["rewritten_lines"].append(json.dumps(event, ensure_ascii=False, separators=(",", ":")) + "\n")
 
     return report

@@ -135,6 +135,7 @@ def build_event(hook_input: dict, assistant_event: dict, message: dict, usage: d
     cache_read_tokens = as_int(usage.get("cache_read_input_tokens"))
 
     return {
+        "schema_version": 1,
         "ts": datetime.now().astimezone().isoformat(timespec="milliseconds"),
         "session_id": hook_input["session_id"],
         "message_uuid": str(assistant_event.get("uuid", "")),

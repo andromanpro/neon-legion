@@ -186,6 +186,7 @@ def build_tracker_event(
         )
 
     event = {
+        "schema_version": 1,
         "ts": timestamp,
         "session_id": session_id,
         "message_uuid": message_uuid,

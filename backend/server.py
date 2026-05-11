@@ -1193,6 +1193,7 @@ def build_wp_snapshot(
 
     # Compose WP-shaped payload
     return {
+        "schema_version": 1,
         "generated_at": current.isoformat(timespec="seconds"),
         "totals": {
             "calls": int(summary_data["totals"].get("calls") or 0),

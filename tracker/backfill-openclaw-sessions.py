@@ -248,6 +248,7 @@ def read_session_events(path: Path, since: datetime | None) -> tuple[list[dict],
             msg_id = str(item.get("id") or message.get("responseId") or line_no)
             exit_code, partial = event_status(message.get("stopReason"))
             event = {
+                "schema_version": 1,
                 "event_id": f"openclaw-session-{session_id}-{msg_id}",
                 "tracking_run_id": f"openclaw-session-{session_id}",
                 "sequence_no": line_no,
