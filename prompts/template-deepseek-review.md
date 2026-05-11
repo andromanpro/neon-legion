@@ -2,7 +2,7 @@
 
 Use this template when running a third-opinion review via OpenCode after
 Claude (architect) + Codex (developer) have already iterated. Fill in
-`<TASK>` placeholders and pipe through `opencode run --model deepseek/deepseek-v4 ...`.
+`<TASK>` placeholders and pipe through `opencode run -m openrouter/deepseek/deepseek-v4-pro --format default --pure ...` (the `openrouter/` provider prefix is required; OpenCode rejects bare `deepseek/...` slugs).
 
 ## Inputs to provide
 
@@ -117,7 +117,7 @@ as developer) have already iterated on this code. Your job is to find
 # DeepSeek v4 audit report
 
 Risk profile: <name>
-Reviewer model: deepseek/deepseek-v4
+Reviewer model: openrouter/deepseek/deepseek-v4-pro
 Audit time: ~<minutes>
 
 ## A. Privacy

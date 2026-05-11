@@ -21,7 +21,7 @@ invocation = "codex-exec"
 
 [role.reviewer]
 provider = "openrouter"
-model = "deepseek/deepseek-v4-pro"
+model = "openrouter/deepseek/deepseek-v4-pro"
 goal = "Third-opinion review: security, money math, residual privacy, code quality."
 backstory = "Independent security reviewer. Finds what architect and developer missed. Opinionated, terse, cites file:line for every issue."
 deliverables = ["audit_report.md"]
