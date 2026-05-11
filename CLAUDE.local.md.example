@@ -1,0 +1,48 @@
+# CLAUDE.local.md (template)
+
+Copy this file to `CLAUDE.local.md` (gitignored) and fill in your local
+context. This is where agent-personal memory lives: customer codenames,
+infrastructure hostnames, personal preferences, history of work in this
+repo. It does NOT get committed.
+
+## Local environment
+
+- Working directory: `<path on disk>`
+- Operating system: `<windows|linux|macos>`
+- Python: `<command, e.g. py -3.14>`
+
+## Local infrastructure
+
+- Backend host:port: `localhost:8089`
+- Snapshot output: `<path or WP uploads dir>`
+- Salt file: `~/.multi-agent-snapshot-salt`
+- (optional) WordPress install: `<path>`
+- (optional) NAS / Docker host: `<hostname>`
+
+## Confidential project codenames
+
+If your AI sessions reference internal projects / clients whose names should
+NEVER appear in a public snapshot, list them here. They get scrubbed by
+`--public` snapshot mode when listed in your customer-blocklist.
+
+```
+<client-1>
+<client-2>
+<internal-product-codename>
+```
+
+## Personal conventions
+
+- Commit-message style: `<your-style>`
+- Pre-push checks: `<your-list>`
+- Whom to ping when escalating: `<contact>`
+
+## History
+
+Free-form area for your own notes about what was done in this repo. Agents
+will read it on session start. Examples of useful entries:
+
+- `2026-NN-NN — refactored estimator to use Codex CLI because Claude headless
+  OAuth was broken`
+- `2026-NN-NN — decided to keep dashboard single-file vanilla JS (no build)`
+- `2026-NN-NN — published v0.1.0 to GitHub`

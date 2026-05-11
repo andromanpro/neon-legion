@@ -1,83 +1,87 @@
-# multi-agent — оркестрация Claude + Codex + openclaw
+# CLAUDE.md — agent context for contributors
 
-Pet-проект про peer-to-peer и Telegram-bridge оркестрацию между:
+This file is read automatically by Claude Code (and similar agentic IDEs)
+when working in this repo. It defines the project's identity, conventions,
+and the contracts each agent role must respect.
 
-- **Claude Code** (Max-подписка) — роль архитектора (план, design, review)
-- **Codex CLI** (ChatGPT-подписка) — роль разработчика (implementation, тесты)
-- **openclaw** (Docker на NAS, OpenRouter под капотом) — Telegram-вход в mobile-режиме
+Personal notes (memory, customer references, history) belong in
+`CLAUDE.local.md` (gitignored). See `CLAUDE.local.md.example` as a starting
+template if you want to bootstrap your own local agent notes.
 
-## Топология
+## Project identity
 
-**Desktop (за компом):** peer-to-peer Claude ↔ Codex через `claude mcp serve` ↔ `codex mcp-server`. openclaw в стороне — его модели через OpenRouter не задействуются, две подписки уже оплачены.
+**ai-ops-journal** (codename `multi-agent`) — a personal, local-first AI
+usage tracker and dashboard. It captures token/cost/time metrics across
+Claude Code, Codex CLI, OpenClaw, and OpenCode; runs a sentiment+productivity
+oracle; renders a cyberpunk dashboard locally and (optionally) on a
+WordPress page through a snapshot pipeline that never opens an outbound
+port.
 
-**Mobile (Telegram через Клавбота):** Telegram → openclaw (NAS) → маршрутизирует на Claude/Codex MCP-серверы.
+The multi-agent piece is twofold:
+1. The pipeline aggregates events from multiple AI providers in one
+   dashboard (provider tracking).
+2. Optional bridges (e.g. `tools/openclaw-codex-bridge.py`) let one agent
+   on one machine ask another agent on another machine to run a task — for
+   instance, OpenClaw on a NAS asking Codex on Windows for a `codex_exec`
+   inside a sandbox.
 
-## Структура
+## Repo layout
 
-| Папка | Что |
-|---|---|
-| `hooks/` | Claude Code hook'и; путь регистрируется абсолютным в `~/.claude/settings.json` |
-| `tracker/` | JSONL-события и агрегаторы (для дашборда экономии) |
-| `prompts/` | Role-промпты (architect/developer/reviewer) |
-| `schemas/` | JSON-схемы для `codex exec --output-schema` |
-| `docs/` | Архитектура, диаграммы |
+```
+ai-ops-journal/
+├── hooks/          # Claude Code Stop/SessionStart hooks
+├── tracker/        # Event ingestion (wrappers + backfills) + summary.py
+├── backend/        # HTTP API + snapshot writer (stdlib only)
+├── dashboard/      # Local cyberpunk HTML + WordPress page template
+├── tools/          # Sandbox bridges, sanitization, privacy scanners
+├── prompts/        # Task specs for AI developers (audit history + templates)
+├── schemas/        # JSON schemas for codex --output-schema strict mode
+└── docs/           # Architecture, diagrams, screenshots
+```
 
-## Roadmap
+## Conventions for any agent
 
-| Phase | Что |
-|---|---|
-| 1.0 | Claude Code tracking hook + summary ($ tracking) — done 2026-05-09 |
-| 1.0.1 | Retroactive backfill из `~/.claude/projects/*/*.jsonl` (дедуп по session_id+message_uuid) |
-| 1.1 | Codex CLI tracking |
-| 1.2 | openclaw call tracking |
-| 1.3 | Task complexity estimation (часы «как без ИИ») для time-saved метрики |
-| 1.4 | Sentiment / emotion tracking per session (профанити, frustration, благодарности) |
-| 2 | Aggregator backend ($ saved + hours saved + productivity multiplier + emotion index) |
-| 3 | Live cyberpunk dashboard (time/$ saved графики, «×N» множитель big-number, real-time 5h-budget remaining widget — wedge: ни у одного multi-tool конкурента такого нет) |
-| 4 | Public stats на androman.pro (wow-метрика «N дней сэкономлено») |
-| 5 | Conversation graph viz (human↔AI как граф) |
-| 6 | AR overlay для контроля агентов (Xreal/Quest/Vision Pro + voice headset) — киберпанк HUD в углу зрения, голос через openclaw bridge |
-| 7 | Productization — competitor research, packaging (OSS / SaaS / hybrid), pricing, distribution для AI productivity audience |
+1. **No outbound network calls** from `tracker/`, `backend/`, or `dashboard/`.
+   The whole pipeline runs locally. `tools/` may call out (e.g. fetching
+   currency rates) — flag it in the module docstring.
+2. **Stdlib only** in `tracker/`, `backend/`, `dashboard/`. Third-party
+   dependencies belong in `tools/` and must be optional.
+3. **Atomic writes** for any file that the dashboard reads:
+   `*.tmp.<pid>.<tid>` → `os.replace`. Never leave partially-written JSON
+   visible to the UI.
+4. **No `Co-Authored-By:`** trailers in commits — AI tools are not authors.
+   The human submitter is responsible for the change.
+5. **Privacy by default** — assume any sample data you commit will end up
+   on a public Pages site. If unsure, run `tools/oss-sanitize.py --check`.
+6. **Append-only events** — never rewrite `tracker/*-events.jsonl`. To
+   correct mistakes, write a compensating event with a `correction_of`
+   field.
 
-## Метрики
+## Multi-agent roles
 
-Две оси экономии:
+| Role | Who | Responsibility |
+|---|---|---|
+| Architect | Claude Code (interactive) | Design decisions, code review, narrative |
+| Developer | Codex CLI (headless, `codex exec`) | Implementation, refactors, tests |
+| Reviewer (third opinion) | OpenCode + DeepSeek v4 via OpenRouter | Security audit, money-math sanity, residual issue scan |
+| Approver | Human submitter | Final merge gate; pushes to public main |
 
-**$ saved** = сколько API стоил бы за токены минус pro-rated подписка. Уже считается в Phase 1.0.
+The standard flow is described in the `/multi-agent` skill. In short:
+architect writes a task spec in `prompts/`, developer implements, architect
+reviews. For high-stakes batches (release prep, security PRs), add a third
+DeepSeek pass before merge.
 
-**Time saved** = `complexity_hours_without_ai − wall_clock_hours_with_ai` (Phase 1.3 + 2). Где:
-- `complexity_hours_without_ai` — оценка сложности задачи в человеко-часах (вариант: Claude/Codex выдаёт baseline в конце сессии, user корректирует через `tracker/note-task.py` или Telegram).
-- `wall_clock_hours_with_ai` — `last_ts − first_ts` по `session_id` в JSONL (трекер уже это знает).
-- `productivity_multiplier = complexity_hours_without_ai / wall_clock_hours_with_ai` — для wow-виджета.
+## Trust boundaries
 
-Единица «задачи» = одна Claude Code session (`session_id` — естественная группировка). Если задача охватывает несколько сессий — group по тегу / Gitea Issue (Phase 1.3 решит).
+- **`workspace-write` sandbox** is allowed for Codex implementing under
+  spec. Tests run on host, not inside sandbox (the sandbox blocks `pip
+  install`).
+- **`danger-full-access`** for any agent requires explicit human approval
+  per invocation. Bridges (`tools/openclaw-codex-bridge.py`) reject it.
+- **`read-only`** for all third-opinion reviewers.
 
-## Конвенции
+## When in doubt
 
-- **Issue в Gitea = задача.** Body содержит Goal, Deliverables, Acceptance Criteria, Out-of-scope, Workflow (architect→developer→reviewer→human).
-- **Cost tracking** — JSONL в `tracker/`, локально (gitignore — не публикуем сырые данные с путями и метаданными).
-- **Без `Co-Authored-By:` в commit messages** — пользователь единственный автор. Инструменты не авторы.
-- **Trust boundaries обкатываются постепенно** — сначала human-approve каждой фазы; автоматизация цепочек только когда стабильно.
-
-## Privacy hardening для Phase 4 (публикация на androman.pro)
-
-OpenAI policy позволяет наш Codex headless под ChatGPT-auth (compliant в trusted private infra), но для публикации метрик на публичный блог — **обезличить данные**:
-
-- ❌ Не публиковать сырые transcript'ы / output Codex'а verbatim
-- ✅ Только агрегированные метрики (числа, графики, дашборды без raw payload)
-- ✅ `working_dir` обезличить или хешировать (сейчас раскрывает FS-структуру + имена проектов; плюс там mojibake кириллицы который тоже надо чинить)
-- ✅ `session_id` укоротить до short-hash при публикации, не raw UUID
-- См. `reference_openai_codex_policy.md` в memory для деталей policy-research
-
-## Внешние ссылки
-
-- Gitea репо: http://nas.local:3000/androman/multi-agent
-- openclaw на NAS: 192.168.1.130:8789 (Docker, alpine/openclaw:latest)
-- Codex CLI: 0.128.0 (через npm, `C:/Users/Roono/AppData/Roaming/npm/codex.cmd`)
-
-## Если ты Claude в новой сессии и работаешь над этим проектом
-
-1. Прочитай `README.md` для текущего статуса фаз.
-2. Активные задачи — в Gitea issues по лейблу `phase:*`.
-3. Следуй конвенциям выше.
-4. Не выдумывай фазы / архитектуру — сверяйся с roadmap и issues.
+Read `README.md` for the user-facing story, `docs/architecture.md` for the
+data flow, and `SECURITY.md` for what is considered sensitive. Then check
+the `/multi-agent` skill for SDLC patterns.

@@ -1,9 +1,33 @@
+# Runtime data (event streams, locks, task store)
 tracker/*.jsonl
 tracker/*.lock
 tracker/.last-uuids.json
 tracker/tasks.json
 tracker/.estimation-logs/
+tracker/private/
+prompts/private/
+
+# Per-environment config / agent notes (use config.example.toml + CLAUDE.example.md as templates)
+config.toml
+CLAUDE.local.md
+.env
+.env.local
+
+# Sanitization backups — pre-OSS originals with personal data, must NEVER be pushed
+.oss-backup/
+
+# Private sanitization rules — see .oss-sanitize-private.example.txt
+.oss-sanitize-private.txt
+
+# Local snapshot artifacts
+dashboard/snapshot.json
+dashboard/snapshot-*.json
+docs/screenshots/.tmp/
+
+# IDE / OS / build artifacts
 .serena/
+.idea/
+.vscode/
 __pycache__/
 *.pyc
 *.pyo
@@ -12,3 +36,4 @@ __pycache__/
 *.log
 .~lock.*
 ~$*
+codex-tests.tmp/

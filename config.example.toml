@@ -1,0 +1,77 @@
+# ai-ops-journal configuration template
+#
+# Copy this file to `config.toml` (gitignored) and edit the paths for your
+# environment. Most defaults work out of the box if you have Claude Code +
+# Codex CLI installed in standard locations.
+
+[paths]
+# Where the snapshot writer atomically lands the WP-page JSON.
+# Default: <project>/dashboard/snapshot.json (local) — change to your WP
+# uploads directory if you want the dashboard live on a WordPress host.
+snapshot_output = "dashboard/snapshot.json"
+
+# Salt for hashing session_id in --public mode. 32 random bytes, auto-generated
+# on first --public run. KEEP THIS PATH OUT OF YOUR REPO.
+salt_file = "~/.multi-agent-snapshot-salt"
+
+# Optional: file listing customer / project names to scrub from public
+# snapshots. One name per line; "#" lines are comments. Russian inflections
+# need to be listed explicitly — the regex matches whole-word case-insensitive.
+customers_blocklist = ""
+
+[backend]
+# Backend API listens here. Keep 127.0.0.1 unless you intentionally want LAN
+# access — even then prefer a reverse proxy with auth.
+host = "127.0.0.1"
+port = 8089
+
+# Snapshot writer cadence
+snapshot_interval_seconds = 900
+snapshot_period_days = 62
+
+[oracle]
+# AI used for productivity estimation ("how long would this have taken without
+# AI?"). Currently "codex" (via Codex CLI) or "claude" (when headless OAuth is
+# fixed). DeepSeek/GPT/Gemini via OpenRouter also work — see tools/oracle-*.py.
+provider = "codex"
+
+# Sandbox mode for the oracle subprocess. read-only is safest.
+sandbox = "read-only"
+
+# ===========================================================================
+# NOTE: in v0.1 the runtime does NOT read this TOML file. The values below
+# document the intended config layer; a real loader lands in v0.2. For now,
+# override at runtime via environment variables (set before launching the
+# backend):
+#
+#   $env:CLAUDE_MONTHLY_SUBSCRIPTION_USD = "100"   # Claude Max 5x
+#   $env:OPENAI_MONTHLY_SUBSCRIPTION_USD = "20"    # ChatGPT Plus
+#
+# Defaults assume Claude Max 20x + ChatGPT Pro = $400/mo combined. If you
+# pay less, set lower values, or your "savings vs API" number will be
+# overstated.
+# ===========================================================================
+
+[providers.anthropic]
+# Monthly subscription cost in USD. Used for "subscription pro-rated" savings.
+# Examples: Claude Pro = 20, Claude Max 5x = 100, Claude Max 20x = 200.
+subscription_usd = 200.0
+
+[providers.openai]
+# ChatGPT Plus = 20, ChatGPT Pro = 200, API-only = 0.
+subscription_usd = 200.0
+
+[providers.openrouter]
+# Pay-as-you-go. Leave 0 unless you want to amortize a fixed credit topup.
+subscription_usd = 0.0
+
+[dashboard]
+# Currency conversion target for non-USD rendering. Set to empty string to
+# disable conversion. Conversion rate fetched daily from cbr-xml-daily.ru (RU
+# central bank) — replace endpoint if you need a different source.
+display_currency = "RUB"
+
+[hooks]
+# Where Claude Code stores per-project state. Default works for stock Claude
+# Code; override if you've moved ~/.claude.
+claude_projects_dir = "~/.claude/projects"
