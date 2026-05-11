@@ -244,6 +244,40 @@ get_header();
   .ma-hero-title { color: var(--text); font-family: 'Manrope', sans-serif; font-weight: 700; font-size: 22px; letter-spacing: -0.01em; margin: 4px 0 8px; }
   .ma-hero-sub { color: var(--text-dim); font-family: 'Inter', sans-serif; font-size: 13px; line-height: 1.55; max-width: 720px; }
   .ma-hero-sub code { background: rgba(0, 212, 255, 0.08); padding: 1px 6px; border-radius: 3px; font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--cyan); }
+  .ma-hero-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 14px;
+  }
+  .ma-kpi-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    min-height: 30px;
+    padding: 6px 9px;
+    border: 1px solid rgba(0, 212, 255, 0.22);
+    border-radius: 5px;
+    background: rgba(0, 212, 255, 0.04);
+    font-family: 'JetBrains Mono', monospace;
+    white-space: nowrap;
+  }
+  .ma-kpi-badge .k {
+    color: var(--text-muted);
+    font-size: 9px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+  .ma-kpi-badge .v {
+    color: var(--cyan);
+    font-size: 11px;
+    font-weight: 700;
+  }
+  .ma-kpi-badge.signal {
+    border-color: rgba(106, 255, 211, 0.34);
+    background: rgba(106, 255, 211, 0.035);
+  }
+  .ma-kpi-badge.signal .v { color: var(--signal); }
   .ma-rate-info { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--text-muted); letter-spacing: 0.1em; margin-top: 10px; padding-top: 8px; border-top: 1px dashed rgba(0, 212, 255, 0.1); }
   .ma-rate-info .v { color: var(--cyan); }
   .ma-data-source {
@@ -629,6 +663,28 @@ get_header();
       <code>стресс</code> — мат и закипание в стенограммах. Живой поток шуршит локально на 8089.
       На экране — только снимок, чтобы видеть масштаб.
     </div>
+    <div class="ma-hero-badges" aria-label="Snapshot highlights">
+      <span class="ma-kpi-badge">
+        <span class="k" data-ma-i18n="hero_badge_sources">источники</span>
+        <span class="v"><span data-hero-provider-count><?php echo count( $providers ); ?></span></span>
+      </span>
+      <span class="ma-kpi-badge">
+        <span class="k" data-ma-i18n="hero_badge_sessions">сессии оценены</span>
+        <span class="v"><span data-hero-sessions-covered><?php echo (int) $productivity['sessions_covered']; ?></span>/<span data-hero-sessions-total><?php echo (int) $productivity['sessions_total']; ?></span></span>
+      </span>
+      <span class="ma-kpi-badge signal">
+        <span class="k" data-ma-i18n="hero_badge_multiplier">множитель</span>
+        <span class="v">×<span data-hero-multiplier><?php echo number_format( $productivity['multiplier'], 1 ); ?></span></span>
+      </span>
+      <span class="ma-kpi-badge signal">
+        <span class="k" data-ma-i18n="hero_badge_savings">чистая экономия</span>
+        <span class="v" data-usd="<?php echo esc_attr( $totals['savings_usd'] ); ?>" data-hero-savings></span>
+      </span>
+      <span class="ma-kpi-badge">
+        <span class="k" data-ma-i18n="hero_badge_privacy">публикация</span>
+        <span class="v" data-ma-i18n="hero_badge_privacy_value">public-safe</span>
+      </span>
+    </div>
     <div class="ma-rate-info">
       <span data-ma-i18n="rate_label">Курс ЦБ РФ:</span>
       <span class="v">1 USD = <?php echo number_format( $rate, 2, '.', ' ' ); ?> ₽</span>
@@ -971,6 +1027,12 @@ get_header();
       mood_frustrated_calm: 'недовольство → спокойствие',
       meta: '4 ИСТОЧНИКА · 3 ОСИ ОЦЕНКИ · СНИМОК ДЛЯ ПУБЛИКАЦИИ',
       hero_sub: 'ОПЕРАЦИОННЫЙ ЖУРНАЛ. После каждой сессии остаются три цифры: <code>деньги</code> — API-эквивалент и стоимость подписок, <code>часы</code> — активное время против ручной оценки, <code>стресс</code> — агрегированный эмоциональный след. На странице только обезличенный snapshot без текстов переписок.',
+      hero_badge_sources: 'источники',
+      hero_badge_sessions: 'сессии оценены',
+      hero_badge_multiplier: 'множитель',
+      hero_badge_savings: 'чистая экономия',
+      hero_badge_privacy: 'публикация',
+      hero_badge_privacy_value: 'public-safe',
       rate_label: 'Курс ЦБ РФ:',
       rate_note: '(используется для конвертации в рублях; обновляется раз в 12 часов)',
       ds_loading: 'проверяю снимок…',
@@ -1061,6 +1123,12 @@ get_header();
       mood_frustrated_calm: 'annoyed → calm',
       meta: '4 SOURCES · 3 MEASUREMENT AXES · PUBLIC-READY SNAPSHOT',
       hero_sub: 'OPERATIONS LOG. Every session leaves three numbers: <code>money</code> — API equivalent and subscription cost, <code>hours</code> — active time versus manual estimate, <code>stress</code> — aggregated emotional trace. The page shows an anonymized snapshot without prompt or response text.',
+      hero_badge_sources: 'sources',
+      hero_badge_sessions: 'sessions scored',
+      hero_badge_multiplier: 'multiplier',
+      hero_badge_savings: 'net savings',
+      hero_badge_privacy: 'publishing',
+      hero_badge_privacy_value: 'public-safe',
       rate_label: 'CBR rate:',
       rate_note: '(used for RUB conversion; refreshed every 12 hours)',
       ds_loading: 'checking snapshot…',
@@ -1935,6 +2003,40 @@ get_header();
     });
   }
 
+  function applyHeroBadges(snap) {
+    if (!snap || typeof snap !== 'object') return;
+
+    const providers = snap.providers || {};
+    const providerKeys = Object.keys(providers);
+    const providerCount = providerKeys.length;
+    const p = (snap.productivity_periods && snap.productivity_periods.all)
+      ? snap.productivity_periods.all
+      : (snap.productivity || {});
+
+    const sourcesEl = document.querySelector('[data-hero-provider-count]');
+    if (sourcesEl && providerCount > 0) sourcesEl.textContent = fmtNumberRu(providerCount, 0);
+
+    const sessionsCoveredEl = document.querySelector('[data-hero-sessions-covered]');
+    if (sessionsCoveredEl && p.sessions_covered != null) {
+      sessionsCoveredEl.textContent = fmtNumberRu(parseInt(p.sessions_covered, 10) || 0, 0);
+    }
+    const sessionsTotalEl = document.querySelector('[data-hero-sessions-total]');
+    if (sessionsTotalEl && p.sessions_total != null) {
+      sessionsTotalEl.textContent = fmtNumberRu(parseInt(p.sessions_total, 10) || 0, 0);
+    }
+
+    const multiplier = finiteNumber(p.multiplier);
+    const multiplierEl = document.querySelector('[data-hero-multiplier]');
+    if (multiplierEl && multiplier !== null && multiplier > 0) {
+      multiplierEl.textContent = fmtNumberRu(multiplier, 1);
+    }
+
+    const savingsEl = document.querySelector('[data-hero-savings]');
+    if (savingsEl && snap.totals && snap.totals.savings_usd != null) {
+      savingsEl.dataset.usd = String(snap.totals.savings_usd);
+    }
+  }
+
   function applyTodayToTodayAttrs(snap) {
     if (!snap.today) return;
     const t = snap.today;
@@ -2037,6 +2139,7 @@ get_header();
     applyTotalsToBaseAttrs(snap);
     applyProviders(snap);
     applyProductivityToBaseAttrs(snap);
+    applyHeroBadges(snap);
     applyTodayToTodayAttrs(snap);
 
     // 3. Refresh standalone scalar panels (budget, sentiment) directly
