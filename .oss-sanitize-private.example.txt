@@ -1,0 +1,43 @@
+# Private sanitization rules — local-only.
+#
+# Copy this file to `.oss-sanitize-private.txt` (gitignored) and add your
+# environment-specific scrub patterns. Each non-empty, non-comment line is
+# one rule with the format:
+#
+#     <regex-pattern> | <replacement> | <description>
+#
+# The regex is a Python `re` pattern. Replacement is the literal string
+# (supports backrefs like `\1`). Description is free-form for logs.
+#
+# WHEN TO USE: when you want to scrub specific personal identifiers from
+# the tracked files in your fork (NAS IPs, customer codenames, your
+# username, your blog domain). These are TOO SPECIFIC to ship as
+# defaults in OSS — see `GENERIC_RULES` in tools/oss-sanitize.py for the
+# safe-to-share patterns that already apply.
+#
+# CYRILLIC INFLECTIONS: list each form explicitly. The bot does not do
+# lemmatization. For a hypothetical client `Acmecorp` in Russian, you would
+# need to list each inflected form (Акмекорп, Акмекорпа, Акмекорпу, ...) on
+# separate lines.
+
+# === example rules — replace with your own and remove these ===
+
+# NAS LAN host (your specific IP)
+# 192\.168\.1\.130:(\d+) | localhost:\1 | NAS LAN with port → localhost
+# 192\.168\.1\.130 | localhost | NAS LAN bare → localhost
+
+# Your Gitea/GitLab on NAS
+# http://nas\.local:3000/myorg/ | https://github.com/<your-org>/ | Gitea → GitHub placeholder
+
+# Your blog domain
+# myblog\.example | <your-blog>.example | Blog domain
+
+# Your GitHub username  (not yours-to-share if forks differ)
+# myusername | <your-org> | GitHub username
+
+# Customer codenames (one inflection per line)
+# (?<![\wЀ-ӿ])AcmeCorp(?![\wЀ-ӿ]) | <client> | Acme full
+# (?<![\wЀ-ӿ])acme-corp(?![\wЀ-ӿ]) | <client> | Acme kebab
+
+# Your local paths (after generic [A-Z]:/path catches the rest)
+# H:[/\\]wordpress[/\\]wp-data | <wp_root>/wp-data | WP install root

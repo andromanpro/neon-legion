@@ -15,25 +15,57 @@ import sys
 from pathlib import Path
 
 
-DEFAULT_SNAPSHOT = Path(r"H:\wordpress-androman\wp-data\wp-content\uploads\multi-agent\snapshot.json")
+# Default snapshot location. Override via --snapshot if your WordPress install
+# uses a different uploads directory.
+DEFAULT_SNAPSHOT = Path("dashboard/snapshot.json")
 
+# Generic privacy patterns — apply to any snapshot. Personal terms (specific
+# usernames, customer codenames, internal IDs) belong in your own private
+# blocklist loaded via --extra-terms; this file MUST NOT bake them in.
 PATTERNS = {
     "windows_path": re.compile(r"[A-Za-z]:[\\/][^\"'\s<>]+"),
     "user_profile": re.compile(r"C:[\\/]Users[\\/][^\"'\s<>]+", re.IGNORECASE),
-    "nas_drive": re.compile(r"\b[HF]:[\\/][^\"'\s<>]+", re.IGNORECASE),
+    "unix_home": re.compile(r"/(?:home|users)/[\w\-+./]+", re.IGNORECASE),
     "email": re.compile(r"\b[\w.+\-]+@[\w\-]+\.[\w\-.]+\b"),
     "api_token": re.compile(r"\b(sk_|pk_|ghp_|gho_|github_pat_)\w{16,}\b"),
-    "telegram_id": re.compile(r"\btelegram:\d+\b|\b422958213\b", re.IGNORECASE),
+    "telegram_id": re.compile(r"\btelegram:\d+\b"),
     "raw_message_id": re.compile(r"\bmsg_[A-Za-z0-9]{12,}\b"),
     "raw_session_id": re.compile(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b", re.IGNORECASE),
-    "private_name": re.compile(r"\b(Roman|Roono|androman)\b", re.IGNORECASE),
-    "private_workspace": re.compile(r"\bWorkAI\b", re.IGNORECASE),
+    "private_lan_ip": re.compile(r"\b(?:10|172\.(?:1[6-9]|2[0-9]|3[01])|192\.168)\.\d{1,3}\.\d{1,3}\b"),
 }
+
+
+def load_extra_patterns(path: Path | None) -> dict:
+    """Load user-specific terms from a blocklist file (one literal per line,
+    # comments allowed). Compiled as case-insensitive whole-word patterns."""
+    if path is None or not path.exists():
+        return {}
+    extra: dict = {}
+    raw = path.read_text(encoding="utf-8")
+    for i, line in enumerate(raw.splitlines(), start=1):
+        s = line.strip()
+        if not s or s.startswith("#"):
+            continue
+        # Whole-word, Cyrillic-aware
+        extra[f"private_term_{i}"] = re.compile(
+            r"(?<![\wЀ-ӿ])" + re.escape(s) + r"(?![\wЀ-ӿ])",
+            re.IGNORECASE,
+        )
+    return extra
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--snapshot", type=Path, default=DEFAULT_SNAPSHOT)
+    parser.add_argument(
+        "--extra-terms",
+        type=Path,
+        default=None,
+        help="Optional blocklist file (one literal term per line). Compiled as "
+             "case-insensitive whole-word patterns. Inflected languages (RU, DE, "
+             "FI, ...) need each form listed explicitly — the matcher does no "
+             "lemmatization.",
+    )
     return parser.parse_args(argv)
 
 
@@ -55,8 +87,11 @@ def main(argv: list[str]) -> int:
         print(f"not valid JSON: {exc}", file=sys.stderr)
         return 2
 
+    all_patterns = dict(PATTERNS)
+    all_patterns.update(load_extra_patterns(args.extra_terms))
+
     findings = []
-    for name, pattern in PATTERNS.items():
+    for name, pattern in all_patterns.items():
         for match in pattern.finditer(text):
             findings.append((name, match.group(0), preview(text, match.start(), match.end())))
 
