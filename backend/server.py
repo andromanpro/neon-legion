@@ -594,7 +594,10 @@ def build_health():
 # WP fetches this JSON and overrides PHP-baked mock values via JS.
 # Atomic write: tmp + os.replace to avoid the WP page seeing a half-written file.
 
-_TASK_DESCRIPTION_FALLBACK = "Phase 3 cyberpunk dashboard"
+# Generic placeholder for `today.top_session` when no real description is
+# available. Must not reference any internal phase / project codename — this
+# string appears in the public snapshot under --public mode.
+_TASK_DESCRIPTION_FALLBACK = "AI coding session"
 # Lowercased — comparison happens case-insensitively in _models_with_pct.
 _SYNTHETIC_MODELS = {"<synthetic>", "synthetic", "unknown", ""}
 _DESC_MAX_LEN = 120
@@ -602,12 +605,15 @@ _PATTERN_PATH_WIN = re.compile(r'(?<![\w/])[A-Za-z]:[\\/][\w\\/.\-+~]*', re.IGNO
 _PATTERN_PATH_UNIX = re.compile(r'(?<![\w/])(?:~|/(?:home|usr|opt|var|etc)(?:/[\w\-+./]*)?)', re.IGNORECASE)
 _PATTERN_EMAIL = re.compile(r'\b[\w.+\-]+@[\w\-]+\.[\w\-.]+\b')
 _PATTERN_TOKEN = re.compile(r'\b(sk_|pk_|ghp_|gho_|github_pat_)\w{16,}\b')
-_PUBLIC_TERM_REPLACEMENTS = (
-    (re.compile(r'\bWorkAI\b', re.IGNORECASE), "workspace"),
-    (re.compile(r'\bRoman\b', re.IGNORECASE), "the user"),
-    (re.compile(r'\bRoono\b', re.IGNORECASE), "the user"),
-    (re.compile(r'\bandroman\b', re.IGNORECASE), "site"),
-)
+# Personal-identifier scrub defaults are intentionally empty for OSS users:
+# add your own via --customers-blocklist (one entry per line). For Cyrillic /
+# accent inflections, list each form explicitly — the regex matches whole-word
+# case-insensitive without lemmatization.
+#
+# Example: if you want every mention of "AcmeCorp" or "acme-corp" in a sessions
+# description scrubbed to <client>, write a line `AcmeCorp` AND `acme-corp` in
+# the blocklist file.
+_PUBLIC_TERM_REPLACEMENTS: tuple = ()
 
 
 def load_or_create_salt(path):

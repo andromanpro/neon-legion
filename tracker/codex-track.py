@@ -27,11 +27,21 @@ TRACKER_DIR = PROJECT_ROOT / "tracker"
 EVENTS_FILE = TRACKER_DIR / "codex-events.jsonl"
 LOCK_FILE = TRACKER_DIR / ".codex-events.lock"
 
+# Pricing per million tokens — used to compute "what API would have cost" if
+# the user paid OpenAI per token instead of via a ChatGPT subscription. These
+# defaults track GPT-5.5 (gpt-5.5) rates as of 2026-Q2:
+#   input          $10 / 1M
+#   cached_input   $2.50 / 1M  (90% cache discount)
+#   output         $30 / 1M
+#   reasoning      $30 / 1M    (charged at output rate)
+# Source: OpenAI pricing page, capture from 2026-05. Override per environment
+# by setting OPENAI_TOKEN_PRICE_{INPUT,CACHED_INPUT,OUTPUT,REASONING} (USD per
+# million tokens) before launching the wrapper. See `_load_pricing()` below.
 PRICING = {
-    "input": 10.0 / 1_000_000,
-    "cached_input": 2.5 / 1_000_000,
-    "output": 30.0 / 1_000_000,
-    "reasoning": 30.0 / 1_000_000,
+    "input": float(os.environ.get("OPENAI_TOKEN_PRICE_INPUT", 10.0)) / 1_000_000,
+    "cached_input": float(os.environ.get("OPENAI_TOKEN_PRICE_CACHED_INPUT", 2.5)) / 1_000_000,
+    "output": float(os.environ.get("OPENAI_TOKEN_PRICE_OUTPUT", 30.0)) / 1_000_000,
+    "reasoning": float(os.environ.get("OPENAI_TOKEN_PRICE_REASONING", 30.0)) / 1_000_000,
 }
 
 LOCK_TIMEOUT_SECONDS = 10.0
@@ -358,7 +368,16 @@ def main(argv: list[str]) -> int:
                 proc.kill()
                 proc.wait()
     if proc.poll() is None:
-        proc.wait()
+        # DeepSeek audit C2: bounded wait — if the wrapped codex process hangs
+        # past 10s after stdout closes, kill it rather than block forever.
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                pass  # last-ditch: leak the child rather than hang the wrapper
     duration_ms = int((time.time() - start_ts) * 1000)
     exit_code = 130 if interrupted and proc.returncode == 0 else proc.returncode
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Controlled bridge from openclaw workspace to F:/WorkAI and Codex CLI.
+"""Controlled bridge from openclaw workspace to <workspace> and Codex CLI.
 
 openclaw runs on the NAS and cannot see the Windows F: drive directly. This
 bridge watches a shared NAS folder, processes constrained JSON requests on the
@@ -22,9 +22,9 @@ from pathlib import Path
 from typing import Any
 
 
-DEFAULT_WORKAI_ROOT = Path(os.environ.get("WORKAI_ROOT", "F:/WorkAI"))
+DEFAULT_WORKAI_ROOT = Path(os.environ.get("WORKAI_ROOT", "<workspace>"))
 DEFAULT_BRIDGE_ROOT = Path(
-    os.environ.get("OPENCLAW_CODEX_BRIDGE", "H:/openclaw/workspace/codex-bridge")
+    os.environ.get("OPENCLAW_CODEX_BRIDGE", "<openclaw_share>/workspace/codex-bridge")
 )
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 MAX_READ_BYTES = 200_000
@@ -257,7 +257,7 @@ def find_rg() -> str:
     found = shutil.which("rg")
     if found:
         return found
-    bundled = Path("C:/Users/Roono/AppData/Local/OpenAI/Codex/bin/rg.exe")
+    bundled = Path("<user_home>/AppData/Local/OpenAI/Codex/bin/rg.exe")
     if bundled.exists():
         return str(bundled)
     raise BridgeError("rg executable not found")
@@ -568,14 +568,18 @@ def action_codex_cancel(
     pid = state.get("runner_pid")
     if not isinstance(pid, int) or pid <= 0:
         raise BridgeError(f"job has no runner_pid: {job_id}")
-    completed = subprocess.run(
-        ["taskkill", "/PID", str(pid), "/T", "/F"],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        check=False,
-    )
+    try:
+        completed = subprocess.run(
+            ["taskkill", "/PID", str(pid), "/T", "/F"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+            timeout=15,  # DeepSeek audit C3: bounded — taskkill must not hang the bridge
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise BridgeError(f"taskkill timed out after 15s for pid {pid}") from exc
     write_job_state(
         job_dir,
         "cancelled",

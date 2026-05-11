@@ -204,6 +204,12 @@ def dispatch_estimator(session_id: str, transcript_path: str) -> None:
     else:
         popen_kwargs["start_new_session"] = True
 
+    # Fire-and-forget dispatch (the hook must return quickly so SessionStart
+    # isn't blocked). Popen has no `timeout` parameter — the launched
+    # estimate-task.py has its OWN subprocess timeouts (codex exec capped at
+    # 180s, see tracker/estimate-task.py:run_oracle). If a future change
+    # removes those inner timeouts, this Popen becomes a resource leak vector.
+    # DeepSeek audit C1 — accepted with the inner-timeout invariant documented.
     try:
         with log_path.open("a", encoding="utf-8", newline="\n") as log_file:
             subprocess.Popen(command, stdout=log_file, **popen_kwargs)
