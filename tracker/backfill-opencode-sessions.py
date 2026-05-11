@@ -18,11 +18,14 @@ from pathlib import Path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT_ROOT))
+from tools import config as cfg  # noqa: E402
+
 TRACKER_DIR = PROJECT_ROOT / "tracker"
 EVENTS_FILE = TRACKER_DIR / "opencode-events.jsonl"
 def _default_opencode_db() -> Path:
     """OpenCode default DB path per OS. Override via OPENCODE_DB_PATH env var."""
-    env = os.environ.get("OPENCODE_DB_PATH")
+    env = cfg.get_legacy_env("OPENCODE_DB_PATH")
     if env:
         return Path(env)
     home = Path.home()
@@ -30,7 +33,7 @@ def _default_opencode_db() -> Path:
     # Windows: %APPDATA%\opencode\opencode.db (recent) or %LOCALAPPDATA%\opencode\opencode.db
     # Fall back to ~/.local/share which OpenCode also creates on cross-platform installs.
     if os.name == "nt":
-        appdata = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA")
+        appdata = cfg.get_legacy_env("LOCALAPPDATA") or cfg.get_legacy_env("APPDATA")
         if appdata:
             candidate = Path(appdata) / "opencode" / "opencode.db"
             if candidate.exists():

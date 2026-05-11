@@ -23,6 +23,9 @@ from pathlib import Path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT_ROOT))
+from tools import config as cfg  # noqa: E402
+
 TRACKER_DIR = PROJECT_ROOT / "tracker"
 EVENTS_FILE = TRACKER_DIR / "codex-events.jsonl"
 LOCK_FILE = TRACKER_DIR / ".codex-events.lock"
@@ -38,10 +41,10 @@ LOCK_FILE = TRACKER_DIR / ".codex-events.lock"
 # by setting OPENAI_TOKEN_PRICE_{INPUT,CACHED_INPUT,OUTPUT,REASONING} (USD per
 # million tokens) before launching the wrapper. See `_load_pricing()` below.
 PRICING = {
-    "input": float(os.environ.get("OPENAI_TOKEN_PRICE_INPUT", 10.0)) / 1_000_000,
-    "cached_input": float(os.environ.get("OPENAI_TOKEN_PRICE_CACHED_INPUT", 2.5)) / 1_000_000,
-    "output": float(os.environ.get("OPENAI_TOKEN_PRICE_OUTPUT", 30.0)) / 1_000_000,
-    "reasoning": float(os.environ.get("OPENAI_TOKEN_PRICE_REASONING", 30.0)) / 1_000_000,
+    "input": cfg.get_legacy_env("OPENAI_TOKEN_PRICE_INPUT", 10.0, float) / 1_000_000,
+    "cached_input": cfg.get_legacy_env("OPENAI_TOKEN_PRICE_CACHED_INPUT", 2.5, float) / 1_000_000,
+    "output": cfg.get_legacy_env("OPENAI_TOKEN_PRICE_OUTPUT", 30.0, float) / 1_000_000,
+    "reasoning": cfg.get_legacy_env("OPENAI_TOKEN_PRICE_REASONING", 30.0, float) / 1_000_000,
 }
 
 LOCK_TIMEOUT_SECONDS = 10.0
@@ -143,7 +146,7 @@ def resolve_model(args: list[str], events: list[dict]) -> str:
     if arg_model:
         return arg_model
 
-    env_model = os.environ.get("CODEX_MODEL")
+    env_model = cfg.get_legacy_env("CODEX_MODEL")
     if env_model:
         return env_model
 
@@ -167,7 +170,7 @@ def resolve_approval_mode(args: list[str]) -> str:
     approval = (
         parse_option(args, "--approval-mode")
         or parse_option(args, "--ask-for-approval")
-        or os.environ.get("CODEX_APPROVAL_MODE")
+        or cfg.get_legacy_env("CODEX_APPROVAL_MODE")
         or parse_config_value("approval_mode")
         or parse_config_value("approval_policy")
     )
@@ -175,7 +178,7 @@ def resolve_approval_mode(args: list[str]) -> str:
 
 
 def subscription_type() -> str:
-    if os.environ.get("OPENAI_API_KEY") or os.environ.get("ANTHROPIC_API_KEY"):
+    if cfg.get_legacy_env("OPENAI_API_KEY") or cfg.get_legacy_env("ANTHROPIC_API_KEY"):
         return "api-key"
     return "chatgpt-pro"
 

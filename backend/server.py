@@ -14,6 +14,9 @@ from pathlib import Path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT_ROOT))
+from tools import config as cfg  # noqa: E402
+
 DASHBOARD_DIR = PROJECT_ROOT / "dashboard"
 sys.path.insert(0, str(PROJECT_ROOT / "tracker"))
 import summary  # noqa: E402
@@ -27,9 +30,12 @@ DEFAULT_DAYS = 1
 DEFAULT_SESSION_LIMIT = 20
 
 # Snapshot writer defaults — safe fallback path inside repo if user hasn't mounted H:/.
-SNAPSHOT_DEFAULT_INTERVAL = 900  # 15 minutes
-SNAPSHOT_DEFAULT_DAYS = 62
+SNAPSHOT_DEFAULT_INTERVAL = cfg.get("backend.snapshot_interval_seconds", 900, int)  # 15 minutes
+SNAPSHOT_DEFAULT_DAYS = cfg.get("backend.snapshot_period_days", 62, int)
 SNAPSHOT_DEFAULT_SESSIONS = 8
+SNAPSHOT_DEFAULT_PATH = cfg.get("paths.snapshot_output", None, str)
+SALT_FILE_DEFAULT = cfg.get("paths.salt_file", str(Path.home() / ".multi-agent-snapshot-salt"), str)
+CUSTOMERS_BLOCKLIST_DEFAULT = cfg.get("paths.customers_blocklist", None, str)
 
 
 if hasattr(sys.stdout, "reconfigure"):
@@ -54,11 +60,11 @@ def positive_int(value):
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Multi-agent tracker backend API")
-    parser.add_argument("--port", type=int, default=8089)
-    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--port", type=int, default=cfg.get("backend.port", 8089, int))
+    parser.add_argument("--host", default=cfg.get("backend.host", "127.0.0.1", str))
     parser.add_argument(
         "--snapshot-path",
-        default=None,
+        default=SNAPSHOT_DEFAULT_PATH,
         help="Write WP-shaped JSON snapshot here every --snapshot-interval seconds. "
              "Disabled if empty.",
     )
@@ -87,13 +93,13 @@ def parse_args():
     )
     parser.add_argument(
         "--salt-file",
-        default=str(Path.home() / ".multi-agent-snapshot-salt"),
+        default=SALT_FILE_DEFAULT,
         help="Path to file with salt for session_id hashing. Auto-generated (32 random bytes) "
              "if missing. Required when --public is set.",
     )
     parser.add_argument(
         "--customers-blocklist",
-        default=None,
+        default=CUSTOMERS_BLOCKLIST_DEFAULT,
         help="Optional path to file listing customer names to scrub from desc/top_session "
              "(one name per line, # comments allowed). Only used with --public.",
     )
@@ -622,7 +628,7 @@ def load_or_create_salt(path):
     Returns bytes. Atomic create (tmp + replace) to avoid readers observing a
     partial file. Permissions: 0600 on POSIX; on Windows best-effort chmod.
     """
-    p = Path(path)
+    p = Path(path).expanduser()
     if p.exists():
         data = p.read_bytes().strip()
         if len(data) >= 16:
