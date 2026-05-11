@@ -1,0 +1,28 @@
+# Manifest for running a task through the orchestrator.
+# Copy to your_task.toml, edit, run: `py tools/orchestrate.py run your_task.toml`
+
+[task]
+title = "Add X feature to Y module"
+description = """
+Long-form task description. Will be prepended to every role's prompt as
+the canonical task definition. Be specific about acceptance criteria.
+"""
+
+# Flow: roles run in this order, each receives prior deliverables as context.
+# For parallel/DAG flow, use [task.parallel] groups instead (see below).
+flow = ["architect", "developer", "reviewer", "approver"]
+
+# Optional: skip a role from the canonical flow (e.g. for trivial tasks)
+# skip = ["reviewer"]
+
+# Optional: extra context files attached to every role's prompt
+context_files = ["docs/architecture.md", "CONTRIBUTING.md"]
+
+[task.acceptance]
+# Free-form acceptance criteria. The orchestrator passes this verbatim to
+# architect and reviewer for verification.
+criteria = """
+- Tests pass
+- No new third-party dependencies
+- README updated with the new feature
+"""

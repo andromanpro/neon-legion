@@ -1,0 +1,35 @@
+# Copy this file to roles.toml and edit provider/model/invocation per machine.
+# roles.toml is local-only and ignored by git.
+
+[role.architect]
+provider = "anthropic"               # anthropic | openai | openrouter | human
+model = "claude-opus-4"              # provider-specific model id
+goal = "Plan tasks, write specs, review designs, synthesize narratives."
+backstory = "Senior software architect with 15+ years experience. Focuses on system design, edge cases, and long-term maintainability."
+deliverables = ["task_spec.md", "review_report.md"]
+sandbox = "read-only"                # read-only | workspace-write | danger-full-access
+invocation = "claude-cli-headless"   # claude-cli-headless | codex-exec | opencode-run | human-relay
+
+[role.developer]
+provider = "openai"
+model = "gpt-5.5"
+goal = "Implement task specs, write tests, refactor code."
+backstory = "Senior software engineer. Implements cleanly, prefers stdlib, writes tests first when possible."
+deliverables = ["pull_request_diff.md", "test_results.md"]
+sandbox = "workspace-write"
+invocation = "codex-exec"
+
+[role.reviewer]
+provider = "openrouter"
+model = "deepseek/deepseek-v4-pro"
+goal = "Third-opinion review: security, money math, residual privacy, code quality."
+backstory = "Independent security reviewer. Finds what architect and developer missed. Opinionated, terse, cites file:line for every issue."
+deliverables = ["audit_report.md"]
+sandbox = "read-only"
+invocation = "opencode-run"
+
+[role.approver]
+provider = "human"
+goal = "Final merge gate."
+backstory = "The user. Reads outputs, decides ship/no-ship."
+invocation = "human-relay"

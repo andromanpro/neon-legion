@@ -121,6 +121,25 @@ Use Claude Code / Codex CLI as normal — events accumulate in
 > subscription costs, oracle provider). A real config loader is on the
 > v0.2 roadmap; for now pass overrides as CLI flags to `backend/server.py`.
 
+## Roles + orchestrator (v0.2)
+
+`neon-legion` ships a thin orchestration layer:
+
+1. Copy `roles.example.toml` → `roles.toml` (gitignored). Edit provider/model
+   per role. Out of the box: Claude as architect, Codex as developer,
+   DeepSeek as reviewer, you as approver.
+2. Copy `prompts/MANIFEST.example.toml` → `your_task.toml`. Describe the
+   task. Pick the flow (default: architect → developer → reviewer → approver).
+3. Run: `py tools/orchestrate.py run your_task.toml`
+
+Each role's output lands in `orchestrate-runs/<run-id>/`. Human-relay roles
+(approver, or any model that hits an OAuth wall) pause the flow — you fill
+the answer file, then `py tools/orchestrate.py resume <run-id>` picks it up.
+
+The orchestrator is single-shot, stateless, file-driven. No daemon, no
+scheduler, no database. It aligns with the rest of the project: stdlib only,
+local-first, no SaaS.
+
 ## Features
 
 - **Multi-vendor aggregation** — Claude, Codex, OpenClaw, OpenCode in one
@@ -243,6 +262,27 @@ alias codex='python tracker/codex-track.py'
 python backend/server.py --snapshot-path dashboard/snapshot.json
 # открой dashboard/index.html
 ```
+
+### Роли + оркестратор (v0.2)
+
+В `neon-legion` есть тонкий слой оркестрации:
+
+1. Скопируй `roles.example.toml` → `roles.toml` (gitignored). Настрой
+   provider/model для каждой роли. По умолчанию: Claude как architect,
+   Codex как developer, DeepSeek как reviewer, ты как approver.
+2. Скопируй `prompts/MANIFEST.example.toml` → `your_task.toml`. Опиши
+   задачу и выбери flow (по умолчанию: architect → developer → reviewer
+   → approver).
+3. Запусти: `py tools/orchestrate.py run your_task.toml`
+
+Выход каждой роли сохраняется в `orchestrate-runs/<run-id>/`. Human-relay
+роли (approver или модель, упершаяся в OAuth) ставят flow на паузу: кладёшь
+ответ в нужный `.md` файл, затем `py tools/orchestrate.py resume <run-id>`
+продолжает выполнение.
+
+Оркестратор одноразовый, файловый и без состояния вне run-директории. Без
+демона, scheduler'а и базы данных. Как и остальной проект: stdlib only,
+local-first, без SaaS.
 
 ### Что внутри
 

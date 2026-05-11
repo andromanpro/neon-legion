@@ -6,9 +6,11 @@ tracker/tasks.json
 tracker/.estimation-logs/
 tracker/private/
 prompts/private/
+orchestrate-runs/
 
 # Per-environment config / agent notes (use config.example.toml + CLAUDE.example.md as templates)
 config.toml
+roles.toml
 CLAUDE.local.md
 .env
 .env.local
