@@ -1,12 +1,20 @@
-# CLAUDE.md — agent context for contributors
+# CLAUDE.md — Claude-specific entry point
 
-This file is read automatically by Claude Code (and similar agentic IDEs)
-when working in this repo. It defines the project's identity, conventions,
-and the contracts each agent role must respect.
+**Canonical project context lives in [`AGENTS.md`](AGENTS.md).** That file
+is read by every agent (Codex, OpenCode, OpenClaw, Aider, Cody). Claude
+Code reads this file (`CLAUDE.md`); to avoid drift, this file is a thin
+pointer. If you edit one, edit the other.
 
 Personal notes (memory, customer references, history) belong in
 `CLAUDE.local.md` (gitignored). See `CLAUDE.local.md.example` as a starting
 template if you want to bootstrap your own local agent notes.
+
+---
+
+The sections below duplicate the high-signal parts of `AGENTS.md` so
+Claude has them inline; for the full contract (sandbox boundaries, file
+protocols, bridge details, "any agent can be orchestrator") — read
+`AGENTS.md`.
 
 ## Project identity
 

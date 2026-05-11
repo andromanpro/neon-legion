@@ -2,7 +2,7 @@
 
 ![neon-legion cyberpunk command banner](docs/branding/hero-banner.svg)
 
-> **Your personal AI legion. Almost no swearing.**
+> **Your personal AI legion. Almost no fucking swearing. _(Yes, we count yours.)_**
 >
 > Wire up Claude Code, Codex CLI, OpenClaw, OpenCode, and DeepSeek into one
 > command-line legion with roles (architect / developer / reviewer /
@@ -213,7 +213,7 @@ sessions without their explicit consent.
 
 # 🇷🇺 По-русски
 
-# neon-legion — твоя личная армия. Почти без мата.
+# neon-legion — твоя личная армия. Почти без ебать-колотить. (Да, мы считаем маты.)
 
 Связывает **Claude Code + Codex CLI + OpenClaw + OpenCode + DeepSeek** в
 один командный пункт с ролями (architect / developer / reviewer / approver),
