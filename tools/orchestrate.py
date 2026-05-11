@@ -152,9 +152,14 @@ def create_run_dir(new_run_id: str) -> Path:
 def resolve_context_path(raw_path: str) -> Path:
     candidate = Path(raw_path)
     path = candidate if candidate.is_absolute() else PROJECT_ROOT / candidate
-    resolved = path.resolve()
+    # A1 (DeepSeek audit): on Windows `Path.resolve()` does NOT follow
+    # directory junctions, so a junction inside PROJECT_ROOT pointing
+    # outside would bypass the relative_to check. `os.path.realpath`
+    # resolves junctions on Python 3.8+ and symlinks on all platforms.
+    resolved = Path(os.path.realpath(path))
+    project_real = Path(os.path.realpath(PROJECT_ROOT))
     try:
-        resolved.relative_to(PROJECT_ROOT.resolve())
+        resolved.relative_to(project_real)
     except ValueError as exc:
         raise ValueError(f"context file escapes project root: {raw_path}") from exc
     return resolved
@@ -341,7 +346,8 @@ def execute_flow(
             error_path = write_error_file(run_dir, index, role_name, result)
             step.update({"status": "failed", "error_path": str(error_path)})
             update_state(run_dir, state, "failed")
-            print(f"failed at role {role_name}; error written to {error_path}")
+            # E2 (DeepSeek audit): include run_id so user can inspect run dir.
+            print(f"failed at role {role_name}; run_id={state['run_id']}; error written to {error_path}")
             return 1
 
         step.update({"status": "completed", "output_path": str(out_path)})
@@ -378,6 +384,11 @@ def command_run(args: argparse.Namespace) -> int:
     if getattr(args, "list_roles", False):
         print_roles(roles, roles_path)
         return 0
+    if args.manifest is None:
+        # D4 (DeepSeek audit): manifest is required for actual run; only
+        # --list-roles is OK without it.
+        print("error: manifest path required (or pass --list-roles)", file=sys.stderr)
+        return 2
     manifest_path = (PROJECT_ROOT / args.manifest).resolve() if not args.manifest.is_absolute() else args.manifest
     manifest = load_manifest(manifest_path)
     flow = planned_flow(manifest)
@@ -460,7 +471,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--list-roles", action="store_true", help="print parsed role definitions and exit")
     sub = parser.add_subparsers(dest="command")
     run = sub.add_parser("run", help="start a new orchestrator run")
-    run.add_argument("manifest", type=Path)
+    # D4 (DeepSeek audit): manifest is nargs='?' so `run --list-roles` works
+    # without requiring a dummy manifest path.
+    run.add_argument("manifest", type=Path, nargs="?", default=None)
     run.add_argument("--dry-run", action="store_true", help="print the planned flow without invoking roles")
     run.add_argument("--list-roles", action="store_true", help="print parsed role definitions and exit")
     resume = sub.add_parser("resume", help="resume a paused human-relay run")

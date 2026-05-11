@@ -1,5 +1,7 @@
 # neon-legion
 
+![neon-legion cyberpunk command banner](docs/branding/hero-banner.svg)
+
 > **Your personal AI legion. Almost no swearing.**
 >
 > Wire up Claude Code, Codex CLI, OpenClaw, OpenCode, and DeepSeek into one

@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-labelledby="socialTitle socialDesc">
+  <desc id="socialDesc">High-contrast social preview for neon-legion showing the title, slogan, shield monogram, command HUD lines, and a local-first dashboard strip.</desc>
+  <title id="socialTitle">neon-legion social card</title>
+  <defs>
+    <style><![CDATA[
+      .h{font-family:Inter,system-ui,sans-serif;font-size:104px;font-weight:900;letter-spacing:7px;fill:#F8FAFC}
+      .s{font-family:Inter,system-ui,sans-serif;font-size:31px;font-weight:750;fill:#F8FAFC}
+      .m{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:21px;font-weight:700;fill:#64FFDA}
+      .tiny{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:15px;fill:#F8FAFC}
+      .cyan{stroke:#00D4FF}.mag{stroke:#FF2EC4}.green{stroke:#64FFDA}.thin{fill:none;stroke-width:2}.hair{fill:none;stroke-width:1}
+    ]]></style>
+    <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#020617"/>
+      <stop offset="0.48" stop-color="#061a32"/>
+      <stop offset="1" stop-color="#210725"/>
+    </linearGradient>
+    <radialGradient id="burst" cx="78%" cy="45%" r="48%">
+      <stop offset="0" stop-color="#00D4FF" stop-opacity="0.38"/>
+      <stop offset="0.42" stop-color="#7C3AED" stop-opacity="0.16"/>
+      <stop offset="1" stop-color="#020617" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="scan" width="7" height="7" patternUnits="userSpaceOnUse">
+      <path d="M0 0H7" stroke="#F8FAFC" stroke-opacity="0.06"/>
+    </pattern>
+    <filter id="soft" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="4" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <rect width="1200" height="630" fill="url(#bg)"/>
+  <rect width="1200" height="630" fill="url(#burst)"/>
+  <rect width="1200" height="630" fill="url(#scan)"/>
+  <path d="M0 510H1200M0 550H1200M0 590H1200" class="cyan hair" opacity="0.35"/>
+  <path d="M70 630L460 425M220 630L540 425M370 630L620 425M520 630L700 425M670 630L780 425M820 630L860 425M970 630L940 425M1120 630L1020 425" class="mag hair" opacity="0.31"/>
+
+  <g transform="translate(78 98)">
+    <path d="M0 0H360L390 28H590" class="cyan thin" opacity="0.75"/>
+    <text x="2" y="126" class="h" fill="#00D4FF" opacity="0.45" filter="url(#soft)">NEON</text>
+    <text x="8" y="132" class="h" fill="#FF2EC4" opacity="0.38">NEON</text>
+    <text x="4" y="128" class="h">NEON</text>
+    <text x="0" y="242" class="h" fill="#00D4FF" opacity="0.42" filter="url(#soft)">LEGION</text>
+    <text x="7" y="248" class="h" fill="#FF2EC4" opacity="0.38">LEGION</text>
+    <text x="3" y="244" class="h">LEGION</text>
+    <text x="4" y="300" class="s">Your personal AI legion. Almost no swearing.</text>
+    <g transform="translate(4 348)">
+      <rect x="0" y="0" width="610" height="58" rx="5" fill="#020617" fill-opacity="0.78" stroke="#00D4FF" stroke-opacity="0.55"/>
+      <text x="23" y="38" class="m">5 providers / 1 dashboard / 0 SaaS</text>
+    </g>
+  </g>
+
+  <g transform="translate(808 80)" filter="url(#soft)">
+    <path d="M170 0L322 64V238C322 334 249 402 170 448C91 402 18 334 18 238V64Z" fill="#020617" fill-opacity="0.66" stroke="#00D4FF" stroke-width="5"/>
+    <path d="M170 51L275 96V231C275 291 228 342 170 376C112 342 65 291 65 231V96Z" fill="none" stroke="#FF2EC4" stroke-width="3"/>
+    <path d="M90 164H126L170 260V164H213V339H174L130 244V339H90Z" fill="#F8FAFC"/>
+    <path d="M235 164H279V296H340V339H235Z" fill="#64FFDA"/>
+  </g>
+
+  <g transform="translate(918 346)">
+    <circle r="96" fill="none" stroke="#00D4FF" stroke-width="2" stroke-opacity="0.62"/>
+    <circle r="60" fill="none" stroke="#64FFDA" stroke-opacity="0.38"/>
+    <path d="M-96 0H96M0 -96V96" stroke="#F8FAFC" stroke-opacity="0.15"/>
+    <path d="M0 0L76 -54" stroke="#64FFDA" stroke-width="3"/>
+    <g fill="#00D4FF"><circle cx="-47" cy="-32" r="6"/><circle cx="51" cy="-42" r="6"/><circle cx="62" cy="30" r="6"/><circle cx="-26" cy="58" r="6"/><circle cx="11" cy="-5" r="6"/></g>
+    <text x="0" y="132" class="tiny" text-anchor="middle">LOCAL COMMAND BRIDGE</text>
+  </g>
+  <g opacity="0.72" class="thin">
+    <path d="M36 36H98M36 36V98" class="cyan"/>
+    <path d="M1164 36H1102M1164 36V98" class="mag"/>
+    <path d="M36 594H98M36 594V532" class="mag"/>
+    <path d="M1164 594H1102M1164 594V532" class="cyan"/>
+  </g>
+</svg>

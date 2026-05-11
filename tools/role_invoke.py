@@ -3,13 +3,24 @@
 
 from __future__ import annotations
 
+import json
 import os
+import re
 import secrets
 import shutil
 import subprocess
 import time
 from pathlib import Path
 from typing import Any
+
+# ANSI escape sequence regex (color codes, cursor moves, screen clears).
+# OpenCode and some CLIs emit these even when piped to non-tty; they corrupt
+# the deliverable files and pollute downstream role prompts.
+_ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[a-zA-Z]|\x1b\][^\x07]*\x07")
+
+
+def _strip_ansi(text: str) -> str:
+    return _ANSI_RE.sub("", text) if text else text
 
 
 def atomic_write_text(path: Path, text: str) -> None:
@@ -23,7 +34,19 @@ def atomic_write_text(path: Path, text: str) -> None:
 
 
 def _command(name: str) -> str:
-    return shutil.which(name) or name
+    """Resolve a CLI tool path; helpful error if not installed.
+
+    Falls back to the bare name so the OSError from subprocess.run still
+    has a recognizable command in its message — but in practice the caller
+    catches OSError and we want a clearer signal than "[WinError 2]".
+    """
+    found = shutil.which(name)
+    if found is None:
+        raise FileNotFoundError(
+            f"{name!r} not found on PATH. "
+            f"Install it or update your role's invocation in roles.toml."
+        )
+    return found
 
 
 def _error_from(completed: subprocess.CompletedProcess[str], prefix: str) -> str:
@@ -79,9 +102,42 @@ def _invoke_claude(prompt: str, output_path: Path) -> dict[str, Any]:
 
     ok = completed.returncode == 0
     if ok:
-        atomic_write_text(output_path, completed.stdout)
+        # B1 (DeepSeek audit): `claude -p --output-format json` returns
+        # {"response": "...", "cost_usd": ..., "usage": ...}. We must extract
+        # the response text — writing the raw JSON would pollute every
+        # downstream role's prompt context with metadata noise.
+        body = _extract_claude_response(completed.stdout)
+        atomic_write_text(output_path, body)
     error = None if ok else "Claude CLI failed. If this is an OAuth refresh issue, re-authenticate Claude Code and retry. " + _error_from(completed, "claude")
     return _result(ok=ok, exit_code=completed.returncode, started=started, output_path=output_path, error=error)
+
+
+def _extract_claude_response(stdout: str) -> str:
+    """Extract response text from `claude -p --output-format json` wrapper.
+
+    Format observed: {"response": "...", "result": "...", "content": [...], ...}.
+    We try several keys in order. Falls back to raw stdout if parse fails so
+    the user never silently loses data.
+    """
+    if not stdout:
+        return ""
+    try:
+        data = json.loads(stdout)
+    except (json.JSONDecodeError, ValueError):
+        return stdout  # not JSON, treat as plain text
+    if isinstance(data, dict):
+        # Try common response keys
+        for key in ("response", "result", "text", "output", "content"):
+            value = data.get(key)
+            if isinstance(value, str) and value:
+                return value
+            # Anthropic-style: content is a list of {type, text} blocks
+            if isinstance(value, list):
+                parts = [b.get("text", "") for b in value if isinstance(b, dict)]
+                joined = "".join(parts).strip()
+                if joined:
+                    return joined
+    return stdout  # unrecognized JSON shape, keep raw
 
 
 def _invoke_codex(role_config: dict[str, Any], prompt: str, output_path: Path) -> dict[str, Any]:
@@ -123,7 +179,11 @@ def _invoke_codex(role_config: dict[str, Any], prompt: str, output_path: Path) -
         if tmp_output.exists():
             os.replace(tmp_output, output_path)
         else:
-            atomic_write_text(output_path, completed.stdout)
+            # C2 (DeepSeek audit): Codex CLI stdout has ANSI + spinner chars.
+            # When --output-last-message file is missing (codex misbehaved),
+            # we fall back to stdout — but strip ANSI first so the deliverable
+            # is at least readable to downstream roles.
+            atomic_write_text(output_path, _strip_ansi(completed.stdout))
     elif tmp_output.exists():
         tmp_output.unlink(missing_ok=True)
     return _result(
@@ -194,7 +254,10 @@ def _invoke_opencode(role_config: dict[str, Any], prompt: str, output_path: Path
 
     ok = completed.returncode == 0
     if ok:
-        atomic_write_text(output_path, completed.stdout)
+        # B2 (DeepSeek audit): OpenCode emits ANSI escape sequences (\x1b[0m,
+        # \x1b[33m, ...) even when stdout is piped. They corrupt the
+        # deliverable file and pollute downstream role prompts.
+        atomic_write_text(output_path, _strip_ansi(completed.stdout))
     return _result(
         ok=ok,
         exit_code=completed.returncode,

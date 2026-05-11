@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="60" viewBox="0 0 1500 60" role="img" aria-labelledby="dividerTitle dividerDesc">
+  <desc id="dividerDesc">Subtle cyberpunk section divider with neon scanline rails, command ticks, a small shield mark, and five agent blips.</desc>
+  <title id="dividerTitle">neon-legion divider</title>
+  <defs>
+    <style><![CDATA[
+      .mono{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:10px;fill:#64FFDA}
+      .cyan{stroke:#00D4FF}.mag{stroke:#FF2EC4}.green{stroke:#64FFDA}.thin{fill:none;stroke-width:2}.hair{fill:none;stroke-width:1}
+    ]]></style>
+    <linearGradient id="rail" x1="0" x2="1" y1="0" y2="0">
+      <stop offset="0" stop-color="#020617" stop-opacity="0"/>
+      <stop offset="0.12" stop-color="#00D4FF" stop-opacity="0.62"/>
+      <stop offset="0.5" stop-color="#64FFDA" stop-opacity="0.85"/>
+      <stop offset="0.88" stop-color="#FF2EC4" stop-opacity="0.62"/>
+      <stop offset="1" stop-color="#020617" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <rect width="1500" height="60" fill="#020617" fill-opacity="0"/>
+  <path d="M64 30H1436" stroke="url(#rail)" stroke-width="2"/>
+  <path d="M64 24H256M1244 24H1436M64 36H256M1244 36H1436" class="hair" stroke="url(#rail)" opacity="0.52"/>
+  <g class="cyan hair" opacity="0.62">
+    <path d="M120 18V42M190 22V38M260 16V44M330 22V38M400 18V42M470 22V38M540 16V44M610 22V38"/>
+    <path d="M890 22V38M960 16V44M1030 22V38M1100 18V42M1170 22V38M1240 16V44M1310 22V38M1380 18V42"/>
+  </g>
+  <g transform="translate(750 30)">
+    <path d="M0 -24L38 -8V15C38 34 19 47 0 56C-19 47 -38 34 -38 15V-8Z" fill="#020617" stroke="#00D4FF" stroke-width="2"/>
+    <path d="M0 -13L23 -3V13C23 24 12 33 0 39C-12 33 -23 24 -23 13V-3Z" fill="none" stroke="#FF2EC4"/>
+    <text x="0" y="14" class="mono" text-anchor="middle">NL</text>
+  </g>
+  <g fill="#00D4FF">
+    <circle cx="676" cy="30" r="4"/><circle cx="708" cy="24" r="4"/><circle cx="792" cy="24" r="4"/><circle cx="824" cy="30" r="4"/><circle cx="750" cy="7" r="3"/>
+  </g>
+  <g class="mag thin" opacity="0.65">
+    <path d="M48 30H18M1452 30H1482"/>
+  </g>
+</svg>

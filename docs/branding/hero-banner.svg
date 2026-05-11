@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="500" viewBox="0 0 1500 500" role="img" aria-labelledby="heroTitle heroDesc">
+  <desc id="heroDesc">Cyberpunk command banner for neon-legion with a neon title, five agent blips, a shield mark, scanlines, and a synthwave command-grid horizon.</desc>
+  <title id="heroTitle">neon-legion hero banner</title>
+  <defs>
+    <style><![CDATA[
+      .headline{font-family:Inter,system-ui,sans-serif;font-size:92px;font-weight:900;letter-spacing:8px;fill:#F8FAFC}
+      .sub{font-family:Inter,system-ui,sans-serif;font-size:29px;font-weight:700;fill:#F8FAFC}
+      .ru{font-family:Inter,system-ui,sans-serif;font-size:20px;font-weight:600;fill:#64FFDA}
+      .mono{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:15px;fill:#64FFDA}
+      .tiny{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:12px;fill:#F8FAFC}
+      .cyan{stroke:#00D4FF}.mag{stroke:#FF2EC4}.green{stroke:#64FFDA}.white{stroke:#F8FAFC}
+      .thin{fill:none;stroke-width:2}.hair{fill:none;stroke-width:1}
+    ]]></style>
+    <linearGradient id="sky" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#020617"/>
+      <stop offset="0.55" stop-color="#07112a"/>
+      <stop offset="1" stop-color="#1b0b2f"/>
+    </linearGradient>
+    <radialGradient id="cyanFade" cx="75%" cy="42%" r="55%">
+      <stop offset="0" stop-color="#00D4FF" stop-opacity="0.32"/>
+      <stop offset="0.46" stop-color="#7C3AED" stop-opacity="0.14"/>
+      <stop offset="1" stop-color="#020617" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="magFade" cx="9%" cy="83%" r="65%">
+      <stop offset="0" stop-color="#FF2EC4" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#020617" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="scan" width="8" height="8" patternUnits="userSpaceOnUse">
+      <path d="M0 0H8" stroke="#F8FAFC" stroke-opacity="0.07"/>
+    </pattern>
+    <filter id="glow" x="-20%" y="-30%" width="140%" height="160%">
+      <feGaussianBlur stdDeviation="4" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <rect width="1500" height="500" fill="url(#sky)"/>
+  <rect width="1500" height="500" fill="url(#cyanFade)"/>
+  <rect width="1500" height="500" fill="url(#magFade)"/>
+  <rect width="1500" height="500" fill="url(#scan)" opacity="0.75"/>
+
+  <g opacity="0.45" class="cyan hair">
+    <path d="M0 392H1500M0 422H1500M0 452H1500M0 482H1500"/>
+    <path d="M80 500L610 360M260 500L700 360M440 500L790 360M620 500L880 360M800 500L970 360M980 500L1060 360M1160 500L1150 360M1340 500L1240 360"/>
+  </g>
+  <g opacity="0.28" class="mag hair">
+    <path d="M0 438H1500M0 468H1500"/>
+    <path d="M1470 500L1260 360M1260 500L1160 360M1040 500L1040 360"/>
+  </g>
+
+  <g transform="translate(80 76)">
+    <path d="M0 22H278L303 0H515" class="cyan thin" opacity="0.7"/>
+    <path d="M0 46H140L160 66H360" class="mag thin" opacity="0.55"/>
+    <text x="0" y="140" class="headline" fill="#00D4FF" opacity="0.45" filter="url(#glow)">NEON LEGION</text>
+    <text x="5" y="145" class="headline" fill="#FF2EC4" opacity="0.35">NEON LEGION</text>
+    <text x="2" y="142" class="headline">NEON LEGION</text>
+    <text x="3" y="199" class="sub">Your personal AI legion. Almost no swearing.</text>
+    <text x="3" y="232" class="ru">Твоя личная армия. Почти без мата.</text>
+    <g transform="translate(5 270)">
+      <rect x="0" y="0" width="530" height="42" rx="4" fill="#020617" opacity="0.72" stroke="#00D4FF" stroke-opacity="0.45"/>
+      <text x="18" y="27" class="mono">COMMANDER: USER</text>
+      <text x="208" y="27" class="mono">AGENTS: 5</text>
+      <text x="342" y="27" class="mono">MODE: LOCAL-FIRST</text>
+    </g>
+  </g>
+
+  <g transform="translate(870 68)" filter="url(#glow)">
+    <path d="M230 14L350 64V202C350 280 293 342 230 378C167 342 110 280 110 202V64Z" fill="#020617" fill-opacity="0.56" stroke="#00D4FF" stroke-width="4"/>
+    <path d="M230 58L310 92V198C310 247 274 291 230 319C186 291 150 247 150 198V92Z" fill="none" stroke="#FF2EC4" stroke-width="2" opacity="0.9"/>
+    <path d="M171 158H198L230 230V158H262V288H232L200 216V288H171Z" fill="#F8FAFC"/>
+    <path d="M279 158H312V258H359V288H279Z" fill="#64FFDA"/>
+  </g>
+
+  <g transform="translate(1092 220)">
+    <circle r="118" fill="#020617" fill-opacity="0.38" stroke="#00D4FF" stroke-opacity="0.7" stroke-width="2"/>
+    <circle r="78" fill="none" stroke="#00D4FF" stroke-opacity="0.45"/>
+    <circle r="38" fill="none" stroke="#64FFDA" stroke-opacity="0.45"/>
+    <path d="M0 0L96 -69" stroke="#64FFDA" stroke-width="3" stroke-opacity="0.8"/>
+    <path d="M-118 0H118M0 -118V118" stroke="#F8FAFC" stroke-opacity="0.16"/>
+    <g fill="#00D4FF">
+      <circle cx="-58" cy="-43" r="7"/><circle cx="62" cy="-54" r="7"/><circle cx="78" cy="35" r="7"/><circle cx="-33" cy="72" r="7"/><circle cx="14" cy="-6" r="7"/>
+    </g>
+    <g class="tiny" text-anchor="middle">
+      <text x="-90" y="-60">CLAUDE</text><text x="93" y="-73">CODEX</text><text x="112" y="59">OPENCLAW</text><text x="-58" y="101">OPENCODE</text><text x="28" y="-21">DEEPSEEK</text>
+    </g>
+  </g>
+
+  <g transform="translate(924 367)" opacity="0.92">
+    <g fill="#020617" stroke="#00D4FF" stroke-width="2">
+      <path d="M0 82L18 20H64L82 82Z"/><path d="M97 82L115 20H161L179 82Z"/><path d="M194 82L212 20H258L276 82Z"/><path d="M291 82L309 20H355L373 82Z"/><path d="M388 82L406 20H452L470 82Z"/>
+    </g>
+    <g class="green thin" opacity="0.75">
+      <path d="M41 20V0M138 20V0M235 20V0M332 20V0M429 20V0"/>
+    </g>
+    <g class="tiny" text-anchor="middle">
+      <text x="41" y="108">ARCH</text><text x="138" y="108">DEV</text><text x="235" y="108">REVIEW</text><text x="332" y="108">BRIDGE</text><text x="429" y="108">TRACK</text>
+    </g>
+  </g>
+
+  <g opacity="0.62">
+    <path d="M62 36H18V86" class="cyan thin"/><path d="M1438 36H1482V86" class="mag thin"/><path d="M62 464H18V414" class="mag thin"/><path d="M1438 464H1482V414" class="cyan thin"/>
+  </g>
+</svg>
