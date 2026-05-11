@@ -22,11 +22,14 @@ from pathlib import Path
 from typing import Any
 
 
-DEFAULT_WORKAI_ROOT = Path(os.environ.get("WORKAI_ROOT", "<workspace>"))
-DEFAULT_BRIDGE_ROOT = Path(
-    os.environ.get("OPENCLAW_CODEX_BRIDGE", "<openclaw_share>/workspace/codex-bridge")
-)
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT_ROOT))
+from tools import config as cfg  # noqa: E402
+
+DEFAULT_WORKAI_ROOT = Path(cfg.get_legacy_env("WORKAI_ROOT", "<workspace>"))
+DEFAULT_BRIDGE_ROOT = Path(
+    cfg.get_legacy_env("OPENCLAW_CODEX_BRIDGE", "<openclaw_share>/workspace/codex-bridge")
+)
 MAX_READ_BYTES = 200_000
 MAX_RG_LINES = 200
 MAX_LIST_ITEMS = 500
@@ -251,7 +254,7 @@ def action_read(
 
 
 def find_rg() -> str:
-    explicit = os.environ.get("RG_EXE")
+    explicit = cfg.get_legacy_env("RG_EXE")
     if explicit:
         return explicit
     found = shutil.which("rg")

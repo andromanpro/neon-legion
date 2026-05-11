@@ -18,6 +18,9 @@ from pathlib import Path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT_ROOT))
+from tools import config as cfg  # noqa: E402
+
 TRACKER_DIR = PROJECT_ROOT / "tracker"
 EVENTS_FILE = TRACKER_DIR / "codex-events.jsonl"
 LOCK_FILE = TRACKER_DIR / ".codex-events.lock"
@@ -78,7 +81,7 @@ def parse_ts(value: object) -> datetime | None:
 
 
 def subscription_type() -> str:
-    if os.environ.get("OPENAI_API_KEY") or os.environ.get("ANTHROPIC_API_KEY"):
+    if cfg.get_legacy_env("OPENAI_API_KEY") or cfg.get_legacy_env("ANTHROPIC_API_KEY"):
         return "api-key"
     return "chatgpt-pro"
 

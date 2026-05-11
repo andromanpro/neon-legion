@@ -1,13 +1,15 @@
 #!/usr/bin/env python
 import argparse
 import json
-import os
 import sys
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT_ROOT))
+from tools import config as cfg  # noqa: E402
+
 CLAUDE_EVENTS_FILE = PROJECT_ROOT / "tracker" / "claude-events.jsonl"
 CODEX_EVENTS_FILE = PROJECT_ROOT / "tracker" / "codex-events.jsonl"
 OPENCLAW_EVENTS_FILE = PROJECT_ROOT / "tracker" / "openclaw-events.jsonl"
@@ -17,13 +19,7 @@ TASKS_FILE = PROJECT_ROOT / "tracker" / "tasks.json"
 
 
 def env_float(name: str, default: float) -> float:
-    raw = os.environ.get(name)
-    if raw is None:
-        return default
-    try:
-        return float(raw)
-    except ValueError:
-        return default
+    return cfg.get_legacy_env(name, default, float)
 
 
 CLAUDE_MONTHLY_SUBSCRIPTION_USD = env_float("CLAUDE_MONTHLY_SUBSCRIPTION_USD", 200.0)

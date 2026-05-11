@@ -19,6 +19,9 @@ from pathlib import Path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT_ROOT))
+from tools import config as cfg  # noqa: E402
+
 TRACKER_DIR = PROJECT_ROOT / "tracker"
 EVENTS_FILE = TRACKER_DIR / "openclaw-events.jsonl"
 def _default_openclaw_sessions() -> Path:
@@ -31,7 +34,7 @@ def _default_openclaw_sessions() -> Path:
     set OPENCLAW_SESSIONS_ROOT to the mounted path. Otherwise this script
     looks for a local fallback at ~/.openclaw/agents/main/sessions.
     """
-    env = os.environ.get("OPENCLAW_SESSIONS_ROOT")
+    env = cfg.get_legacy_env("OPENCLAW_SESSIONS_ROOT")
     if env:
         return Path(env)
     return Path.home() / ".openclaw" / "agents" / "main" / "sessions"

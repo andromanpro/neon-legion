@@ -1,8 +1,11 @@
 # neon-legion configuration template
 #
-# Copy this file to `config.toml` (gitignored) and edit the paths for your
-# environment. Most defaults work out of the box if you have Claude Code +
-# Codex CLI installed in standard locations.
+# This file is the canonical default config. Override locally by creating
+# `config.toml` (gitignored) next to this file with only the keys you want
+# to change. Env vars (e.g. NEON_LEGION_PORT) still work and take precedence
+# over both files — see `tools/config.py:ENV_OVERRIDES` for the mapping.
+#
+# Precedence (highest first): CLI flag → env var → config.toml → config.example.toml → code default.
 
 [paths]
 # Where the snapshot writer atomically lands the WP-page JSON.
@@ -37,20 +40,6 @@ provider = "codex"
 
 # Sandbox mode for the oracle subprocess. read-only is safest.
 sandbox = "read-only"
-
-# ===========================================================================
-# NOTE: in v0.1 the runtime does NOT read this TOML file. The values below
-# document the intended config layer; a real loader lands in v0.2. For now,
-# override at runtime via environment variables (set before launching the
-# backend):
-#
-#   $env:CLAUDE_MONTHLY_SUBSCRIPTION_USD = "100"   # Claude Max 5x
-#   $env:OPENAI_MONTHLY_SUBSCRIPTION_USD = "20"    # ChatGPT Plus
-#
-# Defaults assume Claude Max 20x + ChatGPT Pro = $400/mo combined. If you
-# pay less, set lower values, or your "savings vs API" number will be
-# overstated.
-# ===========================================================================
 
 [providers.anthropic]
 # Monthly subscription cost in USD. Used for "subscription pro-rated" savings.
