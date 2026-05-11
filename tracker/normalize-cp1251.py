@@ -80,6 +80,12 @@ def fix_event(event: dict) -> tuple[dict, bool]:
     return event, changed
 
 
+def with_schema_version(event: dict) -> dict:
+    if "schema_version" in event:
+        return event
+    return {"schema_version": 1, **event}
+
+
 def atomic_rewrite(path: Path, new_lines: list[str]) -> None:
     tmp = path.with_name(f".{path.name}.tmp-{os.getpid()}-{secrets.token_hex(3)}")
     with tmp.open("w", encoding="utf-8", newline="\n") as handle:
@@ -114,6 +120,7 @@ def process_file(path: Path) -> tuple[int, int]:
             event, changed = fix_event(event)
             if changed:
                 fixed += 1
+                event = with_schema_version(event)
                 new_lines.append(json.dumps(event, ensure_ascii=False) + "\n")
             else:
                 new_lines.append(line)

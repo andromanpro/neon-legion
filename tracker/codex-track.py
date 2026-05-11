@@ -250,6 +250,7 @@ def build_event_from_codex_events(
     partial = interrupted or exit_code != 0 or not usage_captured
 
     return {
+        "schema_version": 1,
         "event_id": run_id,
         "tracking_run_id": run_id,
         "sequence_no": 1,

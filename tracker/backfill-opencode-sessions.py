@@ -261,6 +261,7 @@ def read_events_from_db(path: Path, since: datetime | None) -> tuple[list[dict],
                 working_dir = str(row["session_directory"] or "")
 
             events.append({
+                "schema_version": 1,
                 "event_id": f"opencode-session-{session_id}-{message_id}",
                 "tracking_run_id": f"opencode-session-{session_id}",
                 "sequence_no": sequence_no,

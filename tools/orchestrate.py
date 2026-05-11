@@ -242,6 +242,7 @@ when relevant. Keep the output in Markdown.
 def init_state(new_run_id: str, manifest_path: Path, roles_path: Path, flow: list[str]) -> dict[str, Any]:
     now = datetime.now().astimezone().isoformat(timespec="seconds")
     return {
+        "schema_version": 1,
         "run_id": new_run_id,
         "status": "running",
         "created_at": now,

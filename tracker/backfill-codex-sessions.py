@@ -241,6 +241,7 @@ def read_session_events(path: Path, since: datetime | None) -> list[dict]:
 
             sid = session_id or path.stem
             event = {
+                "schema_version": 1,
                 "event_id": f"codex-session-{sid}-{line_no}",
                 "tracking_run_id": f"codex-session-{sid}",
                 "sequence_no": line_no,
