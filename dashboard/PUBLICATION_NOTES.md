@@ -37,7 +37,7 @@
 1. Сгенерировать snapshot в публичном режиме:
 
    ```cmd
-   py -3.14 backend\server.py --snapshot-once --public --snapshot-path "H:\wordpress-androman\wp-data\wp-content\uploads\multi-agent\snapshot.json"
+   py -3.14 backend\server.py --snapshot-once --public --snapshot-path "<wp_uploads>/multi-agent\snapshot.json"
    ```
 
 2. Просканировать snapshot на локальные пути, имена пользователей, идентификаторы и приватные названия рабочих папок:
@@ -98,7 +98,7 @@ Before public publishing:
 1. Generate snapshot with public mode:
 
    ```cmd
-   py -3.14 backend\server.py --snapshot-once --public --snapshot-path "H:\wordpress-androman\wp-data\wp-content\uploads\multi-agent\snapshot.json"
+   py -3.14 backend\server.py --snapshot-once --public --snapshot-path "<wp_uploads>/multi-agent\snapshot.json"
    ```
 
 2. Scan snapshot for local paths, usernames, IDs, and private workspace names:

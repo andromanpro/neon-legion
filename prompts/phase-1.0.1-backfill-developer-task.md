@@ -2,7 +2,7 @@
 
 You are the **developer** role. The architect (Claude) wrote this plan. Implement it and report via `--output-schema`.
 
-Working directory: `F:/WorkAI/multi-agent` (already your `--cd`).
+Working directory: `<project_root>` (already your `--cd`).
 
 Project context: read `CLAUDE.md` (project conventions, Phase 1.0 done с Stop hook, Phase 1.3 done с SessionStart hook). Phase 1.0.1 — retroactive backfill всех прошлых Claude Code сессий из `~/.claude/projects/<encoded-cwd>/<session_id>.jsonl`, чтобы у трекера сразу была история за все месяцы работы пользователя.
 
@@ -91,7 +91,7 @@ Claude Code кодирует cwd в имя директории заменяя:
 - `\` → `-` (Windows)
 - `/` → `-` (Unix)
 
-Пример: `F:\WorkAI\multi-agent` → `F--WorkAI-multi-agent`
+Пример: `<project_root>` → `F--WorkAI-multi-agent`
 
 Decoder:
 ```python
@@ -123,7 +123,7 @@ def decode_project_dir(name: str) -> str:
   "cache_read_tokens": 800,
   "cost_estimate_usd": 0.0456,
   "duration_ms": 0,
-  "working_dir": "F:/WorkAI",
+  "working_dir": "<workspace>",
   "tool_uses": 3,
   "stop_reason": "end_turn",
   "backfilled": true

@@ -9,7 +9,7 @@ Produces: same file, modified
 
 ## Operational backstory
 
-Sandbox `workspace-write` в `F:/WorkAI/multi-agent`. После твоих изменений architect синхронизирует в `H:/wordpress-androman/.../page-multi-agent.php` на NAS WordPress.
+Sandbox `workspace-write` в `<project_root>`. После твоих изменений architect синхронизирует в `<wp_root>/.../page-multi-agent.php` на NAS WordPress.
 
 User feedback (verbatim):
 - **«Self-hosted productivity-трекер — это ли не англицизм? да и вообще сложно и не по киберпанковски»** — hero rewrite в киберпанк-стиле
@@ -22,7 +22,7 @@ User feedback (verbatim):
 
 ## Working directory
 
-`F:/WorkAI/multi-agent`. Файл — `dashboard/page-multi-agent.php`.
+`<project_root>`. Файл — `dashboard/page-multi-agent.php`.
 
 ## Goal
 
@@ -225,7 +225,7 @@ Mood values `'frustrated→calm'` (есть только в Phase 1.0.2 entry) �
 - Реальная фильтрация по периоду (только UI toggle)
 - Backend integration с live data
 - Mobile-specific tweaks (если existing responsive work — оставить)
-- Phase 4 publish на androman.pro
+- Phase 4 publish на <your-blog>.example
 
 ## Final report
 

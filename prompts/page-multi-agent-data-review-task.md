@@ -12,7 +12,7 @@ Reviewer-only mode. Read-only sandbox. Мы только что отправил
 
 ## Working directory
 
-`F:/WorkAI/multi-agent` (--cd).
+`<project_root>` (--cd).
 
 Файл для аудита: `dashboard/page-multi-agent.php`.
 
@@ -72,7 +72,7 @@ User фактически не превышает лимит подписки �
 ### D. Privacy / leak checks
 
 1. Никаких privately user'овых session_id (UUIDs)?
-2. Никаких реальных working_dir paths (F:/WorkAI/...)?
+2. Никаких реальных working_dir paths (<workspace>/...)?
 3. Никаких email / login / token references?
 
 ## Output format

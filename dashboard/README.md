@@ -24,4 +24,4 @@ Single-file cyberpunk live dashboard для Phase 1.0+ метрик.
 
 ## Phase 4 (отдельно)
 
-Public-share snapshot на androman.pro — обезличенные числа, без `working_dir` / `session_id`.
+Public-share snapshot на <your-blog>.example — обезличенные числа, без `working_dir` / `session_id`.

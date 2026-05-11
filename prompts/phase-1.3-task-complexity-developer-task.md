@@ -2,7 +2,7 @@
 
 You are the **developer** role in a multi-agent workflow. The architect (Claude) wrote this plan. Implement it and report via `--output-schema`.
 
-Working directory: `F:/WorkAI/multi-agent` (already your `--cd`).
+Working directory: `<project_root>` (already your `--cd`).
 
 Project context: read `CLAUDE.md` (especially section "Trigger для baseline-оценки сложности") and `README.md` for roadmap. Phase 1.0 already shipped: `hooks/claude-track-calls.py` writes JSONL events on Stop, `tracker/summary.py` outputs markdown. Now we add complexity estimation для time-saved metric.
 
@@ -33,7 +33,7 @@ Hook сам **не блокирует** startup — `subprocess.Popen` с `start
 ```json
 {
   "session_id": "<новый session_id>",
-  "transcript_path": "C:/Users/Roono/.claude/projects/<encoded-cwd>/<session_id>.jsonl",
+  "transcript_path": "<user_home>/.claude/projects/<encoded-cwd>/<session_id>.jsonl",
   "cwd": "<новый cwd>",
   "source": "startup" | "resume" | "clear"
 }
@@ -50,7 +50,7 @@ Hook сам **не блокирует** startup — `subprocess.Popen` с `start
     "estimated_at": "2026-05-09T13:00:00+10:00",
     "estimation_confidence": "high",
     "needs_manual_review": false,
-    "transcript_path": "C:/Users/Roono/.claude/projects/.../abc.jsonl"
+    "transcript_path": "<user_home>/.claude/projects/.../abc.jsonl"
   }
 }
 ```
@@ -67,7 +67,7 @@ Hook сам **не блокирует** startup — `subprocess.Popen` с `start
 5. Read tasks.json (default {}); collect pending = recent_sids - tasks.keys()
 6. If not pending → exit 0
 7. For each pending sid:
-   a. Find transcript: glob C:/Users/Roono/.claude/projects/*/{sid}.jsonl
+   a. Find transcript: glob <user_home>/.claude/projects/*/{sid}.jsonl
    b. If not found → log warning to tracker/.estimation-logs/<sid>.log, write tasks.json entry с needs_manual_review=true, ai_baseline_hours=null, brief_description="transcript not found"
    c. Else: subprocess.Popen([py -3.14, 'tracker/estimate-task.py', sid, transcript_path], detached, redirect stderr/stdout to .estimation-logs/<sid>.log)
 8. exit 0

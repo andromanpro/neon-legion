@@ -20,7 +20,7 @@ User says «дай кодексу на проверку — мне пока не
 
 ## Working directory
 
-`F:/WorkAI/multi-agent/` (--cd при запуске).
+`<project_root>/` (--cd при запуске).
 
 ## Что изменилось — обзор
 

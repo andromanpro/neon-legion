@@ -17,7 +17,7 @@ Architect (Claude) построил Phase 1.0 (Claude tracking via Stop hook), P
 
 ## Working directory
 
-`F:/WorkAI/multi-agent/`
+`<project_root>/`
 
 ## Архитектурные параметры (от architect — НЕ менять без escalation)
 
@@ -38,7 +38,7 @@ Architect (Claude) построил Phase 1.0 (Claude tracking via Stop hook), P
   "duration_ms": 45678,
   "cost_estimate_usd": 0.087,
   "exit_code": 0,
-  "working_dir": "F:/WorkAI/multi-agent",
+  "working_dir": "<project_root>",
   "subscription_type": "chatgpt-pro",
   "approval_mode": "never",
   "sandbox_mode": "workspace-write"
@@ -82,7 +82,7 @@ Codex CLI **на момент 0.128 не имеет hooks** (как у Claude Co
 
 User then aliases (либо в bashrc/profile):
 ```bash
-alias codex='py -3.14 F:/WorkAI/multi-agent/tracker/codex-track.py'
+alias codex='py -3.14 <project_root>/tracker/codex-track.py'
 ```
 
 или вызывает напрямую `py tracker/codex-track.py exec ...` для ручных runs.
@@ -183,10 +183,10 @@ def main(argv):
 Тонкая cmd-обёртка для удобства:
 ```cmd
 @echo off
-"C:\Windows\py.exe" -3.14 "F:\WorkAI\multi-agent\tracker\codex-track.py" %*
+"C:\Windows\py.exe" -3.14 "<project_root>\tracker\codex-track.py" %*
 ```
 
-User может положить в PATH или использовать как `F:\WorkAI\multi-agent\tracker\codex-track.cmd exec ...`.
+User может положить в PATH или использовать как `<project_root>\tracker\codex-track.cmd exec ...`.
 
 ### 3. `tracker/summary.py` — расширить чтение Codex events
 

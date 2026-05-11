@@ -2,7 +2,7 @@
 
 You are the **developer** role. The architect (Claude) wrote this hot-fix plan. Implement it and report via `--output-schema`.
 
-Working directory: `F:/WorkAI/multi-agent` (already your `--cd`).
+Working directory: `<project_root>` (already your `--cd`).
 
 Project context: read `CLAUDE.md`, `README.md`, и `tracker/README.md`. Phase 1.0 (Stop hook) и Phase 1.3 (SessionStart hook) и Phase 1.0.1 (backfill) уже в main. Real backfill только что выполнен — 79,716 events в `tracker/claude-events.jsonl` (30MB). Несколько критичных багов нужно срочно поправить.
 

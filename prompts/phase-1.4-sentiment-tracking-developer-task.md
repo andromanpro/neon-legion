@@ -9,7 +9,7 @@ Produces: 5 modified files (no new files)
 
 ## Operational backstory
 
-You are running with `workspace-write` sandbox in `F:/WorkAI/multi-agent`. Phase 1.0/1.3/1.0.1/1.0.2/1.0.3 уже в main. Phase 1.4 расширяет существующий sentiment pipeline без новых файлов.
+You are running with `workspace-write` sandbox in `<project_root>`. Phase 1.0/1.3/1.0.1/1.0.2/1.0.3 уже в main. Phase 1.4 расширяет существующий sentiment pipeline без новых файлов.
 
 **Privacy критично**: храним только counters (`profanity_count: 7`), НЕ raw примеры матов. При публикации на блог (Phase 4) — только aggregated numbers.
 
@@ -17,7 +17,7 @@ You are running with `workspace-write` sandbox in `F:/WorkAI/multi-agent`. Phase
 
 ## Working directory
 
-`F:/WorkAI/multi-agent` (already your `--cd`).
+`<project_root>` (already your `--cd`).
 
 ## Project context
 
@@ -257,6 +257,6 @@ Skip Sentiment block if no tasks с sentiment data в period.
 
 ## Final report
 
-Conform to `--output-schema` (`F:/WorkAI/multi-agent/schemas/phase-1.0-developer-output.json`). Required: `files_created`, `summary`, `tested`, `test_results`, `open_questions`, `deviations_from_spec`.
+Conform to `--output-schema` (`<project_root>/schemas/phase-1.0-developer-output.json`). Required: `files_created`, `summary`, `tested`, `test_results`, `open_questions`, `deviations_from_spec`.
 
 `files_created` должен включать **5 modified файлов** (нет новых файлов в этом phase).

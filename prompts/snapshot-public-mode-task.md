@@ -9,19 +9,19 @@ Produces: modified `backend/server.py` + раздел в `README.md`
 
 ## Operational backstory
 
-Phase 3.5 (snapshot pipeline) уже работает: backend пишет JSON в `H:/wordpress-androman/wp-data/wp-content/uploads/multi-agent/snapshot.json` каждые 15 мин, WP-страница на NAS:8080 фетчит. Сейчас snapshot живёт **только в LAN**, всё OK.
+Phase 3.5 (snapshot pipeline) уже работает: backend пишет JSON в `<wp_uploads>/multi-agent/snapshot.json` каждые 15 мин, WP-страница на NAS:8080 фетчит. Сейчас snapshot живёт **только в LAN**, всё OK.
 
-Phase 4 (будет позже) — публикация на `androman.pro` production. Тогда тот же JSON станет публично доступен. Codex review (issue D1) предупредил: `session_id_short` (первые 8 hex от UUID) и `desc` (brief_description из tasks.json) в публичном виде = **privacy leak**:
+Phase 4 (будет позже) — публикация на `<your-blog>.example` production. Тогда тот же JSON станет публично доступен. Codex review (issue D1) предупредил: `session_id_short` (первые 8 hex от UUID) и `desc` (brief_description из tasks.json) в публичном виде = **privacy leak**:
 
 - `session_id_short` коррелирует временные ряды активности (когда пользователь работал/отдыхал)
-- `desc` может содержать абсолютные пути (`F:/WorkAI/...`), email'ы, имена клиентов («Сфера», «3Лоджик»)
+- `desc` может содержать абсолютные пути (`<workspace>/...`), email'ы, имена клиентов («<client>», «<client>»)
 - `top_session` (today panel) — то же самое
 
 Архитектор хочет реализовать `--public` режим **сейчас**, чтобы не забыть. Default остаётся small-scope (LAN), но при флаге включается hardening.
 
 ## Working directory
 
-`F:/WorkAI/multi-agent/` (--cd при запуске).
+`<project_root>/` (--cd при запуске).
 
 ## Deliverables
 
@@ -216,9 +216,9 @@ def main():
 
 ### 7. README раздел
 
-В `F:/WorkAI/multi-agent/README.md` найти раздел `Phase 3.5 — snapshot pipeline (WP ↔ backend)` и добавить подсекцию **«Privacy hardening для Phase 4»** с описанием:
+В `<project_root>/README.md` найти раздел `Phase 3.5 — snapshot pipeline (WP ↔ backend)` и добавить подсекцию **«Privacy hardening для Phase 4»** с описанием:
 
-- Зачем нужен `--public` (публикация на androman.pro)
+- Зачем нужен `--public` (публикация на <your-blog>.example)
 - Как генерится salt (auto-create в `~/.multi-agent-snapshot-salt`, 32 random bytes, 0600)
 - Что scrub'ится (paths, emails, tokens, customer names)
 - Пример команды с `--public` и `--customers-blocklist`
@@ -243,7 +243,7 @@ def main():
   - `session_id_short` — 8 hex deterministic, ≠ original UUID prefix
   - `desc`/`top_session` — scrubbed (paths/emails/tokens removed)
 - [ ] `~/.multi-agent-snapshot-salt` создан с 32 байтами + 0600 permission (POSIX)
-- [ ] Customer blocklist пример: `echo -e "Сфера\n3Лоджик\n# comment" > /tmp/customers.txt`, `--customers-blocklist /tmp/customers.txt` → имена scrub'нуты
+- [ ] Customer blocklist пример: `echo -e "<client-a>\n<client-b>\n# comment" > /tmp/customers.txt`, `--customers-blocklist /tmp/customers.txt` → имена scrub'нуты
 - [ ] README обновлён с разделом про `--public`
 - [ ] Architect сможет сравнить два snapshot'а (private vs public) и убедиться в разнице
 
@@ -254,7 +254,7 @@ def main():
 - [ ] Smoke без `--public`: `python backend/server.py --snapshot-once --snapshot-path /tmp/private.json`
 - [ ] Smoke с `--public`: `python backend/server.py --snapshot-once --snapshot-path /tmp/public.json --public`
 - [ ] Diff: показать `session_id_short` и `desc` отличаются между private и public
-- [ ] Customer blocklist: создать `/tmp/customers.txt` со словом «Сфера», прогнать с blocklist'ом, убедиться что в public.json нет «Сфера»
+- [ ] Customer blocklist: создать `/tmp/customers.txt` со словом «<client>», прогнать с blocklist'ом, убедиться что в public.json нет «<client>»
 
 Если sandbox blocks `/tmp` — использовать `F:/temp/` или текущую директорию.
 

@@ -2,7 +2,7 @@
 
 You are the **developer** role in a multi-agent workflow. The architect (Claude) wrote this plan. Implement it and report via `--output-schema`. The reviewer (Claude) will check your work against acceptance criteria.
 
-Working directory: `F:/WorkAI/multi-agent` (already your `--cd`).
+Working directory: `<project_root>` (already your `--cd`).
 
 Project context: see `CLAUDE.md` and `README.md` in working dir for project conventions and roadmap.
 
@@ -21,8 +21,8 @@ Build basic tracking layer for Claude Code calls — foundation for cost-savings
 ```json
 {
   "session_id": "abc-123",
-  "transcript_path": "C:/Users/Roono/.claude/projects/.../transcript.jsonl",
-  "cwd": "F:/WorkAI",
+  "transcript_path": "<user_home>/.claude/projects/.../transcript.jsonl",
+  "cwd": "<workspace>",
   "stop_hook_active": false
 }
 ```
@@ -71,7 +71,7 @@ Some assistant events may lack `usage` or `model` (system messages, etc.) — sk
   "cache_read_tokens": 800,
   "cost_estimate_usd": 0.0456,
   "duration_ms": 0,
-  "working_dir": "F:/WorkAI",
+  "working_dir": "<workspace>",
   "tool_uses": 3,
   "stop_reason": "end_turn"
 }
@@ -103,7 +103,7 @@ PRICING = {
 - **UTF-8**: explicit `encoding="utf-8"` on all file I/O
 - **Atomic write**: write JSONL line to `tracker/.claude-events.jsonl.tmp.<pid>`, then `os.replace()` to merge with existing file. Concurrent runs must not corrupt.
 - **Idempotent**: dedup key is `(session_id, message_uuid)`. Track last seen UUID per session in `tracker/.last-uuids.json` (atomic write same way). If hook fires twice for same UUID, second invocation is no-op.
-- **Output file**: `F:/WorkAI/multi-agent/tracker/claude-events.jsonl`, autocreate parent dir
+- **Output file**: `<project_root>/tracker/claude-events.jsonl`, autocreate parent dir
 - **Path resolution**: hook is run with arbitrary cwd by Claude Code. Use `__file__` to find project root, not relative paths.
 
 ## summary.py CLI
@@ -143,7 +143,7 @@ Number formatting: thousands with comma separator (`45,201`).
 
 Must explain:
 1. What the hook does (one paragraph)
-2. **Full settings.json snippet** to register it (use absolute path `F:/WorkAI/multi-agent/hooks/claude-track-calls.py`)
+2. **Full settings.json snippet** to register it (use absolute path `<project_root>/hooks/claude-track-calls.py`)
 3. Where data lives (`tracker/claude-events.jsonl`)
 4. How to run summary (`py -3.14 tracker/summary.py`)
 5. How to verify hook is firing (`tail -f tracker/claude-events.jsonl` after a session)

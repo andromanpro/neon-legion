@@ -15,13 +15,13 @@ You are running with `workspace-write` sandbox. Phase 2 backend `backend/server.
 
 ## Working directory
 
-`F:/WorkAI/multi-agent` (already your `--cd`).
+`<project_root>` (already your `--cd`).
 
 ## Project context
 
 Read `CLAUDE.md`, `README.md`, `backend/server.py` (понять endpoints), `backend/README.md`. Также — для дизайн-стиля можно посмотреть существующие визуальные проекты пользователя (vanilla cyberpunk):
 
-- `F:/WorkAI/visual/cyberpunk-anim-demo/` (если доступно) — пример cyberpunk-themed анимация
+- `<workspace>/visual/cyberpunk-anim-demo/` (если доступно) — пример cyberpunk-themed анимация
 - Memory `user_design_preferences.md` — синий, киберпанк, баланс минимализма и wow
 
 ## Goal
@@ -182,7 +182,7 @@ Single-file cyberpunk live dashboard для Phase 1.0+ метрик.
 
 ## Phase 4 (отдельно)
 
-Public-share snapshot на androman.pro — обезличенные числа, без working_dir / session_id.
+Public-share snapshot на <your-blog>.example — обезличенные числа, без working_dir / session_id.
 ```
 
 ## Constraints

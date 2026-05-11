@@ -4,7 +4,7 @@ Name: codex-reviewer
 Profile: Codex CLI 0.128+ (gpt-5.5, xhigh reasoning, --sandbox read-only)
 Goal: Найти все недопереведённые тексты + неясные UX элементы в WordPress page template multi-agent dashboard'а. **Не редактировать файл** — отдать structured markdown report с конкретными fixes (line numbers + suggested replacements). Architect применит fixes.
 Constraints: read-only sandbox, no file modifications, focus on text completeness и UX clarity, не на code style
-Watches: `F:/WorkAI/multi-agent/dashboard/page-multi-agent.php` (копия из WordPress theme в workspace для sandbox access)
+Watches: `<project_root>/dashboard/page-multi-agent.php` (копия из WordPress theme в workspace для sandbox access)
 
 ## Operational backstory
 
@@ -14,7 +14,7 @@ User feedback: «многое не переведено, часть элемен
 
 ## Working directory
 
-`F:/WorkAI/multi-agent` (--cd). Файл для review: **`dashboard/page-multi-agent.php`** (597 строк, копия из WordPress theme).
+`<project_root>` (--cd). Файл для review: **`dashboard/page-multi-agent.php`** (597 строк, копия из WordPress theme).
 
 ВАЖНО: this is **WordPress page template** (не single-file standalone HTML `dashboard/index.html`!). Файл содержит PHP блок (mock data + CBR rate fetch), inline `<style>`, HTML markup с `data-ma-i18n` / `data-ma-i18n-html` / `data-ma-i18n-text` / `data-usd` атрибутами, и финальный `<script>` с inline TRANSLATIONS dict (RU + EN) + JS для применения переводов и currency conversion.
 

@@ -10,13 +10,13 @@ Watches:
 
 ## Operational backstory
 
-User в Windows-окружении, backend живёт на 127.0.0.1:8089 (только localhost), WordPress — на NAS (192.168.1.130:8080) через SMB-mount H:/. Snapshot.json пишется backend'ом каждые 15 мин атомарно (tmp + os.replace) в NAS uploads, WP-страница fetch'ит на load. User эксплицитно сказал «ничего наружу не торчит».
+User в Windows-окружении, backend живёт на 127.0.0.1:8089 (только localhost), WordPress — на NAS (localhost:8080) через SMB-mount H:/. Snapshot.json пишется backend'ом каждые 15 мин атомарно (tmp + os.replace) в NAS uploads, WP-страница fetch'ит на load. User эксплицитно сказал «ничего наружу не торчит».
 
 Architect только что завершил эту фазу одним заходом без независимого review. Smoke-test прошёл (snapshot.json записан, page рендерится, fetch работает), но **detail bugs** не проверены.
 
 ## Working directory
 
-`F:/WorkAI/multi-agent/` (--cd).
+`<project_root>/` (--cd).
 
 ## Зачем Codex'у
 
@@ -57,7 +57,7 @@ Architect только что завершил эту фазу одним зах
 
 1. Backend записал snapshot, потом WP page открылась через 5 минут: badge показывает «ЛАЙВ» (≤ 30 мин), но если backend упал и не пишет 1 час — badge должен переключиться в «СНИМОК». Проверить age-вычисление.
 2. Если backend пишет в момент когда WP читает: atomic? `os.replace` на NTFS должен быть atomic, но fetch может read tmp вместо final?
-3. Localization: today.top_session приходит на русском (например «Этап 5 ИИкона») — escape OK? Прямо в `textContent` — должно быть OK.
+3. Localization: today.top_session приходит на русском (например «Этап 5 <project>») — escape OK? Прямо в `textContent` — должно быть OK.
 
 ### D. Privacy / leak в snapshot
 
@@ -70,7 +70,7 @@ Architect только что завершил эту фазу одним зах
 - Performance scaling beyond 1k sessions/day
 - Multi-server replication
 - snapshot.json compression (file ~4kb сейчас)
-- Phase 4 (publishing на androman.pro production)
+- Phase 4 (publishing на <your-blog>.example production)
 
 ## Output format
 

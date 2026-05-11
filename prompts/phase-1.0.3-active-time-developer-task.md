@@ -2,7 +2,7 @@
 
 You are the **developer** role. The architect (Claude) wrote this plan. Implement it and report via `--output-schema`.
 
-Working directory: `F:/WorkAI/multi-agent` (already your `--cd`).
+Working directory: `<project_root>` (already your `--cd`).
 
 Project context: read `CLAUDE.md`, `README.md`. Phase 1.0.2 hot-fix только что merged. Сейчас `summary.py` показывает «Hours with AI» через merged-intervals = calendar span sessions, что выдаёт 1462.5h за 62 дня (физически невозможно). Phase 1.0.3 — добавить **active-time** метрику.
 

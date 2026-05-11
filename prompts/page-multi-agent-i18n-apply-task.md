@@ -9,11 +9,11 @@ Produces: same file, modified
 
 ## Operational backstory
 
-Sandbox `workspace-write` в `F:/WorkAI/multi-agent`. Файл `dashboard/page-multi-agent.php` — копия из WordPress theme. После твоих изменений architect скопирует файл обратно в `H:/wordpress-androman/wp-data/wp-content/themes/androman/page-multi-agent.php`.
+Sandbox `workspace-write` в `<project_root>`. Файл `dashboard/page-multi-agent.php` — копия из WordPress theme. После твоих изменений architect скопирует файл обратно в `<wp_theme>/page-multi-agent.php`.
 
 ## Working directory
 
-`F:/WorkAI/multi-agent`.
+`<project_root>`.
 
 ## Goal
 
@@ -180,8 +180,8 @@ document.querySelectorAll('[data-ma-i18n-title]').forEach(function(el) {
 - [ ] Поиск hardcoded `BURST`, `LIVE`, `calls`, `Max 5x` в HTML body — не должно остаться
 
 **Architect (host, after merge)**:
-- Sync обратно в `H:/wordpress-androman/.../page-multi-agent.php`
-- Curl `http://192.168.1.130:8080/multi-agent/` + проверить рендер
+- Sync обратно в `<wp_root>/.../page-multi-agent.php`
+- Curl `http://localhost:8080/multi-agent/` + проверить рендер
 
 ## Out of scope
 

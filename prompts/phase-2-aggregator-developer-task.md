@@ -9,7 +9,7 @@ Produces: `backend/server.py` (новый) + `backend/README.md` (новый)
 
 ## Operational backstory
 
-You are running with `workspace-write` sandbox в `F:/WorkAI/multi-agent`. Phase 1.0/1.3/1.0.1/1.0.2/1.0.3/1.4 уже в main. Этот phase **не модифицирует** existing tracker/ файлы, только **читает** через import.
+You are running with `workspace-write` sandbox в `<project_root>`. Phase 1.0/1.3/1.0.1/1.0.2/1.0.3/1.4 уже в main. Этот phase **не модифицирует** existing tracker/ файлы, только **читает** через import.
 
 **Sandbox limitation** (Phase 1.0.2 lesson): Codex не запускает реальный сервер для тестирования. Static check (py_compile + import test) — Codex; runtime check (`curl localhost:8080/api/health`) — architect на host.
 
@@ -17,7 +17,7 @@ You are running with `workspace-write` sandbox в `F:/WorkAI/multi-agent`. Phase
 
 ## Working directory
 
-`F:/WorkAI/multi-agent` (already your `--cd`).
+`<project_root>` (already your `--cd`).
 
 ## Project context
 

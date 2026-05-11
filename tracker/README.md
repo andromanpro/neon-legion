@@ -8,9 +8,9 @@
 
 `tracker/backfill-codex-sessions.py` imports historical Codex Desktop/TUI token usage from `~/.codex/sessions/**/*.jsonl`. It reads only `token_count.info.last_token_usage` plus session metadata, not prompt/response text, and appends deterministic `event_id` values so repeated runs are idempotent.
 
-`tracker/backfill-openclaw-sessions.py` imports OpenClaw assistant usage from `H:\openclaw\data\.openclaw\agents\main\sessions\*.jsonl`. It records OpenRouter/DeepSeek provider, model, token usage, exact cost, and channel origin without copying message text. These events are stored separately from Codex events so "OpenClaw thought" is not mixed with "OpenClaw launched Codex".
+`tracker/backfill-openclaw-sessions.py` imports OpenClaw assistant usage from `<openclaw_share>\data\.openclaw\agents\main\sessions\*.jsonl`. It records OpenRouter/DeepSeek provider, model, token usage, exact cost, and channel origin without copying message text. These events are stored separately from Codex events so "OpenClaw thought" is not mixed with "OpenClaw launched Codex".
 
-`tracker/backfill-opencode-sessions.py` imports OpenCode assistant usage from `C:\Users\Roono\.local\share\opencode\opencode.db`. It reads assistant `message.data` accounting fields only (`providerID`, `modelID`, `tokens`, `cost`, `finish`) and stores them as a separate OpenCode provider.
+`tracker/backfill-opencode-sessions.py` imports OpenCode assistant usage from `<user_home>\.local\share\opencode\opencode.db`. It reads assistant `message.data` accounting fields only (`providerID`, `modelID`, `tokens`, `cost`, `finish`) and stores them as a separate OpenCode provider.
 
 ## Register the hooks
 
@@ -25,7 +25,7 @@ Add this to `~/.claude/settings.json`:
         "hooks": [
           {
             "type": "command",
-            "command": "py -3.14 F:/WorkAI/multi-agent/hooks/claude-session-start.py"
+            "command": "py -3.14 <project_root>/hooks/claude-session-start.py"
           }
         ]
       }
@@ -36,7 +36,7 @@ Add this to `~/.claude/settings.json`:
         "hooks": [
           {
             "type": "command",
-            "command": "py -3.14 F:/WorkAI/multi-agent/hooks/claude-track-calls.py"
+            "command": "py -3.14 <project_root>/hooks/claude-track-calls.py"
           }
         ]
       }
@@ -169,7 +169,7 @@ tracker\codex-track.cmd exec --sandbox read-only "prompt"
 Optional shell alias:
 
 ```bash
-alias codex='py -3.14 F:/WorkAI/multi-agent/tracker/codex-track.py'
+alias codex='py -3.14 <project_root>/tracker/codex-track.py'
 ```
 
 Backfill historical desktop sessions:
