@@ -502,6 +502,9 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "list":
             return command_list(args)
         raise SystemExit("command required: run, resume, status, list, or --list-roles")
+    except (tomllib.TOMLDecodeError, ValueError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     except Exception as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1

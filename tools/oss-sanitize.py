@@ -64,7 +64,7 @@ if hasattr(sys.stderr, "reconfigure"):
 # `_load_private_rules()` below.
 GENERIC_RULES: list[tuple[str, str, str]] = [
     # Private LAN IPv4 (RFC1918)
-    (r"\b(?:10|172\.(?:1[6-9]|2[0-9]|3[01])|192\.168)\.\d{1,3}\.\d{1,3}\b", "<lan-host>", "Private LAN IP (RFC1918)"),
+    (r"\b(?:10|172\.(?:1[6-9]|2[0-9]|3[01])|192\.168)\.\d{1,3}\.\d{1,3}\b", "localhost", "Private LAN IP (RFC1918)"),
     # Unix user home / system dirs (only when an absolute path)
     (r"(?<![\w/])/(?:home|users)/[\w\-+./]+", "<user_home>", "Unix user home"),
     # NOTE: mDNS `.local` and drive-letter paths are user-specific and prone
@@ -123,6 +123,8 @@ EXCLUDE_PATTERNS = {
     "LICENSE", "SECURITY.md", "CONTRIBUTING.md",
     "config.example.toml", ".gitignore", "tools/oss-sanitize.py",
 }
+KEEP_OPEN = "<!-- oss:keep -->"
+KEEP_CLOSE = "<!-- /oss:keep -->"
 
 
 def gather_files(root: Path, globs: list[str]) -> list[Path]:
@@ -138,16 +140,72 @@ def gather_files(root: Path, globs: list[str]) -> list[Path]:
     return sorted(seen)
 
 
-def sanitize_text(text: str) -> tuple[str, list[tuple[str, int]]]:
-    """Apply all rules (generic + private) to text. Return (new_text, [(rule_desc, hit_count), ...])."""
+def _keep_segments(text: str) -> list[tuple[bool, str]]:
+    """Split text into (is_keep_block, segment) chunks."""
+    lines = text.splitlines(keepends=True)
+    if not any(KEEP_OPEN in line for line in lines):
+        return [(False, text)]
+
+    segments: list[tuple[bool, str]] = []
+    buf: list[str] = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if KEEP_OPEN not in line:
+            buf.append(line)
+            i += 1
+            continue
+
+        if buf:
+            segments.append((False, "".join(buf)))
+            buf = []
+
+        keep: list[str] = [line]
+        i += 1
+        fence: str | None = None
+        while i < len(lines):
+            keep.append(lines[i])
+            stripped = lines[i].lstrip()
+            if KEEP_CLOSE in lines[i]:
+                i += 1
+                break
+            if fence is None and (stripped.startswith("```") or stripped.startswith("~~~")):
+                fence = stripped[:3]
+            elif fence is not None and stripped.startswith(fence):
+                i += 1
+                break
+            i += 1
+        segments.append((True, "".join(keep)))
+
+    if buf:
+        segments.append((False, "".join(buf)))
+    return segments
+
+
+def _apply_rules(text: str, rules: list[tuple[str, str, str]]) -> tuple[str, list[tuple[str, int]]]:
     hits: list[tuple[str, int]] = []
     out = text
-    for pat, repl, desc in _all_rules():
+    for pat, repl, desc in rules:
         new, n = re.subn(pat, repl, out)
         if n > 0:
             hits.append((desc, n))
         out = new
     return out, hits
+
+
+def sanitize_text(text: str) -> tuple[str, list[tuple[str, int]]]:
+    """Apply rules outside oss:keep blocks. Return (new_text, [(rule_desc, hit_count), ...])."""
+    rules = _all_rules()
+    pieces: list[str] = []
+    hits: list[tuple[str, int]] = []
+    for keep, segment in _keep_segments(text):
+        if keep:
+            pieces.append(segment)
+            continue
+        new, segment_hits = _apply_rules(segment, rules)
+        pieces.append(new)
+        hits.extend(segment_hits)
+    return "".join(pieces), hits
 
 
 def backup_file(path: Path) -> None:

@@ -1,0 +1,16 @@
+# release-gate allowlist examples
+#
+# This file is documentation only. The scanner does not read it.
+# Supported suppressions are intentionally narrow:
+#
+# 1. Exclude whole files in tools/release-gate.toml [scope].exclude_globs.
+# 2. Suppress one false-positive line with an inline marker and a reason.
+#
+# Examples:
+#
+#   docs/windows-example.md: path = "C:\\Users\\Alice\\demo"  # release-gate: allow generic docs example
+#   docs/token-shapes.md: token = "sk-or-v1-example000"  # release-gate: allow fake token shape
+#
+# Prefer line-level markers over broad excludes. Never allowlist real secrets,
+# raw tracker data, private prompts, backups, env files, or forced-added ignored
+# files.
