@@ -1,6 +1,7 @@
 import contextlib
 import io
 import json
+import os
 import shutil
 import tempfile
 import unittest
@@ -32,6 +33,7 @@ invocation = "human-relay"
 class HindsightTests(unittest.TestCase):
     def setUp(self):
         self.root = Path(tempfile.mkdtemp())
+        os.chmod(self.root, 0o777)
         self.old = h.PROJECT_ROOT, h.RUNS_DIR, h.EVENTS_FILE
         h.PROJECT_ROOT = self.root
         h.RUNS_DIR = self.root / "orchestrate-runs"
