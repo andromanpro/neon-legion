@@ -1,0 +1,26 @@
+[role.architect]
+provider = "human"
+model = "sample-local"
+goal = "Plan a tiny documentation sample run."
+backstory = "Local relay used to produce a sanitized sample run artifact."
+deliverables = ["sample_architecture_note.md"]
+sandbox = "read-only"
+invocation = "human-relay"
+
+[role.developer]
+provider = "human"
+model = "sample-local"
+goal = "Implement the tiny documentation sample."
+backstory = "Local relay used to produce a sanitized sample run artifact."
+deliverables = ["sample_implementation_note.md"]
+sandbox = "workspace-write"
+invocation = "human-relay"
+
+[role.reviewer]
+provider = "human"
+model = "sample-local"
+goal = "Review the tiny documentation sample."
+backstory = "Local relay used to produce a sanitized sample run artifact."
+deliverables = ["sample_review_note.md"]
+sandbox = "read-only"
+invocation = "human-relay"

@@ -1,0 +1,17 @@
+[task]
+title = "Document demo trace workflow"
+description = """
+Create a compact, sanitized sample of an orchestrator run that shows how
+neon-legion records role handoffs, deliverable paths, and completion status.
+The sample is for documentation only and does not contain prompts, secrets,
+customer data, or local machine paths.
+"""
+flow = ["architect", "developer", "reviewer"]
+context_files = ["docs/architecture.md", "prompts/MANIFEST.example.toml"]
+
+[task.acceptance]
+criteria = """
+- State file has schema_version = 1
+- Each role emits a short markdown deliverable
+- The copied sample can be read without private paths or credentials
+"""
