@@ -20,15 +20,10 @@ This tool is what came out of that.
 ![Privacy first](https://img.shields.io/badge/data-stays--local-purple)
 [![architecture](https://img.shields.io/badge/docs-architecture-lightgrey)](docs/architecture.md)
 
-<!-- Screenshot placeholder. After running the dashboard for a few sessions,
-     take a hero shot at 1200×630 and drop it as `docs/screenshots/hero.png`,
-     then uncomment the line below.
-![hero](docs/screenshots/hero.png)
-*(local cyberpunk dashboard — replace with your own screenshot)*
--->
+![Local cyberpunk dashboard — hero](docs/screenshots/hero.png)
 
-> 📸 **Screenshot coming soon.** After running the dashboard you can drop
-> a hero image at `docs/screenshots/hero.png` — README auto-renders it.
+*Local cyberpunk dashboard at 127.0.0.1:8089. Numbers are real
+(personal usage, two months of Claude Code + Codex CLI + OpenClaw + OpenCode).*
 
 ---
 
@@ -65,6 +60,19 @@ adapter, hindsight, and sanitizer behavior. Run it with
 `config.example.toml`, ignored `config.toml`, and explicit env-var overrides.
 Backend, tracker, and tool code use it for shared runtime settings without
 making local paths part of git history.
+
+## Gallery
+
+| Widget | Shot |
+|---|---|
+| Period totals — 2 months in one panel | ![period](docs/screenshots/total-period.png) |
+| Cost timeline by provider | ![cost](docs/screenshots/cost-chart.png) |
+| Productivity multiplier (×N big-number) | ![multiplier](docs/screenshots/multiplier-bignumber.png) |
+| Stress overlay — profanity + frustration arc | ![sentiment](docs/screenshots/sentiment-widget.png) |
+
+Agent conveyor (what gets wired up — Telegram → OpenClaw → Claude → Codex → DeepSeek → approve):
+
+![agent flow](docs/screenshots/neon-legion-flow.png)
 
 ## Why
 

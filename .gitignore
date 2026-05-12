@@ -38,4 +38,12 @@ __pycache__/
 *.log
 .~lock.*
 ~$*
+
+# Codex sandbox leftovers — process creates these as workspace-temp inside
+# the cwd, locks them with AppContainer ACL, then exits without cleanup.
+# Removal requires `takeown /f tmp* /r /d y && rd /s /q tmp*` from admin
+# PowerShell (or just delete from File Explorer with admin perms).
 codex-tests.tmp/
+pytestdir/
+demo-smoke-*/
+tmp[a-z_0-9][a-z_0-9][a-z_0-9][a-z_0-9][a-z_0-9][a-z_0-9][a-z_0-9][a-z_0-9]/

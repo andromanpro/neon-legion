@@ -1,5 +1,7 @@
 # Architecture
 
+> Русская версия: [architecture.ru.md](architecture.ru.md) — с диаграммой топологии агентов в начале.
+
 `neon-legion` is a 5-layer local-first pipeline. Each layer can run alone;
 adding the next layer enables the next class of metrics.
 
