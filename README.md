@@ -32,6 +32,40 @@ This tool is what came out of that.
 
 ---
 
+## v0.3 highlights
+
+**Hindsight Replay.** Completed orchestrator runs can get a second-model review
+with [`tools/hindsight.py`](tools/hindsight.py): Codex output can be critiqued
+by OpenCode/DeepSeek, OpenCode output by Codex, and trivial deliverables are
+skipped instead of padded.
+
+**Release privacy gate.** [`tools/release-gate.py`](tools/release-gate.py) is a
+read-only hard gate for public releases. It scans tracked files, forced ignored
+files, and recent commit messages for private data patterns and exits non-zero
+on configured failures.
+
+**Demo data.** [`tools/gen-fake-events.py`](tools/gen-fake-events.py) creates
+deterministic local telemetry for Claude, Codex, OpenClaw, and OpenCode. The
+`make demo` target writes that data and produces `dashboard/snapshot.json` for
+an instant dashboard run.
+
+**Schema versioning.** Persisted records now carry `schema_version`, and
+[`tools/schema_migrate.py --check`](tools/schema_migrate.py) reports coverage
+across tracker JSONL, orchestrator state, and dashboard snapshots.
+
+**Live OpenCode tracking.** [`tracker/opencode-watch.py`](tracker/opencode-watch.py)
+polls the OpenCode SQLite database and reuses the idempotent backfill importer.
+It logs only non-empty ticks unless `--verbose` is set.
+
+**Tests.** The core suite is 53 stdlib `unittest` cases across orchestrator,
+adapter, hindsight, and sanitizer behavior. Run it with
+`python -m unittest discover -s tests -v`; see [tests/README.md](tests/README.md).
+
+**Config as TOML.** [`tools/config.py`](tools/config.py) merges
+`config.example.toml`, ignored `config.toml`, and explicit env-var overrides.
+Backend, tracker, and tool code use it for shared runtime settings without
+making local paths part of git history.
+
 ## Why
 
 Anyone running both **Claude Max + ChatGPT Pro** is paying ~$400/mo for AI
