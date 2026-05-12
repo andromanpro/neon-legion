@@ -84,6 +84,10 @@ token math instead of "did this actually save me time?"
 Then it shows you the **multiplier**: `1 + saved/with-AI`. Real number from
 real sessions, not aspirational marketing.
 
+And yes, the slogan's *"we count yours"* is literal — `tracker/backfill-profanity.py`
+runs a regex on your own messages and writes `profanity_count` to every event.
+The number rolls up into the stress axis above. The joke is the feature.
+
 ## How it stays private
 
 - **Stdlib only** for `tracker/`, `backend/`, `dashboard/`. No third-party
