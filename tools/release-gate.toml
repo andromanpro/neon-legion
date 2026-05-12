@@ -1,0 +1,46 @@
+# Release privacy gate configuration.
+#
+# The scanner is read-only. It scans tracked files, reports privacy leaks, and
+# exits non-zero when any category configured as "fail" is found.
+
+[scope]
+# Paths to scan (tracked files only; .gitignore already filters untracked files).
+# Empty list = scan all tracked files.
+include_globs = []
+
+# Glob patterns to skip even if tracked.
+exclude_globs = [
+    "LICENSE",
+    "*.svg",  # branding has hex colors that can look like tokens
+    "tests/**",  # tests intentionally use fake tokens and private-looking data
+]
+
+[patterns]
+# Customer / project codenames from past work that must not appear publicly.
+# One per line; case-insensitive whole-word matches. Add yours.
+customer_codenames = []
+
+# Allow-list emails (will NOT be flagged by the content email scanner).
+# Co-Authored-By trailers in git history are still checked separately.
+allowed_emails = ["noreply@anthropic.com"]
+
+# Allow-list absolute paths (won't be flagged).
+allowed_absolute_paths = []
+
+[severity]
+# Map violation category -> ok/warn/fail.
+forced_ignored = "fail"
+api_token = "fail"
+absolute_path = "warn"
+email = "warn"
+lan_address = "warn"
+co_authored_by = "fail"
+cyrillic_path = "warn"
+tracker_jsonl_tracked = "fail"
+private_prompts_tracked = "fail"
+pycache_tracked = "fail"
+backup_tracked = "fail"
+log_tracked = "warn"
+env_file_tracked = "fail"
+customer_codename = "fail"
+binary_skipped = "info"
