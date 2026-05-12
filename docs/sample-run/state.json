@@ -1,0 +1,71 @@
+{
+  "schema_version": 1,
+  "run_id": "20260512T0939-1e3af3",
+  "status": "completed",
+  "created_at": "2026-05-12T09:39:50+03:00",
+  "updated_at": "2026-05-12T09:40:52+03:00",
+  "manifest_path": "<project_root>/orchestrate-runs/<run_id>/manifest.used.toml",
+  "roles_path": "<project_root>/orchestrate-runs/<run_id>/roles.used.toml",
+  "flow": [
+    "architect",
+    "developer",
+    "reviewer"
+  ],
+  "next_index": 3,
+  "steps": [
+    {
+      "index": 0,
+      "role": "architect",
+      "status": "completed",
+      "output_path": "<project_root>/orchestrate-runs/<run_id>/01-architect.md",
+      "started_at": 1778567990.9264593,
+      "result": {
+        "ok": true,
+        "exit_code": 0,
+        "duration_ms": 2,
+        "output_path": "<project_root>/orchestrate-runs/<run_id>/01-architect-PROMPT.md",
+        "error": null,
+        "waiting_for_human": true,
+        "response_path": "<project_root>/orchestrate-runs/<run_id>/01-architect.md"
+      },
+      "prompt_path": "<project_root>/orchestrate-runs/<run_id>/01-architect-PROMPT.md",
+      "response_path": "<project_root>/orchestrate-runs/<run_id>/01-architect.md"
+    },
+    {
+      "index": 1,
+      "role": "developer",
+      "status": "completed",
+      "output_path": "<project_root>/orchestrate-runs/<run_id>/02-developer.md",
+      "started_at": 1778568011.9007096,
+      "result": {
+        "ok": true,
+        "exit_code": 0,
+        "duration_ms": 2,
+        "output_path": "<project_root>/orchestrate-runs/<run_id>/02-developer-PROMPT.md",
+        "error": null,
+        "waiting_for_human": true,
+        "response_path": "<project_root>/orchestrate-runs/<run_id>/02-developer.md"
+      },
+      "prompt_path": "<project_root>/orchestrate-runs/<run_id>/02-developer-PROMPT.md",
+      "response_path": "<project_root>/orchestrate-runs/<run_id>/02-developer.md"
+    },
+    {
+      "index": 2,
+      "role": "reviewer",
+      "status": "completed",
+      "output_path": "<project_root>/orchestrate-runs/<run_id>/03-reviewer.md",
+      "started_at": 1778568032.0573444,
+      "result": {
+        "ok": true,
+        "exit_code": 0,
+        "duration_ms": 1,
+        "output_path": "<project_root>/orchestrate-runs/<run_id>/03-reviewer-PROMPT.md",
+        "error": null,
+        "waiting_for_human": true,
+        "response_path": "<project_root>/orchestrate-runs/<run_id>/03-reviewer.md"
+      },
+      "prompt_path": "<project_root>/orchestrate-runs/<run_id>/03-reviewer-PROMPT.md",
+      "response_path": "<project_root>/orchestrate-runs/<run_id>/03-reviewer.md"
+    }
+  ]
+}
