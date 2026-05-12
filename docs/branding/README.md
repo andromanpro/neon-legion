@@ -2,7 +2,7 @@
 
 ![Hero banner](hero-banner.svg)
 
-This directory contains the vector branding kit for `neon-legion`. The assets are pure SVG: no JavaScript, no external fonts, no external images, and no binary image weight.
+This directory contains the vector branding kit for `neon-legion`. The assets are pure SVG: no JavaScript, no external fonts, no external images, and no binary image weight. The visual language is intentionally product-first: local command surface, agent conveyor, privacy gate, and measurable cost/time tracking.
 
 ## Assets
 
@@ -11,7 +11,9 @@ This directory contains the vector branding kit for `neon-legion`. The assets ar
 | `hero-banner.svg` | README header banner, 1500 x 500. |
 | `social-card.svg` | OpenGraph/Twitter/Telegram preview card, 1200 x 630. |
 | `logo.svg` | Square avatar and favicon source, 512 x 512. |
-| `divider.svg` | Subtle README section divider, 1500 x 60. |
+| `divider.svg` | Subtle README section divider, 1500 x 72. |
+| `neon-legion-flow.dot` / `.svg` | English agent conveyor diagram for the public README. |
+| `neon-legion-flow.ru.dot` / `.svg` | Russian agent conveyor diagram for Russian architecture docs. |
 
 ## Previews
 
@@ -19,7 +21,9 @@ This directory contains the vector branding kit for `neon-legion`. The assets ar
 
 ![Square logo](logo.svg)
 
-![Cyberpunk divider](divider.svg)
+![Pipeline divider](divider.svg)
+
+![Agent conveyor](neon-legion-flow.svg)
 
 ## Palette
 
@@ -39,7 +43,7 @@ Replace the SVG file in this directory with another self-contained SVG using the
 Recommended root README integration:
 
 ```md
-![neon-legion cyberpunk command banner](docs/branding/hero-banner.svg)
+![neon-legion local AI command banner](docs/branding/hero-banner.svg)
 ```
 
 ## License

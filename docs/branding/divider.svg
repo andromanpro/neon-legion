@@ -1,36 +1,48 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="60" viewBox="0 0 1500 60" role="img" aria-labelledby="dividerTitle dividerDesc">
-  <desc id="dividerDesc">Subtle cyberpunk section divider with neon scanline rails, command ticks, a small shield mark, and five agent blips.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="72" viewBox="0 0 1500 72" role="img" aria-labelledby="dividerTitle dividerDesc">
   <title id="dividerTitle">neon-legion divider</title>
+  <desc id="dividerDesc">Thin neon-legion README divider showing a local agent pipeline from command to review to tracker.</desc>
   <defs>
     <style><![CDATA[
-      .mono{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:10px;fill:#64FFDA}
-      .cyan{stroke:#00D4FF}.mag{stroke:#FF2EC4}.green{stroke:#64FFDA}.thin{fill:none;stroke-width:2}.hair{fill:none;stroke-width:1}
+      .mono{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:11px;font-weight:800;letter-spacing:0;fill:#64FFDA}
+      .tiny{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:10px;font-weight:700;letter-spacing:0;fill:#9FC7E6}
     ]]></style>
     <linearGradient id="rail" x1="0" x2="1" y1="0" y2="0">
       <stop offset="0" stop-color="#020617" stop-opacity="0"/>
-      <stop offset="0.12" stop-color="#00D4FF" stop-opacity="0.62"/>
-      <stop offset="0.5" stop-color="#64FFDA" stop-opacity="0.85"/>
-      <stop offset="0.88" stop-color="#FF2EC4" stop-opacity="0.62"/>
+      <stop offset=".13" stop-color="#00D4FF" stop-opacity=".62"/>
+      <stop offset=".50" stop-color="#64FFDA" stop-opacity=".9"/>
+      <stop offset=".87" stop-color="#FF2EC4" stop-opacity=".62"/>
       <stop offset="1" stop-color="#020617" stop-opacity="0"/>
     </linearGradient>
   </defs>
-  <rect width="1500" height="60" fill="#020617" fill-opacity="0"/>
-  <path d="M64 30H1436" stroke="url(#rail)" stroke-width="2"/>
-  <path d="M64 24H256M1244 24H1436M64 36H256M1244 36H1436" class="hair" stroke="url(#rail)" opacity="0.52"/>
-  <g class="cyan hair" opacity="0.62">
-    <path d="M120 18V42M190 22V38M260 16V44M330 22V38M400 18V42M470 22V38M540 16V44M610 22V38"/>
-    <path d="M890 22V38M960 16V44M1030 22V38M1100 18V42M1170 22V38M1240 16V44M1310 22V38M1380 18V42"/>
+  <rect width="1500" height="72" fill="#020617" fill-opacity="0"/>
+  <path d="M58 36H1442" stroke="url(#rail)" stroke-width="2"/>
+  <path d="M58 28H280M1220 28H1442M58 44H280M1220 44H1442" stroke="url(#rail)" stroke-width="1" opacity=".55"/>
+
+  <g transform="translate(352 36)">
+    <rect x="-72" y="-18" width="144" height="36" rx="6" fill="#07162B" stroke="#00D4FF" stroke-opacity=".52"/>
+    <text x="0" y="5" class="tiny" text-anchor="middle">COMMAND</text>
   </g>
-  <g transform="translate(750 30)">
-    <path d="M0 -24L38 -8V15C38 34 19 47 0 56C-19 47 -38 34 -38 15V-8Z" fill="#020617" stroke="#00D4FF" stroke-width="2"/>
-    <path d="M0 -13L23 -3V13C23 24 12 33 0 39C-12 33 -23 24 -23 13V-3Z" fill="none" stroke="#FF2EC4"/>
-    <text x="0" y="14" class="mono" text-anchor="middle">NL</text>
+  <g transform="translate(548 36)">
+    <rect x="-72" y="-18" width="144" height="36" rx="6" fill="#07162B" stroke="#00D4FF" stroke-opacity=".52"/>
+    <text x="0" y="5" class="tiny" text-anchor="middle">PLAN</text>
   </g>
-  <g fill="#00D4FF">
-    <circle cx="676" cy="30" r="4"/><circle cx="708" cy="24" r="4"/><circle cx="792" cy="24" r="4"/><circle cx="824" cy="30" r="4"/><circle cx="750" cy="7" r="3"/>
+  <g transform="translate(744 36)">
+    <rect x="-72" y="-18" width="144" height="36" rx="6" fill="#07162B" stroke="#00D4FF" stroke-opacity=".52"/>
+    <text x="0" y="5" class="tiny" text-anchor="middle">BUILD</text>
   </g>
-  <g class="mag thin" opacity="0.65">
-    <path d="M48 30H18M1452 30H1482"/>
+  <g transform="translate(940 36)">
+    <rect x="-72" y="-18" width="144" height="36" rx="6" fill="#07162B" stroke="#00D4FF" stroke-opacity=".52"/>
+    <text x="0" y="5" class="tiny" text-anchor="middle">REVIEW</text>
   </g>
+  <g transform="translate(1136 36)">
+    <rect x="-72" y="-18" width="144" height="36" rx="6" fill="#07162B" stroke="#64FFDA" stroke-opacity=".58"/>
+    <text x="0" y="5" class="tiny" text-anchor="middle">TRACK</text>
+  </g>
+
+  <g fill="#00D4FF" opacity=".92">
+    <circle cx="450" cy="36" r="4"/><circle cx="646" cy="36" r="4"/><circle cx="842" cy="36" r="4"/><circle cx="1038" cy="36" r="4"/>
+  </g>
+  <text x="750" y="14" class="mono" text-anchor="middle">NEON-LEGION / LOCAL AI AGENT PIPELINE</text>
+  <text x="750" y="66" class="tiny" text-anchor="middle">JSONL EVENTS + DASHBOARD + HUMAN APPROVAL</text>
 </svg>

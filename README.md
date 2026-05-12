@@ -1,6 +1,6 @@
 # neon-legion
 
-![neon-legion cyberpunk command banner](docs/branding/hero-banner.svg)
+![neon-legion local AI command banner](docs/branding/hero-banner.svg)
 
 > **Your personal AI legion. Almost no fucking swearing. _(Yes, we count yours.)_**
 >

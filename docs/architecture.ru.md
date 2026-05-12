@@ -11,7 +11,7 @@
 управляемый процесс. Трекер появился как побочный результат — нужно было
 видеть кто и за что отвечает.
 
-![Конвейер neon-legion: Telegram → OpenClaw → Claude → Codex → DeepSeek → approve, события каждого шага оседают в трекер](branding/neon-legion-flow.svg)
+![Конвейер neon-legion: Telegram → OpenClaw → Claude → Codex → DeepSeek → approve, события каждого шага оседают в трекер](branding/neon-legion-flow.ru.svg)
 
 | Роль | Кто | Что делает |
 |---|---|---|

@@ -1,103 +1,160 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="1500" height="500" viewBox="0 0 1500 500" role="img" aria-labelledby="heroTitle heroDesc">
-  <desc id="heroDesc">Cyberpunk command banner for neon-legion with a neon title, five agent blips, a shield mark, scanlines, and a synthwave command-grid horizon.</desc>
   <title id="heroTitle">neon-legion hero banner</title>
+  <desc id="heroDesc">Product-style cyberpunk banner for neon-legion: a local-first AI agent command center with five agent roles, live metrics, privacy gate, and a tracker ledger.</desc>
   <defs>
     <style><![CDATA[
-      .headline{font-family:Inter,system-ui,sans-serif;font-size:92px;font-weight:900;letter-spacing:8px;fill:#F8FAFC}
-      .sub{font-family:Inter,system-ui,sans-serif;font-size:29px;font-weight:700;fill:#F8FAFC}
-      .ru{font-family:Inter,system-ui,sans-serif;font-size:20px;font-weight:600;fill:#64FFDA}
-      .mono{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:15px;fill:#64FFDA}
-      .tiny{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:12px;fill:#F8FAFC}
-      .cyan{stroke:#00D4FF}.mag{stroke:#FF2EC4}.green{stroke:#64FFDA}.white{stroke:#F8FAFC}
-      .thin{fill:none;stroke-width:2}.hair{fill:none;stroke-width:1}
+      .title{font-family:Inter,system-ui,sans-serif;font-size:68px;font-weight:900;letter-spacing:0;fill:#F8FAFC}
+      .subtitle{font-family:Inter,system-ui,sans-serif;font-size:28px;font-weight:750;fill:#DCEBFF}
+      .body{font-family:Inter,system-ui,sans-serif;font-size:20px;font-weight:600;fill:#9FC7E6}
+      .mono{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:14px;font-weight:700;letter-spacing:0;fill:#64FFDA}
+      .monoSmall{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:12px;font-weight:650;letter-spacing:0;fill:#9FC7E6}
+      .metricLabel{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:12px;letter-spacing:0;fill:#8AA7C4}
+      .metricValue{font-family:Inter,system-ui,sans-serif;font-size:28px;font-weight:900;fill:#64FFDA}
+      .tiny{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:11px;letter-spacing:0;fill:#DCEBFF}
+      .box{fill:#07162B;stroke:#00D4FF;stroke-width:1.8}
+      .boxSoft{fill:#07162B;stroke:#00D4FF;stroke-width:1.2;stroke-opacity:.36}
+      .wire{fill:none;stroke:#00D4FF;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+      .wireSoft{fill:none;stroke:#64FFDA;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:8 9}
     ]]></style>
-    <linearGradient id="sky" x1="0" x2="1" y1="0" y2="1">
+    <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
       <stop offset="0" stop-color="#020617"/>
-      <stop offset="0.55" stop-color="#07112a"/>
-      <stop offset="1" stop-color="#1b0b2f"/>
+      <stop offset=".55" stop-color="#08152D"/>
+      <stop offset="1" stop-color="#160A2C"/>
     </linearGradient>
-    <radialGradient id="cyanFade" cx="75%" cy="42%" r="55%">
-      <stop offset="0" stop-color="#00D4FF" stop-opacity="0.32"/>
-      <stop offset="0.46" stop-color="#7C3AED" stop-opacity="0.14"/>
+    <radialGradient id="leftGlow" cx="21%" cy="22%" r="60%">
+      <stop offset="0" stop-color="#00D4FF" stop-opacity=".22"/>
+      <stop offset=".55" stop-color="#00D4FF" stop-opacity=".06"/>
       <stop offset="1" stop-color="#020617" stop-opacity="0"/>
     </radialGradient>
-    <radialGradient id="magFade" cx="9%" cy="83%" r="65%">
-      <stop offset="0" stop-color="#FF2EC4" stop-opacity="0.22"/>
+    <radialGradient id="rightGlow" cx="80%" cy="45%" r="55%">
+      <stop offset="0" stop-color="#64FFDA" stop-opacity=".20"/>
+      <stop offset=".55" stop-color="#7C3AED" stop-opacity=".12"/>
       <stop offset="1" stop-color="#020617" stop-opacity="0"/>
     </radialGradient>
+    <linearGradient id="panel" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#07162B" stop-opacity=".96"/>
+      <stop offset="1" stop-color="#030A18" stop-opacity=".96"/>
+    </linearGradient>
     <pattern id="scan" width="8" height="8" patternUnits="userSpaceOnUse">
-      <path d="M0 0H8" stroke="#F8FAFC" stroke-opacity="0.07"/>
+      <path d="M0 0H8" stroke="#F8FAFC" stroke-opacity=".055"/>
     </pattern>
-    <filter id="glow" x="-20%" y="-30%" width="140%" height="160%">
-      <feGaussianBlur stdDeviation="4" result="b"/>
-      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    <filter id="glow" x="-30%" y="-40%" width="160%" height="180%">
+      <feGaussianBlur stdDeviation="4" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
     </filter>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10Z" fill="#00D4FF"/>
+    </marker>
+    <marker id="arrowGreen" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10Z" fill="#64FFDA"/>
+    </marker>
   </defs>
-  <rect width="1500" height="500" fill="url(#sky)"/>
-  <rect width="1500" height="500" fill="url(#cyanFade)"/>
-  <rect width="1500" height="500" fill="url(#magFade)"/>
-  <rect width="1500" height="500" fill="url(#scan)" opacity="0.75"/>
 
-  <g opacity="0.45" class="cyan hair">
-    <path d="M0 392H1500M0 422H1500M0 452H1500M0 482H1500"/>
-    <path d="M80 500L610 360M260 500L700 360M440 500L790 360M620 500L880 360M800 500L970 360M980 500L1060 360M1160 500L1150 360M1340 500L1240 360"/>
-  </g>
-  <g opacity="0.28" class="mag hair">
-    <path d="M0 438H1500M0 468H1500"/>
-    <path d="M1470 500L1260 360M1260 500L1160 360M1040 500L1040 360"/>
+  <rect width="1500" height="500" fill="url(#bg)"/>
+  <rect width="1500" height="500" fill="url(#leftGlow)"/>
+  <rect width="1500" height="500" fill="url(#rightGlow)"/>
+  <rect width="1500" height="500" fill="url(#scan)" opacity=".85"/>
+
+  <g opacity=".23">
+    <path d="M0 405H1500M0 437H1500M0 469H1500" stroke="#00D4FF"/>
+    <path d="M110 500L560 370M300 500L665 370M490 500L770 370M680 500L875 370M870 500L980 370M1060 500L1085 370M1250 500L1190 370M1440 500L1295 370" stroke="#00D4FF"/>
+    <path d="M0 453H1500M0 484H1500" stroke="#FF2EC4"/>
   </g>
 
-  <g transform="translate(80 76)">
-    <path d="M0 22H278L303 0H515" class="cyan thin" opacity="0.7"/>
-    <path d="M0 46H140L160 66H360" class="mag thin" opacity="0.55"/>
-    <text x="0" y="140" class="headline" fill="#00D4FF" opacity="0.45" filter="url(#glow)">NEON LEGION</text>
-    <text x="5" y="145" class="headline" fill="#FF2EC4" opacity="0.35">NEON LEGION</text>
-    <text x="2" y="142" class="headline">NEON LEGION</text>
-    <text x="3" y="199" class="sub">Your personal AI legion. Almost no fucking swearing. (Yes, we count yours.)</text>
-    <text x="3" y="232" class="ru">Твоя личная армия. Почти без ебать-колотить. (Да, мы считаем маты.)</text>
-    <g transform="translate(5 270)">
-      <rect x="0" y="0" width="530" height="42" rx="4" fill="#020617" opacity="0.72" stroke="#00D4FF" stroke-opacity="0.45"/>
-      <text x="18" y="27" class="mono">COMMANDER: USER</text>
-      <text x="208" y="27" class="mono">AGENTS: 5</text>
-      <text x="342" y="27" class="mono">MODE: LOCAL-FIRST</text>
+  <g transform="translate(66 52)">
+    <rect x="0" y="0" width="626" height="384" rx="14" fill="url(#panel)" stroke="#00D4FF" stroke-opacity=".35"/>
+    <path d="M28 34H186L206 18H380" class="wire" opacity=".68"/>
+    <text x="30" y="108" class="title" filter="url(#glow)">NEON-LEGION</text>
+    <text x="34" y="152" class="subtitle">local-first command center for AI agents</text>
+    <text x="34" y="190" class="body">Track cost, time, stress, and review gates across</text>
+    <text x="34" y="218" class="body">Claude, Codex, OpenClaw, OpenCode, and DeepSeek.</text>
+
+    <g transform="translate(34 250)">
+      <rect x="0" y="0" width="116" height="36" rx="5" class="boxSoft"/>
+      <text x="16" y="23" class="mono">CLAUDE</text>
+      <rect x="128" y="0" width="104" height="36" rx="5" class="boxSoft"/>
+      <text x="146" y="23" class="mono">CODEX</text>
+      <rect x="244" y="0" width="134" height="36" rx="5" class="boxSoft"/>
+      <text x="260" y="23" class="mono">OPENCLAW</text>
+      <rect x="390" y="0" width="128" height="36" rx="5" class="boxSoft"/>
+      <text x="406" y="23" class="mono">OPENCODE</text>
+    </g>
+
+    <g transform="translate(34 306)">
+      <rect x="0" y="0" width="174" height="44" rx="5" fill="#020617" stroke="#64FFDA" stroke-opacity=".42"/>
+      <text x="16" y="18" class="metricLabel">MODE</text>
+      <text x="16" y="34" class="mono">LOCAL-FIRST</text>
+      <rect x="188" y="0" width="180" height="44" rx="5" fill="#020617" stroke="#64FFDA" stroke-opacity=".42"/>
+      <text x="204" y="18" class="metricLabel">PRIVACY</text>
+      <text x="204" y="34" class="mono">NO SAAS</text>
+      <rect x="382" y="0" width="166" height="44" rx="5" fill="#020617" stroke="#64FFDA" stroke-opacity=".42"/>
+      <text x="398" y="18" class="metricLabel">DATA</text>
+      <text x="398" y="34" class="mono">JSONL LEDGER</text>
     </g>
   </g>
 
-  <g transform="translate(870 68)" filter="url(#glow)">
-    <path d="M230 14L350 64V202C350 280 293 342 230 378C167 342 110 280 110 202V64Z" fill="#020617" fill-opacity="0.56" stroke="#00D4FF" stroke-width="4"/>
-    <path d="M230 58L310 92V198C310 247 274 291 230 319C186 291 150 247 150 198V92Z" fill="none" stroke="#FF2EC4" stroke-width="2" opacity="0.9"/>
-    <path d="M171 158H198L230 230V158H262V288H232L200 216V288H171Z" fill="#F8FAFC"/>
-    <path d="M279 158H312V258H359V288H279Z" fill="#64FFDA"/>
+  <g transform="translate(736 52)">
+    <rect x="0" y="0" width="698" height="384" rx="14" fill="url(#panel)" stroke="#64FFDA" stroke-opacity=".30"/>
+    <text x="28" y="34" class="mono">LIVE COMMAND SURFACE</text>
+
+    <g transform="translate(28 60)">
+      <rect x="0" y="0" width="200" height="92" rx="8" class="boxSoft"/>
+      <text x="18" y="29" class="metricLabel">NET SAVINGS</text>
+      <text x="18" y="66" class="metricValue">$73K</text>
+      <text x="112" y="64" class="tiny">API equiv</text>
+      <text x="112" y="80" class="tiny">minus subs</text>
+
+      <rect x="220" y="0" width="200" height="92" rx="8" class="boxSoft"/>
+      <text x="238" y="29" class="metricLabel">MULTIPLIER</text>
+      <text x="238" y="66" class="metricValue">x9.8</text>
+      <text x="332" y="66" class="tiny">active time</text>
+
+      <rect x="440" y="0" width="200" height="92" rx="8" class="boxSoft"/>
+      <text x="458" y="29" class="metricLabel">SESSIONS</text>
+      <text x="458" y="66" class="metricValue">245/247</text>
+    </g>
+
+    <g transform="translate(40 218)">
+      <rect x="0" y="-24" width="124" height="48" rx="8" class="box"/>
+      <text x="62" y="-5" class="tiny" text-anchor="middle">Telegram</text>
+      <text x="62" y="13" class="tiny" text-anchor="middle">command</text>
+
+      <rect x="164" y="-24" width="126" height="48" rx="8" class="box"/>
+      <text x="227" y="-5" class="tiny" text-anchor="middle">OpenClaw</text>
+      <text x="227" y="13" class="tiny" text-anchor="middle">NAS bridge</text>
+
+      <rect x="330" y="-62" width="126" height="48" rx="8" class="box"/>
+      <text x="393" y="-43" class="tiny" text-anchor="middle">Claude</text>
+      <text x="393" y="-25" class="tiny" text-anchor="middle">architect</text>
+
+      <rect x="330" y="14" width="126" height="48" rx="8" class="box"/>
+      <text x="393" y="33" class="tiny" text-anchor="middle">Codex</text>
+      <text x="393" y="51" class="tiny" text-anchor="middle">developer</text>
+
+      <rect x="496" y="-24" width="126" height="48" rx="8" class="box"/>
+      <text x="559" y="-5" class="tiny" text-anchor="middle">DeepSeek</text>
+      <text x="559" y="13" class="tiny" text-anchor="middle">reviewer</text>
+
+      <path d="M124 0H164" class="wire" marker-end="url(#arrow)"/>
+      <path d="M290 0C312 0 312 -38 330 -38" class="wire" marker-end="url(#arrow)"/>
+      <path d="M456 -38C486 -38 486 0 496 0" class="wire" marker-end="url(#arrow)"/>
+      <path d="M456 38C480 38 480 0 496 0" class="wire" marker-end="url(#arrow)"/>
+      <path d="M393 -14V14" class="wireSoft" marker-end="url(#arrowGreen)"/>
+    </g>
+
+    <g transform="translate(44 318)">
+      <rect x="0" y="0" width="604" height="48" rx="7" fill="#020617" stroke="#64FFDA" stroke-opacity=".42"/>
+      <text x="18" y="29" class="monoSmall">TRACKER: JSONL + DASHBOARD</text>
+      <text x="248" y="29" class="monoSmall">APPROVAL: HUMAN GATE</text>
+      <text x="472" y="29" class="monoSmall">PUBLIC: SCRUBBED</text>
+    </g>
   </g>
 
-  <g transform="translate(1092 220)">
-    <circle r="118" fill="#020617" fill-opacity="0.38" stroke="#00D4FF" stroke-opacity="0.7" stroke-width="2"/>
-    <circle r="78" fill="none" stroke="#00D4FF" stroke-opacity="0.45"/>
-    <circle r="38" fill="none" stroke="#64FFDA" stroke-opacity="0.45"/>
-    <path d="M0 0L96 -69" stroke="#64FFDA" stroke-width="3" stroke-opacity="0.8"/>
-    <path d="M-118 0H118M0 -118V118" stroke="#F8FAFC" stroke-opacity="0.16"/>
-    <g fill="#00D4FF">
-      <circle cx="-58" cy="-43" r="7"/><circle cx="62" cy="-54" r="7"/><circle cx="78" cy="35" r="7"/><circle cx="-33" cy="72" r="7"/><circle cx="14" cy="-6" r="7"/>
-    </g>
-    <g class="tiny" text-anchor="middle">
-      <text x="-90" y="-60">CLAUDE</text><text x="93" y="-73">CODEX</text><text x="112" y="59">OPENCLAW</text><text x="-58" y="101">OPENCODE</text><text x="28" y="-21">DEEPSEEK</text>
-    </g>
-  </g>
-
-  <g transform="translate(924 367)" opacity="0.92">
-    <g fill="#020617" stroke="#00D4FF" stroke-width="2">
-      <path d="M0 82L18 20H64L82 82Z"/><path d="M97 82L115 20H161L179 82Z"/><path d="M194 82L212 20H258L276 82Z"/><path d="M291 82L309 20H355L373 82Z"/><path d="M388 82L406 20H452L470 82Z"/>
-    </g>
-    <g class="green thin" opacity="0.75">
-      <path d="M41 20V0M138 20V0M235 20V0M332 20V0M429 20V0"/>
-    </g>
-    <g class="tiny" text-anchor="middle">
-      <text x="41" y="108">ARCH</text><text x="138" y="108">DEV</text><text x="235" y="108">REVIEW</text><text x="332" y="108">BRIDGE</text><text x="429" y="108">TRACK</text>
-    </g>
-  </g>
-
-  <g opacity="0.62">
-    <path d="M62 36H18V86" class="cyan thin"/><path d="M1438 36H1482V86" class="mag thin"/><path d="M62 464H18V414" class="mag thin"/><path d="M1438 464H1482V414" class="cyan thin"/>
+  <g opacity=".64">
+    <path d="M54 36H18V86" stroke="#00D4FF" stroke-width="2" fill="none"/>
+    <path d="M1446 36H1482V86" stroke="#FF2EC4" stroke-width="2" fill="none"/>
+    <path d="M54 464H18V414" stroke="#FF2EC4" stroke-width="2" fill="none"/>
+    <path d="M1446 464H1482V414" stroke="#00D4FF" stroke-width="2" fill="none"/>
   </g>
 </svg>

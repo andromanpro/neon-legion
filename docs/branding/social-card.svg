@@ -1,73 +1,125 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-labelledby="socialTitle socialDesc">
-  <desc id="socialDesc">High-contrast social preview for neon-legion showing the title, slogan, shield monogram, command HUD lines, and a local-first dashboard strip.</desc>
   <title id="socialTitle">neon-legion social card</title>
+  <desc id="socialDesc">Social preview for neon-legion as a local-first AI agent command center with provider badges, productivity metrics, privacy gate, and dashboard ledger.</desc>
   <defs>
     <style><![CDATA[
-      .h{font-family:Inter,system-ui,sans-serif;font-size:104px;font-weight:900;letter-spacing:7px;fill:#F8FAFC}
-      .s{font-family:Inter,system-ui,sans-serif;font-size:31px;font-weight:750;fill:#F8FAFC}
-      .m{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:21px;font-weight:700;fill:#64FFDA}
-      .tiny{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:15px;fill:#F8FAFC}
-      .cyan{stroke:#00D4FF}.mag{stroke:#FF2EC4}.green{stroke:#64FFDA}.thin{fill:none;stroke-width:2}.hair{fill:none;stroke-width:1}
+      .title{font-family:Inter,system-ui,sans-serif;font-size:80px;font-weight:900;letter-spacing:0;fill:#F8FAFC}
+      .sub{font-family:Inter,system-ui,sans-serif;font-size:30px;font-weight:800;fill:#DCEBFF}
+      .body{font-family:Inter,system-ui,sans-serif;font-size:21px;font-weight:650;fill:#9FC7E6}
+      .mono{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:17px;font-weight:800;letter-spacing:0;fill:#64FFDA}
+      .small{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:13px;font-weight:700;letter-spacing:0;fill:#9FC7E6}
+      .metricLabel{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:12px;letter-spacing:0;fill:#8AA7C4}
+      .metricValue{font-family:Inter,system-ui,sans-serif;font-size:38px;font-weight:900;fill:#64FFDA}
+      .box{fill:#07162B;stroke:#00D4FF;stroke-width:1.8}
+      .soft{fill:#07162B;stroke:#00D4FF;stroke-width:1.2;stroke-opacity:.38}
+      .wire{fill:none;stroke:#00D4FF;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+      .wireGreen{fill:none;stroke:#64FFDA;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:8 8}
     ]]></style>
     <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
       <stop offset="0" stop-color="#020617"/>
-      <stop offset="0.48" stop-color="#061a32"/>
-      <stop offset="1" stop-color="#210725"/>
+      <stop offset=".58" stop-color="#07152D"/>
+      <stop offset="1" stop-color="#180A2B"/>
     </linearGradient>
-    <radialGradient id="burst" cx="78%" cy="45%" r="48%">
-      <stop offset="0" stop-color="#00D4FF" stop-opacity="0.38"/>
-      <stop offset="0.42" stop-color="#7C3AED" stop-opacity="0.16"/>
+    <radialGradient id="glowA" cx="20%" cy="18%" r="70%">
+      <stop offset="0" stop-color="#00D4FF" stop-opacity=".22"/>
+      <stop offset=".55" stop-color="#00D4FF" stop-opacity=".06"/>
       <stop offset="1" stop-color="#020617" stop-opacity="0"/>
     </radialGradient>
-    <pattern id="scan" width="7" height="7" patternUnits="userSpaceOnUse">
-      <path d="M0 0H7" stroke="#F8FAFC" stroke-opacity="0.06"/>
+    <radialGradient id="glowB" cx="78%" cy="52%" r="58%">
+      <stop offset="0" stop-color="#64FFDA" stop-opacity=".22"/>
+      <stop offset=".55" stop-color="#7C3AED" stop-opacity=".12"/>
+      <stop offset="1" stop-color="#020617" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="scan" width="8" height="8" patternUnits="userSpaceOnUse">
+      <path d="M0 0H8" stroke="#F8FAFC" stroke-opacity=".055"/>
     </pattern>
-    <filter id="soft" x="-20%" y="-20%" width="140%" height="140%">
-      <feGaussianBlur stdDeviation="4" result="b"/>
-      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    <filter id="glow" x="-25%" y="-35%" width="150%" height="170%">
+      <feGaussianBlur stdDeviation="4" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
     </filter>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0L10 5L0 10Z" fill="#00D4FF"/>
+    </marker>
   </defs>
-  <rect width="1200" height="630" fill="url(#bg)"/>
-  <rect width="1200" height="630" fill="url(#burst)"/>
-  <rect width="1200" height="630" fill="url(#scan)"/>
-  <path d="M0 510H1200M0 550H1200M0 590H1200" class="cyan hair" opacity="0.35"/>
-  <path d="M70 630L460 425M220 630L540 425M370 630L620 425M520 630L700 425M670 630L780 425M820 630L860 425M970 630L940 425M1120 630L1020 425" class="mag hair" opacity="0.31"/>
 
-  <g transform="translate(78 98)">
-    <path d="M0 0H360L390 28H590" class="cyan thin" opacity="0.75"/>
-    <text x="2" y="126" class="h" fill="#00D4FF" opacity="0.45" filter="url(#soft)">NEON</text>
-    <text x="8" y="132" class="h" fill="#FF2EC4" opacity="0.38">NEON</text>
-    <text x="4" y="128" class="h">NEON</text>
-    <text x="0" y="242" class="h" fill="#00D4FF" opacity="0.42" filter="url(#soft)">LEGION</text>
-    <text x="7" y="248" class="h" fill="#FF2EC4" opacity="0.38">LEGION</text>
-    <text x="3" y="244" class="h">LEGION</text>
-    <text x="4" y="300" class="s">Your personal AI legion. Almost no fucking swearing. (Yes, we count yours.)</text>
-    <g transform="translate(4 348)">
-      <rect x="0" y="0" width="610" height="58" rx="5" fill="#020617" fill-opacity="0.78" stroke="#00D4FF" stroke-opacity="0.55"/>
-      <text x="23" y="38" class="m">5 providers / 1 dashboard / 0 SaaS</text>
+  <rect width="1200" height="630" fill="url(#bg)"/>
+  <rect width="1200" height="630" fill="url(#glowA)"/>
+  <rect width="1200" height="630" fill="url(#glowB)"/>
+  <rect width="1200" height="630" fill="url(#scan)"/>
+
+  <g opacity=".22">
+    <path d="M0 512H1200M0 552H1200M0 592H1200" stroke="#00D4FF"/>
+    <path d="M90 630L440 435M250 630L528 435M410 630L616 435M570 630L704 435M730 630L792 435M890 630L880 435M1050 630L968 435" stroke="#00D4FF"/>
+    <path d="M0 566H1200M0 602H1200" stroke="#FF2EC4"/>
+  </g>
+
+  <g transform="translate(70 64)">
+    <text x="0" y="82" class="title" filter="url(#glow)">NEON-LEGION</text>
+    <text x="4" y="130" class="sub">your local AI agent command center</text>
+    <text x="4" y="172" class="body">Track cost, saved hours, stress, and approvals across</text>
+    <text x="4" y="202" class="body">Claude, Codex, OpenClaw, OpenCode, and DeepSeek.</text>
+
+    <g transform="translate(4 248)">
+      <rect x="0" y="0" width="143" height="38" rx="5" class="soft"/>
+      <text x="17" y="25" class="mono">CLAUDE</text>
+      <rect x="155" y="0" width="130" height="38" rx="5" class="soft"/>
+      <text x="174" y="25" class="mono">CODEX</text>
+      <rect x="297" y="0" width="160" height="38" rx="5" class="soft"/>
+      <text x="315" y="25" class="mono">OPENCLAW</text>
+      <rect x="469" y="0" width="160" height="38" rx="5" class="soft"/>
+      <text x="488" y="25" class="mono">DEEPSEEK</text>
+    </g>
+
+    <g transform="translate(4 330)">
+      <rect x="0" y="0" width="178" height="86" rx="8" class="soft"/>
+      <text x="18" y="28" class="metricLabel">NET SAVINGS</text>
+      <text x="18" y="65" class="metricValue">$73K</text>
+      <rect x="196" y="0" width="176" height="86" rx="8" class="soft"/>
+      <text x="214" y="28" class="metricLabel">MULTIPLIER</text>
+      <text x="214" y="65" class="metricValue">x9.8</text>
+      <rect x="390" y="0" width="196" height="86" rx="8" class="soft"/>
+      <text x="408" y="28" class="metricLabel">PRIVACY</text>
+      <text x="408" y="65" class="metricValue" style="font-size:28px">PUBLIC-SAFE</text>
     </g>
   </g>
 
-  <g transform="translate(808 80)" filter="url(#soft)">
-    <path d="M170 0L322 64V238C322 334 249 402 170 448C91 402 18 334 18 238V64Z" fill="#020617" fill-opacity="0.66" stroke="#00D4FF" stroke-width="5"/>
-    <path d="M170 51L275 96V231C275 291 228 342 170 376C112 342 65 291 65 231V96Z" fill="none" stroke="#FF2EC4" stroke-width="3"/>
-    <path d="M90 164H126L170 260V164H213V339H174L130 244V339H90Z" fill="#F8FAFC"/>
-    <path d="M235 164H279V296H340V339H235Z" fill="#64FFDA"/>
+  <g transform="translate(760 92)">
+    <rect x="0" y="0" width="352" height="414" rx="16" fill="#07162B" stroke="#64FFDA" stroke-opacity=".36"/>
+    <text x="28" y="38" class="mono">MISSION FLOW</text>
+    <g transform="translate(40 88)">
+      <rect x="0" y="-21" width="104" height="42" rx="7" class="box"/>
+      <text x="52" y="5" class="small" text-anchor="middle">Telegram</text>
+      <rect x="154" y="-21" width="104" height="42" rx="7" class="box"/>
+      <text x="206" y="5" class="small" text-anchor="middle">OpenClaw</text>
+      <path d="M104 0H154" class="wire" marker-end="url(#arrow)"/>
+    </g>
+    <g transform="translate(60 185)">
+      <rect x="0" y="-24" width="112" height="48" rx="7" class="box"/>
+      <text x="56" y="-4" class="small" text-anchor="middle">Claude</text>
+      <text x="56" y="14" class="small" text-anchor="middle">plan/review</text>
+      <rect x="172" y="-24" width="112" height="48" rx="7" class="box"/>
+      <text x="228" y="-4" class="small" text-anchor="middle">Codex</text>
+      <text x="228" y="14" class="small" text-anchor="middle">code/tests</text>
+      <path d="M112 0H172" class="wire" marker-end="url(#arrow)"/>
+    </g>
+    <g transform="translate(60 280)">
+      <rect x="0" y="-24" width="112" height="48" rx="7" class="box"/>
+      <text x="56" y="-4" class="small" text-anchor="middle">DeepSeek</text>
+      <text x="56" y="14" class="small" text-anchor="middle">audit</text>
+      <rect x="172" y="-24" width="112" height="48" rx="7" class="box"/>
+      <text x="228" y="-4" class="small" text-anchor="middle">Human</text>
+      <text x="228" y="14" class="small" text-anchor="middle">approve</text>
+      <path d="M112 0H172" class="wire" marker-end="url(#arrow)"/>
+    </g>
+    <path d="M66 364H286" class="wireGreen"/>
+    <text x="66" y="386" class="small">events -> JSONL -> dashboard</text>
   </g>
 
-  <g transform="translate(918 346)">
-    <circle r="96" fill="none" stroke="#00D4FF" stroke-width="2" stroke-opacity="0.62"/>
-    <circle r="60" fill="none" stroke="#64FFDA" stroke-opacity="0.38"/>
-    <path d="M-96 0H96M0 -96V96" stroke="#F8FAFC" stroke-opacity="0.15"/>
-    <path d="M0 0L76 -54" stroke="#64FFDA" stroke-width="3"/>
-    <g fill="#00D4FF"><circle cx="-47" cy="-32" r="6"/><circle cx="51" cy="-42" r="6"/><circle cx="62" cy="30" r="6"/><circle cx="-26" cy="58" r="6"/><circle cx="11" cy="-5" r="6"/></g>
-    <text x="0" y="132" class="tiny" text-anchor="middle">LOCAL COMMAND BRIDGE</text>
-  </g>
-  <g opacity="0.72" class="thin">
-    <path d="M36 36H98M36 36V98" class="cyan"/>
-    <path d="M1164 36H1102M1164 36V98" class="mag"/>
-    <path d="M36 594H98M36 594V532" class="mag"/>
-    <path d="M1164 594H1102M1164 594V532" class="cyan"/>
+  <g opacity=".7">
+    <path d="M36 36H96M36 36V96" stroke="#00D4FF" stroke-width="2" fill="none"/>
+    <path d="M1164 36H1104M1164 36V96" stroke="#FF2EC4" stroke-width="2" fill="none"/>
+    <path d="M36 594H96M36 594V534" stroke="#FF2EC4" stroke-width="2" fill="none"/>
+    <path d="M1164 594H1104M1164 594V534" stroke="#00D4FF" stroke-width="2" fill="none"/>
   </g>
 </svg>

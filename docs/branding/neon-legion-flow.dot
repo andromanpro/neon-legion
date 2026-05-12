@@ -4,25 +4,25 @@ digraph NeonLegion {
     node [fontname="Arial", fontcolor="#F8FAFC", style="rounded,filled", color="#00D4FF", fillcolor="#0a1429", penwidth=2, shape=box];
     edge [color="#00D4FF", fontcolor="#F8FAFC", fontname="Arial", penwidth=1.5];
 
-    USER [shape=circle, label="Я\n(approver)", fillcolor="#1b0b2f", color="#FF2EC4"];
+    USER [shape=circle, label="You\n(approver)", fillcolor="#1b0b2f", color="#FF2EC4"];
     TG [label="Telegram"];
-    OC [label="OpenClaw\nна NAS\n(мост)"];
-    CLAUDE [label="Claude\nархитектор\n(план + ревью)"];
-    CODEX [label="Codex\nразработчик\n(код + тесты)"];
-    DS [label="DeepSeek\nтретий ревьюер\n(аудит)"];
+    OC [label="OpenClaw\non NAS\n(bridge)"];
+    CLAUDE [label="Claude\narchitect\n(plan + review)"];
+    CODEX [label="Codex\ndeveloper\n(code + tests)"];
+    DS [label="DeepSeek\nthird reviewer\n(audit)"];
     GIT [label="Gitea\nPR + merge"];
-    TR [shape=cylinder, label="Трекер\nJSONL\n+ дашборд", fillcolor="#0a1429", color="#64FFDA"];
+    TR [shape=cylinder, label="Tracker\nJSONL\n+ dashboard", fillcolor="#0a1429", color="#64FFDA"];
 
-    USER -> TG [label="команда"];
+    USER -> TG [label="command"];
     TG -> OC;
-    OC -> CLAUDE [label="задача"];
-    CLAUDE -> CODEX [label="план"];
+    OC -> CLAUDE [label="task"];
+    CLAUDE -> CODEX [label="plan"];
     CODEX -> CLAUDE [label="PR"];
-    CLAUDE -> DS [label="финальный аудит"];
-    DS -> USER [label="approve / правки"];
+    CLAUDE -> DS [label="final audit"];
+    DS -> USER [label="approve / fixes"];
     USER -> GIT [label="merge"];
 
-    CLAUDE -> TR [style=dashed, label="события", color="#64FFDA", fontcolor="#64FFDA"];
+    CLAUDE -> TR [style=dashed, label="events", color="#64FFDA", fontcolor="#64FFDA"];
     CODEX -> TR [style=dashed, color="#64FFDA"];
     DS -> TR [style=dashed, color="#64FFDA"];
     OC -> TR [style=dashed, color="#64FFDA"];
