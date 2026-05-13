@@ -1,48 +1,41 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="1500" height="72" viewBox="0 0 1500 72" role="img" aria-labelledby="dividerTitle dividerDesc">
-  <title id="dividerTitle">neon-legion divider</title>
-  <desc id="dividerDesc">Thin neon-legion README divider showing a local agent pipeline from command to review to tracker.</desc>
+  <title id="dividerTitle">neon-legion section divider</title>
+  <desc id="dividerDesc">Thin README divider showing the neon-legion command flow: command, plan, build, review, track.</desc>
   <defs>
     <style><![CDATA[
-      .mono{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:11px;font-weight:800;letter-spacing:0;fill:#64FFDA}
-      .tiny{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:10px;font-weight:700;letter-spacing:0;fill:#9FC7E6}
+      .mono{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:11px;font-weight:800;letter-spacing:0;fill:#CFFAFE}
+      .tiny{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:10px;font-weight:700;letter-spacing:0;fill:#64FFDA}
     ]]></style>
     <linearGradient id="rail" x1="0" x2="1" y1="0" y2="0">
       <stop offset="0" stop-color="#020617" stop-opacity="0"/>
-      <stop offset=".13" stop-color="#00D4FF" stop-opacity=".62"/>
-      <stop offset=".50" stop-color="#64FFDA" stop-opacity=".9"/>
-      <stop offset=".87" stop-color="#FF2EC4" stop-opacity=".62"/>
+      <stop offset=".14" stop-color="#00D4FF" stop-opacity=".60"/>
+      <stop offset=".50" stop-color="#64FFDA" stop-opacity=".88"/>
+      <stop offset=".86" stop-color="#FF2EC4" stop-opacity=".60"/>
       <stop offset="1" stop-color="#020617" stop-opacity="0"/>
     </linearGradient>
   </defs>
-  <rect width="1500" height="72" fill="#020617" fill-opacity="0"/>
-  <path d="M58 36H1442" stroke="url(#rail)" stroke-width="2"/>
-  <path d="M58 28H280M1220 28H1442M58 44H280M1220 44H1442" stroke="url(#rail)" stroke-width="1" opacity=".55"/>
+  <rect width="1500" height="72" fill="#020617"/>
+  <path d="M70 36H1430" stroke="url(#rail)" stroke-width="2"/>
+  <path d="M70 22H320M1180 22H1430M70 50H320M1180 50H1430" stroke="#164B63" stroke-width="1"/>
 
-  <g transform="translate(352 36)">
-    <rect x="-72" y="-18" width="144" height="36" rx="6" fill="#07162B" stroke="#00D4FF" stroke-opacity=".52"/>
-    <text x="0" y="5" class="tiny" text-anchor="middle">COMMAND</text>
-  </g>
-  <g transform="translate(548 36)">
-    <rect x="-72" y="-18" width="144" height="36" rx="6" fill="#07162B" stroke="#00D4FF" stroke-opacity=".52"/>
-    <text x="0" y="5" class="tiny" text-anchor="middle">PLAN</text>
-  </g>
-  <g transform="translate(744 36)">
-    <rect x="-72" y="-18" width="144" height="36" rx="6" fill="#07162B" stroke="#00D4FF" stroke-opacity=".52"/>
-    <text x="0" y="5" class="tiny" text-anchor="middle">BUILD</text>
-  </g>
-  <g transform="translate(940 36)">
-    <rect x="-72" y="-18" width="144" height="36" rx="6" fill="#07162B" stroke="#00D4FF" stroke-opacity=".52"/>
-    <text x="0" y="5" class="tiny" text-anchor="middle">REVIEW</text>
-  </g>
-  <g transform="translate(1136 36)">
-    <rect x="-72" y="-18" width="144" height="36" rx="6" fill="#07162B" stroke="#64FFDA" stroke-opacity=".58"/>
-    <text x="0" y="5" class="tiny" text-anchor="middle">TRACK</text>
+  <g transform="translate(334 17)">
+    <rect x="0" y="0" width="130" height="38" rx="7" fill="#07182A" stroke="#00D4FF" stroke-opacity=".62"/>
+    <text x="65" y="24" class="mono" text-anchor="middle">COMMAND</text>
+    <circle cx="172" cy="19" r="5" fill="#00D4FF"/>
+    <rect x="214" y="0" width="130" height="38" rx="7" fill="#07182A" stroke="#00D4FF" stroke-opacity=".62"/>
+    <text x="279" y="24" class="mono" text-anchor="middle">PLAN</text>
+    <circle cx="386" cy="19" r="5" fill="#64FFDA"/>
+    <rect x="428" y="0" width="130" height="38" rx="7" fill="#07182A" stroke="#00D4FF" stroke-opacity=".62"/>
+    <text x="493" y="24" class="mono" text-anchor="middle">BUILD</text>
+    <circle cx="600" cy="19" r="5" fill="#FFB020"/>
+    <rect x="642" y="0" width="130" height="38" rx="7" fill="#07182A" stroke="#00D4FF" stroke-opacity=".62"/>
+    <text x="707" y="24" class="mono" text-anchor="middle">REVIEW</text>
+    <circle cx="814" cy="19" r="5" fill="#FF2EC4"/>
+    <rect x="856" y="0" width="130" height="38" rx="7" fill="#07182A" stroke="#64FFDA" stroke-opacity=".70"/>
+    <text x="921" y="24" class="mono" text-anchor="middle">TRACK</text>
   </g>
 
-  <g fill="#00D4FF" opacity=".92">
-    <circle cx="450" cy="36" r="4"/><circle cx="646" cy="36" r="4"/><circle cx="842" cy="36" r="4"/><circle cx="1038" cy="36" r="4"/>
-  </g>
-  <text x="750" y="14" class="mono" text-anchor="middle">NEON-LEGION / LOCAL AI AGENT PIPELINE</text>
-  <text x="750" y="66" class="tiny" text-anchor="middle">JSONL EVENTS + DASHBOARD + HUMAN APPROVAL</text>
+  <text x="750" y="13" class="tiny" text-anchor="middle">NEON-LEGION / LOCAL AI AGENT PIPELINE</text>
+  <text x="750" y="67" class="tiny" text-anchor="middle" fill="#93B7D7">JSONL EVENTS + DASHBOARD + HUMAN APPROVAL</text>
 </svg>

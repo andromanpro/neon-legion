@@ -1,61 +1,53 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-labelledby="logoTitle logoDesc">
-  <title id="logoTitle">neon-legion logo</title>
-  <desc id="logoDesc">Square neon-legion logo: NL command monogram surrounded by five agent nodes and a local JSONL ledger rail.</desc>
+  <title id="logoTitle">neon-legion command mark</title>
+  <desc id="logoDesc">A compact neon-legion command mark: angular NL monogram, five agent nodes, local ledger rails, and human approval accent.</desc>
   <defs>
     <style><![CDATA[
-      .mark{font-family:Inter,system-ui,sans-serif;font-size:150px;font-weight:950;letter-spacing:0;fill:#F8FAFC}
-      .mono{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:23px;font-weight:800;letter-spacing:0;fill:#64FFDA}
-      .tiny{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:13px;font-weight:700;letter-spacing:0;fill:#9FC7E6}
-      .wire{fill:none;stroke:#00D4FF;stroke-width:3;stroke-linecap:round;stroke-linejoin:round}
+      .mark{fill:none;stroke:#F8FAFC;stroke-width:34;stroke-linecap:round;stroke-linejoin:round}
+      .rail{fill:none;stroke:#7DD3FC;stroke-width:2;stroke-opacity:.35}
+      .node{stroke:#020617;stroke-width:8}
+      .label{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:16px;font-weight:800;letter-spacing:0;fill:#CFFAFE}
     ]]></style>
     <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
-      <stop offset="0" stop-color="#020617"/>
-      <stop offset=".58" stop-color="#07152D"/>
-      <stop offset="1" stop-color="#190A2D"/>
+      <stop offset="0" stop-color="#06111F"/>
+      <stop offset=".52" stop-color="#071B2B"/>
+      <stop offset="1" stop-color="#1A1027"/>
     </linearGradient>
-    <radialGradient id="pulse" cx="50%" cy="42%" r="58%">
-      <stop offset="0" stop-color="#00D4FF" stop-opacity=".26"/>
-      <stop offset=".55" stop-color="#64FFDA" stop-opacity=".08"/>
+    <radialGradient id="aura" cx="50%" cy="45%" r="58%">
+      <stop offset="0" stop-color="#22D3EE" stop-opacity=".30"/>
+      <stop offset=".55" stop-color="#22D3EE" stop-opacity=".10"/>
       <stop offset="1" stop-color="#020617" stop-opacity="0"/>
     </radialGradient>
-    <filter id="glow" x="-25%" y="-35%" width="150%" height="170%">
-      <feGaussianBlur stdDeviation="4" result="blur"/>
+    <filter id="softGlow" x="-35%" y="-35%" width="170%" height="170%">
+      <feGaussianBlur stdDeviation="5" result="blur"/>
       <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
     </filter>
   </defs>
-  <rect width="512" height="512" rx="58" fill="url(#bg)"/>
-  <rect width="512" height="512" rx="58" fill="url(#pulse)"/>
 
-  <g opacity=".28">
-    <path d="M70 378H442M92 410H420M116 442H396" stroke="#00D4FF"/>
-    <path d="M128 512L218 340M256 512V340M384 512L294 340" stroke="#FF2EC4"/>
+  <rect width="512" height="512" rx="72" fill="url(#bg)"/>
+  <rect width="512" height="512" rx="72" fill="url(#aura)"/>
+
+  <path d="M48 118V48H126" fill="none" stroke="#00D4FF" stroke-width="5" stroke-linecap="round"/>
+  <path d="M386 48H464V118" fill="none" stroke="#FF2EC4" stroke-width="5" stroke-linecap="round"/>
+  <path d="M48 394V464H126" fill="none" stroke="#FFB020" stroke-width="5" stroke-linecap="round"/>
+  <path d="M386 464H464V394" fill="none" stroke="#64FFDA" stroke-width="5" stroke-linecap="round"/>
+
+  <circle cx="256" cy="242" r="156" fill="#06111F" fill-opacity=".48" stroke="#00D4FF" stroke-width="4" stroke-opacity=".72"/>
+  <circle cx="256" cy="242" r="118" fill="none" stroke="#64FFDA" stroke-width="2" stroke-opacity=".28"/>
+  <path class="rail" d="M106 382H406M132 414H380M164 444H348"/>
+  <path class="rail" d="M256 84V400M116 242H396"/>
+
+  <g filter="url(#softGlow)">
+    <path class="mark" d="M140 324V174L276 324V174"/>
+    <path class="mark" d="M342 174V324H426"/>
   </g>
 
-  <g transform="translate(256 245)" filter="url(#glow)">
-    <circle r="154" fill="#020617" fill-opacity=".28" stroke="#00D4FF" stroke-width="3" stroke-opacity=".62"/>
-    <circle r="106" fill="none" stroke="#64FFDA" stroke-width="2" stroke-opacity=".35"/>
-    <path d="M-118 -76L0 0L118 -76M-118 76L0 0L118 76" class="wire" opacity=".55"/>
-    <g fill="#00D4FF">
-      <circle cx="-118" cy="-76" r="11"/>
-      <circle cx="118" cy="-76" r="11"/>
-      <circle cx="-118" cy="76" r="11"/>
-      <circle cx="118" cy="76" r="11"/>
-      <circle cx="0" cy="0" r="12" fill="#64FFDA"/>
-    </g>
-  </g>
+  <circle class="node" cx="116" cy="242" r="16" fill="#00D4FF"/>
+  <circle class="node" cx="190" cy="118" r="13" fill="#64FFDA"/>
+  <circle class="node" cx="322" cy="118" r="13" fill="#64FFDA"/>
+  <circle class="node" cx="396" cy="242" r="16" fill="#00D4FF"/>
+  <circle class="node" cx="256" cy="386" r="15" fill="#FFB020"/>
 
-  <g filter="url(#glow)">
-    <rect x="130" y="147" width="252" height="158" rx="20" fill="#07162B" stroke="#00D4FF" stroke-width="5"/>
-    <text x="256" y="261" class="mark" text-anchor="middle">NL</text>
-  </g>
-  <text x="256" y="338" class="mono" text-anchor="middle">LOCAL-FIRST</text>
-  <text x="256" y="365" class="tiny" text-anchor="middle">JSONL / AGENTS / DASHBOARD</text>
-
-  <g opacity=".78">
-    <path d="M38 38H116M38 38V116" stroke="#00D4FF" stroke-width="3" fill="none"/>
-    <path d="M474 38H396M474 38V116" stroke="#FF2EC4" stroke-width="3" fill="none"/>
-    <path d="M38 474H116M38 474V396" stroke="#FF2EC4" stroke-width="3" fill="none"/>
-    <path d="M474 474H396M474 474V396" stroke="#00D4FF" stroke-width="3" fill="none"/>
-  </g>
+  <text x="256" y="425" class="label" text-anchor="middle">LOCAL AI OPS</text>
 </svg>
