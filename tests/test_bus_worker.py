@@ -356,7 +356,7 @@ class BusWorkerTests(unittest.TestCase):
     # DeepSeek audit A1 — payload root confinement
     def test_payload_path_raises_when_root_unset(self):
         with patch.dict("os.environ", {}, clear=True):
-            with self.assertRaises(bus_worker._WorkerFailure) as raised:
+            with self.assertRaises(bus_worker.WorkerFailure) as raised:
                 bus_worker._payload_path("file:///F:/tmp/payload.json")
         self.assertEqual(raised.exception.reason, "payload_root_unset")
 
@@ -364,7 +364,7 @@ class BusWorkerTests(unittest.TestCase):
         root = ROOT
         outside = root.parent / "definitely-outside.json"
         with patch.dict("os.environ", {bus_worker.PAYLOAD_ROOT_ENV: str(root)}):
-            with self.assertRaises(bus_worker._WorkerFailure) as raised:
+            with self.assertRaises(bus_worker.WorkerFailure) as raised:
                 bus_worker._payload_path(f"file:///{outside.as_posix()}")
         self.assertEqual(raised.exception.reason, "payload_outside_root")
 
