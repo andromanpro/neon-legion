@@ -13,7 +13,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from tools import bus_gitea
-from tools.bus_gitea import BusGiteaError, comment, create_issue, get_issue, list_issues, update_issue
+from tools.bus_gitea import BusGiteaError, comment, create_issue, get_issue, list_comments, list_issues, update_issue
 
 
 class FakeResponse:
@@ -106,6 +106,22 @@ class BusGiteaTests(unittest.TestCase):
         self.assertEqual(request.get_method(), "POST")
         self.assertEqual(request.full_url, bus_gitea.API_ROOT + "/repos/androman/neon-legion/issues/49/comments")
         self.assertEqual(self.request_json(request), {"body": "running"})
+
+    def test_list_comments_paginates(self):
+        pages = [
+            FakeResponse(200, [{"id": 1}]),
+            FakeResponse(200, [{"id": 2}]),
+            FakeResponse(200, []),
+        ]
+
+        with patch("urllib.request.urlopen", side_effect=pages) as urlopen:
+            result = list_comments(49)
+
+        self.assertEqual(result, [{"id": 1}, {"id": 2}])
+        urls = [call.args[0].full_url for call in urlopen.call_args_list]
+        self.assertEqual(urls[0], bus_gitea.API_ROOT + "/repos/androman/neon-legion/issues/49/comments?page=1")
+        self.assertEqual(urls[1], bus_gitea.API_ROOT + "/repos/androman/neon-legion/issues/49/comments?page=2")
+        self.assertEqual(urls[2], bus_gitea.API_ROOT + "/repos/androman/neon-legion/issues/49/comments?page=3")
 
     def test_list_issues_single_page(self):
         with patch("urllib.request.urlopen", side_effect=[FakeResponse(200, [{"number": 1}]), FakeResponse(200, [])]):
