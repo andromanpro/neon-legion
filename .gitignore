@@ -5,6 +5,7 @@ tracker/.last-uuids.json
 tracker/tasks.json
 tracker/.estimation-logs/
 tracker/private/
+tracker/diff_cost.json
 tracker/regressions.json
 tracker/reputation.json
 prompts/private/
@@ -48,4 +49,6 @@ __pycache__/
 codex-tests.tmp/
 pytestdir/
 demo-smoke-*/
+git-diff-cost-*/
+not-git-*/
 tmp[a-z_0-9][a-z_0-9][a-z_0-9][a-z_0-9][a-z_0-9][a-z_0-9][a-z_0-9][a-z_0-9]/
