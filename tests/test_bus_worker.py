@@ -67,7 +67,7 @@ class BusWorkerTests(unittest.TestCase):
         self.updates = []
         self.patchers = [
             patch("tools.bus_worker.bus_gitea.list_issues", return_value=[]),
-            patch("tools.bus_worker.bus_gitea.get_issue", return_value={}),
+            patch("tools.bus_worker.bus_gitea.get_issue", return_value={"labels": [{"name": bus_worker.CLAIMED}]}),
             patch("tools.bus_worker.bus_gitea.list_comments", side_effect=self.fake_list_comments),
             patch("tools.bus_worker.bus_gitea.update_issue", side_effect=self.fake_update),
             patch("tools.bus_worker.bus_gitea.comment", side_effect=self.fake_comment),
@@ -153,7 +153,7 @@ class BusWorkerTests(unittest.TestCase):
         other_body = "<!-- neon-claim:v1 host=win-codex-01 exec=other-101 claimed_at=2026-05-13T12:30:01Z lease_seconds=600 -->"
 
         with patch("tools.bus_worker._new_exec_id", return_value="mine-100"), \
-             patch("tools.bus_worker.bus_gitea.comment", return_value={"id": 100}), \
+             patch("tools.bus_worker.bus_gitea.comment", return_value={"id": 100}) as comment, \
              patch("tools.bus_worker.bus_gitea.list_comments", return_value=[
                  {"id": 100, "number": 50, "body": mine_body},
                  {"id": 101, "number": 50, "body": other_body},
@@ -162,6 +162,7 @@ class BusWorkerTests(unittest.TestCase):
             bus_worker.process_issue(issue(), HOST)
 
         self.assertEqual(self.states(), ["neon:state/claimed", "neon:state/in-progress", "neon:state/done"])
+        self.assertTrue(any("neon-result:v1" in call.args[1] for call in comment.call_args_list))
 
     def test_interleaved_race_only_first_poster_wins(self):
         # DeepSeek MED #4: the genuinely hard race window. Worker A posts (id=100),
@@ -414,6 +415,78 @@ class BusWorkerTests(unittest.TestCase):
         result_comments = [c for c in self.comments if "neon-result:v1" in c["body"]]
         self.assertEqual(len(result_comments), 1)
         self.assertIn('"status":"done"', result_comments[0]["body"])
+
+    def test_finalise_skipped_when_issue_expired_during_run(self):
+        with patch("tools.bus_worker._new_exec_id", return_value="mine-100"), \
+             patch("tools.bus_worker._payload_read", return_value=PAYLOAD), \
+             patch("tools.bus_worker.bus_gitea.get_issue", return_value={"labels": [{"name": "neon:state/expired"}]}), \
+             patch("tools.bus_worker._post_result") as post_result, \
+             patch("tools.bus_worker.log") as log:
+            bus_worker.process_issue(issue(), HOST)
+
+        post_result.assert_not_called()
+        self.assertNotIn("neon:state/done", self.states())
+        self.assertNotIn("neon:state/failed", self.states())
+        self.assertTrue(any("lease lost" in call.args[0] for call in log.call_args_list))
+
+    def test_finalise_skipped_when_another_worker_reclaimed(self):
+        mine_body = "<!-- neon-claim:v1 host=win-codex-01 exec=mine-100 claimed_at=2026-05-13T12:30:01Z lease_seconds=600 -->"
+        other_body = "<!-- neon-claim:v1 host=win-codex-01 exec=other-099 claimed_at=2026-05-13T12:30:00Z lease_seconds=600 -->"
+        calls = {"list_comments": 0}
+
+        def list_comments(_number):
+            calls["list_comments"] += 1
+            if calls["list_comments"] == 1:
+                return [{"id": 101, "number": 50, "body": mine_body}]
+            return [
+                {"id": 100, "number": 50, "body": other_body},
+                {"id": 101, "number": 50, "body": mine_body},
+            ]
+
+        with patch("tools.bus_worker._new_exec_id", return_value="mine-100"), \
+             patch("tools.bus_worker.bus_gitea.comment", return_value={"id": 101}), \
+             patch("tools.bus_worker.bus_gitea.list_comments", side_effect=list_comments), \
+             patch("tools.bus_worker.bus_gitea.get_issue", return_value={"labels": [{"name": bus_worker.CLAIMED}]}), \
+             patch("tools.bus_worker._payload_read", return_value=PAYLOAD), \
+             patch("tools.bus_worker._post_result") as post_result, \
+             patch("tools.bus_worker.log") as log:
+            bus_worker.process_issue(issue(), HOST)
+
+        post_result.assert_not_called()
+        self.assertNotIn("neon:state/done", self.states())
+        self.assertNotIn("neon:state/failed", self.states())
+        self.assertTrue(any("lease lost" in call.args[0] for call in log.call_args_list))
+
+    def test_finalise_proceeds_when_lease_still_held(self):
+        mine_body = "<!-- neon-claim:v1 host=win-codex-01 exec=mine-100 claimed_at=2026-05-13T12:30:00Z lease_seconds=600 -->"
+        other_body = "<!-- neon-claim:v1 host=win-codex-01 exec=other-101 claimed_at=2026-05-13T12:30:01Z lease_seconds=600 -->"
+
+        with patch("tools.bus_worker._new_exec_id", return_value="mine-100"), \
+             patch("tools.bus_worker.bus_gitea.comment", return_value={"id": 100}), \
+             patch("tools.bus_worker.bus_gitea.list_comments", return_value=[
+                 {"id": 100, "number": 50, "body": mine_body},
+                 {"id": 101, "number": 50, "body": other_body},
+             ]), \
+             patch("tools.bus_worker.bus_gitea.get_issue", return_value={"labels": [{"name": bus_worker.IN_PROGRESS}]}), \
+             patch("tools.bus_worker._payload_read", return_value=PAYLOAD):
+            bus_worker.process_issue(issue(), HOST)
+
+        self.assertEqual(self.states(), ["neon:state/claimed", "neon:state/in-progress", "neon:state/done"])
+
+    def test_finalise_skipped_on_get_issue_error(self):
+        from tools.bus_gitea import BusGiteaError
+
+        with patch("tools.bus_worker._new_exec_id", return_value="mine-100"), \
+             patch("tools.bus_worker._payload_read", return_value=PAYLOAD), \
+             patch("tools.bus_worker.bus_gitea.get_issue", side_effect=BusGiteaError(500, "issue down")), \
+             patch("tools.bus_worker._post_result") as post_result, \
+             patch("tools.bus_worker.log") as log:
+            bus_worker.process_issue(issue(), HOST)
+
+        post_result.assert_not_called()
+        self.assertNotIn("neon:state/done", self.states())
+        self.assertNotIn("neon:state/failed", self.states())
+        self.assertTrue(any("lease lost" in call.args[0] for call in log.call_args_list))
 
 
 if __name__ == "__main__":

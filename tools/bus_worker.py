@@ -169,6 +169,15 @@ def process_issue(issue: dict, host: str) -> None:
     # cannot push the issue into a contradictory state (don/fail double-posted).
     # On finalise failure the result is still in the issue; the reaper will
     # expire the issue and a future poll picks it up cleanly.
+    if not _verify_lease_held(number, exec_id):
+        log(
+            f"#{number} lease lost during handler run (reaper expired or "
+            f"another worker re-claimed); skipping finalise. Result was: "
+            f"{result['status']} reason={result.get('reason', '<none>')}",
+            level="error",
+        )
+        return
+
     _post_result(number, exec_id, result)
     try:
         _set_state(number, current_labels, terminal_state, close=True)
@@ -256,18 +265,7 @@ def _verify_claim_won(issue_number: int, my_exec_id: str, my_comment_id: int | N
         log(f"#{issue_number} claim verify list_comments failed: {exc}; assuming lost", level="error")
         return False
 
-    lowest_id = None
-    lowest_exec = None
-    for comment in comments:
-        match = CLAIM_RE.search(comment.get("body") or "")
-        if not match:
-            continue
-        comment_id = comment.get("id")
-        if comment_id is None:
-            continue
-        if lowest_id is None or comment_id < lowest_id:
-            lowest_id = comment_id
-            lowest_exec = match.group("exec")
+    lowest_id, lowest_exec = _lowest_claim(comments)
 
     won = (
         lowest_exec == my_exec_id
@@ -280,6 +278,46 @@ def _verify_claim_won(issue_number: int, my_exec_id: str, my_comment_id: int | N
             f"lowest_id={lowest_id} my_exec={my_exec_id} my_comment_id={my_comment_id}"
         )
     return won
+
+
+def _verify_lease_held(issue_number: int, my_exec_id: str) -> bool:
+    """True if the issue is still leased to this worker.
+
+    Conservative: any Gitea read error is treated as a lost lease, so a
+    recovering worker cannot overwrite an expired or re-claimed issue.
+    """
+    try:
+        issue = bus_gitea.get_issue(issue_number)
+    except BusGiteaError:
+        return False
+
+    labels = set(_label_names(issue))
+    if CLAIMED not in labels and IN_PROGRESS not in labels:
+        return False
+
+    try:
+        comments = bus_gitea.list_comments(issue_number)
+    except BusGiteaError:
+        return False
+
+    _lowest_id, lowest_exec = _lowest_claim(comments)
+    return lowest_exec == my_exec_id
+
+
+def _lowest_claim(comments: list[dict]) -> tuple[int | None, str | None]:
+    lowest_id = None
+    lowest_exec = None
+    for comment in comments:
+        match = CLAIM_RE.search(comment.get("body") or "")
+        if not match:
+            continue
+        comment_id = comment.get("id")
+        if comment_id is None:
+            continue
+        if lowest_id is None or comment_id < lowest_id:
+            lowest_id = comment_id
+            lowest_exec = match.group("exec")
+    return lowest_id, lowest_exec
 
 
 def _heartbeat_comment(exec_id: str) -> str:
