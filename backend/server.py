@@ -894,7 +894,16 @@ def _today_productivity_block(today_payload):
     saved_raw = today_payload.get("hours_saved") or 0
 
     multiplier_raw = (estimated / estimate_active) if estimate_active > 0 else 0.0
-    if multiplier_raw < 1 or saved_raw < 0:
+    # Mirror the dashboard widget sanity cap (theme v0.8.30): a 0.1h session
+    # estimated at 18.5h gives a ×185 artefact that misleads more than informs.
+    # Suppress it server-side too so any consumer of the snapshot gets the same
+    # answer as the live widget.
+    if (
+        multiplier_raw < 1
+        or saved_raw < 0
+        or estimate_active < 0.5
+        or multiplier_raw > 50
+    ):
         multiplier = 0.0
         saved = 0.0
         estimated_hours = rounded(estimate_active, 1)
