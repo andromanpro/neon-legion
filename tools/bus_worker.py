@@ -264,9 +264,18 @@ def _now_iso() -> str:
 
 
 def _emit_bus_event(envelope: dict, exec_id: str, host: str, issue_number: int, transition: str) -> None:
-    """Append a bus-events.jsonl entry. Best-effort: log and continue on error."""
+    """Append a bus-events.jsonl entry. Best-effort: log and continue on error.
+
+    DeepSeek audit HIGH #1 on PR #77: the previous read-all → modify → atomic
+    replace pattern lost events under concurrent writes from two workers on
+    different hosts (both read N lines, both write N+1, the second clobbers
+    the first's new line). Switched to POSIX `open("a")` append mode — kernel
+    guarantees atomic appends for writes ≤ PIPE_BUF (4096 bytes on Linux,
+    similar on Windows for local NTFS). One JSONL line is ~250 bytes, well
+    under that limit. Cross-host SMB atomicity is OS-dependent and documented
+    as a known constraint (HIGH #2) — the bus is a single-LAN-trust system.
+    """
     path = PROJECT_ROOT / "tracker" / "bus-events.jsonl"
-    tmp = path.with_suffix(path.suffix + f".tmp.{os.getpid()}")
     try:
         event = {
             "schema_version": 1,
@@ -286,22 +295,13 @@ def _emit_bus_event(envelope: dict, exec_id: str, host: str, issue_number: int, 
             "duration_ms": 0,
         }
         path.parent.mkdir(parents=True, exist_ok=True)
-        existing = path.read_text(encoding="utf-8") if path.exists() else ""
         line = json.dumps(event, ensure_ascii=False, separators=(",", ":")) + "\n"
-        with tmp.open("w", encoding="utf-8", newline="\n") as target:
-            target.write(existing)
-            if existing and not existing.endswith("\n"):
-                target.write("\n")
+        with path.open("a", encoding="utf-8", newline="\n") as target:
             target.write(line)
             target.flush()
             os.fsync(target.fileno())
-        os.replace(tmp, path)
     except Exception as exc:
         log(f"failed to emit bus event for #{issue_number} {transition}: {exc}", level="error")
-        try:
-            tmp.unlink()
-        except OSError:
-            pass
 
 
 def _claim_comment(host: str, exec_id: str, lease_seconds: int) -> str:

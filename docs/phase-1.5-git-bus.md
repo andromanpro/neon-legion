@@ -199,3 +199,15 @@ doesn't deploy the bus across a wider trust boundary than it can carry.
    result envelope is still posted to the issue; the worker logs an
    "orphaned" warning and lets the reaper expire the leftover state.
    No double-posting under contradictory reasons.
+
+6. **`tracker/bus-events.jsonl` integrity assumes local FS or single-
+   writer SMB.** The worker appends via POSIX `open("a")` which
+   guarantees atomic writes for lines ≤ PIPE_BUF (4096 bytes on Linux,
+   similar on Windows NTFS). A single JSONL line is ~250 bytes — safely
+   under that limit. **Cross-host SMB atomicity is OS-dependent**: the
+   bus assumes either single-worker deployment or a local FS for the
+   JSONL stream. The readmodel rebuilds from this file at backend
+   startup; a torn write would propagate as a corrupt line skipped at
+   load time (logged, not crashed). For multi-host SMB-concurrent
+   deployment, use a per-host `tracker/bus-events.<host>.jsonl` and
+   merge at read time — out of MVP scope.
