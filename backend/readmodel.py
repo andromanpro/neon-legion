@@ -27,6 +27,183 @@ PROVIDER_ALIASES = {
     "openai": "codex",
     "openrouter": "openclaw",
 }
+PROVIDER_KEYS = {
+    "anthropic": "anthropic_claude",
+    "openai": "openai_codex",
+    "openrouter": "openrouter_openclaw",
+    "opencode": "opencode_openrouter",
+}
+
+
+def aggregate_by_model(
+    conn: sqlite3.Connection,
+    start: date,
+    end: date,
+    providers: list[str] | None = None,
+) -> tuple[dict[str, dict], dict]:
+    """SQL-level GROUP BY model.
+
+    Returns (by_model, totals) matching summary.summarize_by_model's output
+    shape for read_events_fast() over the same window.
+    """
+    if start > end:
+        return {}, _empty_stats()
+
+    provider_keys = _provider_keys(providers) if providers else None
+    cte, params = _deduped_events_cte(start, end, provider_keys)
+    sql = cte + """
+        SELECT
+            provider_norm,
+            model_name,
+            COUNT(*) AS calls,
+            SUM(input_tokens_norm) AS input_tokens,
+            SUM(output_tokens_norm) AS output_tokens,
+            SUM(cache_read_tokens_norm) AS cache_read_tokens,
+            SUM(cache_creation_tokens_norm) AS cache_creation_tokens,
+            SUM(cached_input_tokens_norm) AS cached_input_tokens,
+            SUM(reasoning_tokens_norm) AS reasoning_tokens,
+            SUM(total_tokens_norm) AS total_tokens,
+            SUM(cost_estimate_usd_norm) AS cost_estimate_usd
+        FROM deduped
+        GROUP BY provider_norm, model_name
+    """
+
+    by_model: dict[str, dict] = {}
+    total = _empty_stats()
+    for row in conn.execute(sql, params):
+        (
+            provider,
+            model,
+            calls,
+            input_tokens,
+            output_tokens,
+            cache_read_tokens,
+            cache_creation_tokens,
+            cached_input_tokens,
+            reasoning_tokens,
+            total_tokens,
+            cost_estimate_usd,
+        ) = row
+        stats = _stats_from_aggregate_row(
+            calls,
+            input_tokens,
+            output_tokens,
+            cache_read_tokens,
+            cache_creation_tokens,
+            cached_input_tokens,
+            reasoning_tokens,
+            total_tokens,
+            cost_estimate_usd,
+        )
+        stats["provider"] = provider
+        stats["model"] = model
+        by_model[_provider_model_key(str(provider), str(model))] = stats
+        _add_stats(total, stats)
+
+    return by_model, total
+
+
+def aggregate_totals(
+    conn: sqlite3.Connection,
+    start: date,
+    end: date,
+    providers: list[str] | None = None,
+) -> dict:
+    """SQL-level totals matching summary.summarize_by_model(...)[1]."""
+    if start > end:
+        return _empty_stats()
+
+    provider_keys = _provider_keys(providers) if providers else None
+    cte, params = _deduped_events_cte(start, end, provider_keys)
+    sql = cte + """
+        SELECT
+            COUNT(*) AS calls,
+            SUM(input_tokens_norm) AS input_tokens,
+            SUM(output_tokens_norm) AS output_tokens,
+            SUM(cache_read_tokens_norm) AS cache_read_tokens,
+            SUM(cache_creation_tokens_norm) AS cache_creation_tokens,
+            SUM(cached_input_tokens_norm) AS cached_input_tokens,
+            SUM(reasoning_tokens_norm) AS reasoning_tokens,
+            SUM(total_tokens_norm) AS total_tokens,
+            SUM(cost_estimate_usd_norm) AS cost_estimate_usd
+        FROM deduped
+    """
+    row = conn.execute(sql, params).fetchone()
+    if row is None:
+        return _empty_stats()
+    return _stats_from_aggregate_row(*row)
+
+
+def aggregate_by_provider(
+    conn: sqlite3.Connection,
+    start: date,
+    end: date,
+) -> dict[str, dict]:
+    """SQL-level GROUP BY provider. Returns dict[provider] -> stats dict."""
+    if start > end:
+        return {}
+
+    cte, params = _deduped_events_cte(start, end, None)
+    sql = cte + """
+        SELECT
+            provider_norm,
+            model_name,
+            COUNT(*) AS calls,
+            SUM(input_tokens_norm) AS input_tokens,
+            SUM(output_tokens_norm) AS output_tokens,
+            SUM(cache_read_tokens_norm) AS cache_read_tokens,
+            SUM(cache_creation_tokens_norm) AS cache_creation_tokens,
+            SUM(cached_input_tokens_norm) AS cached_input_tokens,
+            SUM(reasoning_tokens_norm) AS reasoning_tokens,
+            SUM(total_tokens_norm) AS total_tokens,
+            SUM(cost_estimate_usd_norm) AS cost_estimate_usd
+        FROM deduped
+        GROUP BY provider_norm, model_name
+    """
+
+    by_provider: dict[str, dict] = {}
+    for row in conn.execute(sql, params):
+        (
+            provider,
+            model,
+            calls,
+            input_tokens,
+            output_tokens,
+            cache_read_tokens,
+            cache_creation_tokens,
+            cached_input_tokens,
+            reasoning_tokens,
+            total_tokens,
+            cost_estimate_usd,
+        ) = row
+        key = PROVIDER_KEYS.get(str(provider), str(provider))
+        if key not in by_provider:
+            by_provider[key] = _empty_stats()
+            by_provider[key]["provider"] = provider
+            by_provider[key]["models"] = {}
+            by_provider[key]["origins"] = {}
+        stats = _stats_from_aggregate_row(
+            calls,
+            input_tokens,
+            output_tokens,
+            cache_read_tokens,
+            cache_creation_tokens,
+            cached_input_tokens,
+            reasoning_tokens,
+            total_tokens,
+            cost_estimate_usd,
+        )
+        _add_stats(by_provider[key], stats)
+        by_provider[key]["models"][model] = by_provider[key]["models"].get(model, 0) + _as_int(calls)
+
+        origin = _aggregate_origin(str(provider))
+        if origin is not None:
+            origins = by_provider[key]["origins"]
+            if origin not in origins:
+                origins[origin] = _empty_stats()
+            _add_stats(origins[origin], stats)
+
+    return by_provider
 
 
 def build(events_dir: Path, *, providers: list[str] | None = None) -> sqlite3.Connection:
@@ -228,6 +405,193 @@ def read_events_fast(
     return [event for event, _provider_key, _sort_ts in events]
 
 
+def _deduped_events_cte(
+    start: date,
+    end: date,
+    provider_keys: list[str] | None,
+) -> tuple[str, list[object]]:
+    where = ["event_date >= ? AND event_date <= ?"]
+    params: list[object] = [start.isoformat(), end.isoformat()]
+    if provider_keys:
+        placeholders = ",".join("?" for _ in provider_keys)
+        where.append(f"provider IN ({placeholders})")
+        params.extend(provider_keys)
+
+    # DeepSeek audit #60 follow-up: dedupe before GROUP BY so aggregate
+    # counts match read_events_fast() + summary.summarize_by_model().
+    cte = f"""
+        WITH filtered AS (
+            SELECT
+                id,
+                provider_norm,
+                model_name,
+                COALESCE(input_tokens, 0) AS input_tokens_norm,
+                COALESCE(output_tokens, 0) AS output_tokens_norm,
+                COALESCE(aggregate_cache_read_tokens, 0) AS cache_read_tokens_norm,
+                COALESCE(cache_creation_tokens, 0) AS cache_creation_tokens_norm,
+                COALESCE(cached_input_tokens, 0) AS cached_input_tokens_norm,
+                COALESCE(reasoning_tokens, 0) AS reasoning_tokens_norm,
+                COALESCE(aggregate_total_tokens, 0) AS total_tokens_norm,
+                COALESCE(cost_estimate_usd, 0.0) AS cost_estimate_usd_norm,
+                dedupe_group
+            FROM events
+            WHERE {" AND ".join(where)}
+        ),
+        keep AS (
+            SELECT MIN(id) AS id
+            FROM filtered
+            GROUP BY dedupe_group
+        ),
+        deduped AS (
+            SELECT filtered.*
+            FROM filtered
+            JOIN keep USING (id)
+        )
+    """
+    return cte, params
+
+
+def _empty_stats() -> dict:
+    return {
+        "calls": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_creation_tokens": 0,
+        "cached_input_tokens": 0,
+        "reasoning_tokens": 0,
+        "total_tokens": 0,
+        "cost_estimate_usd": 0.0,
+        "api_equivalent_cost_usd": 0.0,
+        "unknown_pricing_events": 0,
+    }
+
+
+def _stats_from_aggregate_row(
+    calls: object,
+    input_tokens: object,
+    output_tokens: object,
+    cache_read_tokens: object,
+    cache_creation_tokens: object,
+    cached_input_tokens: object,
+    reasoning_tokens: object,
+    total_tokens: object,
+    cost_estimate_usd: object,
+) -> dict:
+    stats = _empty_stats()
+    stats["calls"] = _as_int(calls)
+    stats["input_tokens"] = _as_int(input_tokens)
+    stats["output_tokens"] = _as_int(output_tokens)
+    stats["cache_read_tokens"] = _as_int(cache_read_tokens)
+    stats["cache_creation_tokens"] = _as_int(cache_creation_tokens)
+    stats["cached_input_tokens"] = _as_int(cached_input_tokens)
+    stats["reasoning_tokens"] = _as_int(reasoning_tokens)
+    stats["total_tokens"] = _as_int(total_tokens)
+    stats["cost_estimate_usd"] = _as_float(cost_estimate_usd)
+    stats["api_equivalent_cost_usd"] = stats["cost_estimate_usd"]
+    return stats
+
+
+def _add_stats(target: dict, source: dict) -> None:
+    for key in (
+        "calls",
+        "input_tokens",
+        "output_tokens",
+        "cache_read_tokens",
+        "cache_creation_tokens",
+        "cached_input_tokens",
+        "reasoning_tokens",
+        "total_tokens",
+        "unknown_pricing_events",
+    ):
+        target[key] += _as_int(source.get(key))
+    cost = _as_float(source.get("cost_estimate_usd"))
+    target["cost_estimate_usd"] += cost
+    target["api_equivalent_cost_usd"] += cost
+
+
+def _provider_model_key(provider: str, model: str) -> str:
+    lower = model.lower()
+    prefix_by_provider = {
+        "anthropic": "anthropic",
+        "openai": "openai",
+        "openrouter": "openrouter",
+        "opencode": "opencode",
+    }
+    prefix = prefix_by_provider.get(provider, provider)
+    if lower.startswith(f"{prefix}/"):
+        return model
+    return f"{prefix}/{model}"
+
+
+def _aggregate_origin(provider: str) -> str | None:
+    if provider == "openai":
+        return "headless"
+    if provider == "openrouter":
+        return "openclaw"
+    if provider == "opencode":
+        return "opencode"
+    return None
+
+
+def _normalize_event_provider(provider: str | None) -> str:
+    value = str(provider or "").lower()
+    if value in {"openai", "openai_codex", "codex"}:
+        return "openai"
+    if value in {"openrouter", "openrouter_openclaw", "openclaw"}:
+        return "openrouter"
+    if value in {"opencode", "opencode_openrouter", "openrouter_opencode"}:
+        return "opencode"
+    return "anthropic"
+
+
+def _normalize_dedupe_provider(json_provider: str | None, default_provider: str) -> str:
+    value = str(json_provider or "").lower()
+    if value in {"openai", "openai_codex", "codex"}:
+        return "openai"
+    if value in {"openrouter", "openrouter_openclaw", "openclaw"}:
+        return "openrouter"
+    if value in {"opencode", "opencode_openrouter", "openrouter_opencode"}:
+        return "opencode"
+    return default_provider
+
+
+def _model_name(model: object) -> str:
+    if isinstance(model, str) and model:
+        return model
+    return "unknown"
+
+
+def _event_dedupe_group(
+    event: dict,
+    default_provider: str,
+    json_provider: str | None,
+    input_tokens: int,
+    output_tokens: int,
+    cached_input_tokens: int,
+    reasoning_tokens: int,
+    total_tokens: int,
+    exit_code: int | None,
+) -> str:
+    event_id = event.get("event_id") or event.get("tracking_run_id")
+    if isinstance(event_id, str) and event_id:
+        return "event_id:" + event_id
+
+    key = (
+        _normalize_dedupe_provider(json_provider, default_provider),
+        event.get("session_id"),
+        event.get("ts"),
+        event.get("model"),
+        input_tokens,
+        cached_input_tokens,
+        output_tokens,
+        reasoning_tokens,
+        total_tokens,
+        exit_code,
+    )
+    return "legacy:" + json.dumps(key, ensure_ascii=False, separators=(",", ":"))
+
+
 def _create_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(
         """
@@ -235,6 +599,7 @@ def _create_schema(conn: sqlite3.Connection) -> None:
             id INTEGER PRIMARY KEY,
             provider TEXT NOT NULL,
             ts TEXT NOT NULL,
+            event_date TEXT NOT NULL,
             session_id TEXT,
             message_uuid TEXT,
             model TEXT,
@@ -261,9 +626,16 @@ def _create_schema(conn: sqlite3.Connection) -> None:
             -- which is the file tag). Slow path returns this verbatim; fast
             -- path now does too. Falls back to default_provider when absent.
             json_provider TEXT,
+            provider_norm TEXT NOT NULL,
+            model_name TEXT NOT NULL,
+            aggregate_cache_read_tokens INTEGER DEFAULT 0,
+            aggregate_total_tokens INTEGER DEFAULT 0,
+            dedupe_group TEXT NOT NULL,
             raw_json TEXT NOT NULL
         );
         CREATE INDEX idx_events_ts ON events(ts);
+        CREATE INDEX idx_events_date ON events(event_date);
+        CREATE INDEX idx_events_date_group ON events(event_date, dedupe_group, id);
         CREATE INDEX idx_events_session ON events(session_id);
         CREATE INDEX idx_events_provider ON events(provider);
 
@@ -332,31 +704,57 @@ def _load_event_file(
             exit_code = event.get("exit_code")
             exit_code_int = _as_int(exit_code) if exit_code is not None else None
             json_provider = event.get("provider") if isinstance(event.get("provider"), str) else None
+            input_tokens = _as_int(event.get("input_tokens"))
+            output_tokens = _as_int(event.get("output_tokens"))
+            cache_read_tokens = _as_int(event.get("cache_read_tokens"))
+            cached_input_tokens = _as_int(event.get("cached_input_tokens"))
+            reasoning_tokens = _as_int(event.get("reasoning_tokens"))
+            total_tokens = _as_int(event.get("total_tokens"))
+            provider_norm = _normalize_event_provider(json_provider or default_provider)
+            model_name = _model_name(event.get("model"))
+            aggregate_cache_read_tokens = cache_read_tokens + cached_input_tokens
+            aggregate_total_tokens = total_tokens or (
+                input_tokens + cached_input_tokens + output_tokens + reasoning_tokens
+            )
+            dedupe_group = _event_dedupe_group(
+                event,
+                default_provider,
+                json_provider,
+                input_tokens,
+                output_tokens,
+                cached_input_tokens,
+                reasoning_tokens,
+                total_tokens,
+                exit_code_int,
+            )
             conn.execute(
                 """
                 INSERT INTO events (
-                    provider, ts, session_id, message_uuid, model, input_tokens,
+                    provider, ts, event_date, session_id, message_uuid, model, input_tokens,
                     output_tokens, cache_read_tokens, cache_creation_tokens,
                     total_tokens, cost_estimate_usd, duration_ms, working_dir,
                     tool_uses, stop_reason,
                     event_id, tracking_run_id, cached_input_tokens,
                     reasoning_tokens, exit_code, json_provider,
+                    provider_norm, model_name, aggregate_cache_read_tokens,
+                    aggregate_total_tokens, dedupe_group,
                     raw_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                          ?, ?, ?, ?, ?, ?,
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                           ?)
                 """,
                 (
                     provider_key,
                     event["ts"],
+                    ts.astimezone().date().isoformat(),
                     event.get("session_id"),
                     event.get("message_uuid"),
                     event.get("model"),
-                    _as_int(event.get("input_tokens")),
-                    _as_int(event.get("output_tokens")),
-                    _as_int(event.get("cache_read_tokens")),
+                    input_tokens,
+                    output_tokens,
+                    cache_read_tokens,
                     _as_int(event.get("cache_creation_tokens")),
-                    _as_int(event.get("total_tokens")),
+                    total_tokens,
                     _as_float(event.get("cost_estimate_usd")),
                     _as_int(event.get("duration_ms")),
                     event.get("working_dir"),
@@ -364,10 +762,15 @@ def _load_event_file(
                     event.get("stop_reason"),
                     event.get("event_id") if isinstance(event.get("event_id"), str) else None,
                     event.get("tracking_run_id") if isinstance(event.get("tracking_run_id"), str) else None,
-                    _as_int(event.get("cached_input_tokens")),
-                    _as_int(event.get("reasoning_tokens")),
+                    cached_input_tokens,
+                    reasoning_tokens,
                     exit_code_int,
                     json_provider,
+                    provider_norm,
+                    model_name,
+                    aggregate_cache_read_tokens,
+                    aggregate_total_tokens,
+                    dedupe_group,
                     raw,
                 ),
             )

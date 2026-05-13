@@ -15,8 +15,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+if str(ROOT / "tracker") not in sys.path:
+    sys.path.insert(0, str(ROOT / "tracker"))
 
 from backend import readmodel
+import summary
 
 
 DOCUMENTED_EVENT_FIELDS = {
@@ -457,6 +460,146 @@ class ReadModelTests(unittest.TestCase):
                 slow = readmodel.read_events(conn, date(2026, 5, 13), date(2026, 5, 13))
                 self.assertEqual(fast[0]["provider"], slow[0]["provider"])
                 self.assertEqual(fast[0]["provider"], "anthropic")
+            finally:
+                conn.close()
+
+    def test_aggregate_by_model_matches_summarize_by_model(self):
+        with temporary_events_dir() as tmp:
+            write_jsonl(
+                tmp,
+                "claude-events.jsonl",
+                [
+                    event(
+                        10,
+                        session_id="claude-1",
+                        provider="anthropic",
+                        model="claude-sonnet-4",
+                        input_tokens=10,
+                        output_tokens=5,
+                        cache_read_tokens=2,
+                        cached_input_tokens=3,
+                        cache_creation_tokens=4,
+                        reasoning_tokens=1,
+                        total_tokens=19,
+                        cost_estimate_usd=0.12,
+                    ),
+                    event(
+                        10,
+                        session_id="dedupe",
+                        provider="anthropic",
+                        model="claude-sonnet-4",
+                        event_id="evt-dedupe",
+                        input_tokens=100,
+                        output_tokens=50,
+                        cost_estimate_usd=1.0,
+                    ),
+                    event(
+                        10,
+                        session_id="dedupe",
+                        provider="anthropic",
+                        model="claude-sonnet-4",
+                        event_id="evt-dedupe",
+                        input_tokens=999,
+                        output_tokens=50,
+                        cost_estimate_usd=9.0,
+                    ),
+                ],
+            )
+            write_jsonl(
+                tmp,
+                "codex-events.jsonl",
+                [
+                    event(
+                        10,
+                        session_id="codex-1",
+                        provider="openai",
+                        model="gpt-5",
+                        input_tokens=7,
+                        output_tokens=8,
+                        total_tokens=15,
+                        cost_estimate_usd=0.34,
+                    )
+                ],
+            )
+            conn = readmodel.build(Path(tmp))
+            try:
+                fast = readmodel.read_events_fast(conn, date(2026, 5, 10), date(2026, 5, 10))
+                expected_by_model, expected_total = summary.summarize_by_model(fast)
+                actual_by_model, actual_total = readmodel.aggregate_by_model(
+                    conn,
+                    date(2026, 5, 10),
+                    date(2026, 5, 10),
+                )
+                self.assertEqual(actual_by_model, expected_by_model)
+                self.assertEqual(actual_total, expected_total)
+            finally:
+                conn.close()
+
+    def test_aggregate_by_model_handles_unknown_pricing(self):
+        with temporary_events_dir() as tmp:
+            write_jsonl(
+                tmp,
+                "claude-events.jsonl",
+                [
+                    event(
+                        10,
+                        provider="anthropic",
+                        model="claude-mystery-7",
+                        input_tokens=11,
+                        output_tokens=13,
+                    )
+                ],
+            )
+            conn = readmodel.build(Path(tmp))
+            try:
+                fast = readmodel.read_events_fast(conn, date(2026, 5, 10), date(2026, 5, 10))
+                expected_by_model, expected_total = summary.summarize_by_model(fast)
+                actual_by_model, actual_total = readmodel.aggregate_by_model(
+                    conn,
+                    date(2026, 5, 10),
+                    date(2026, 5, 10),
+                )
+                self.assertEqual(
+                    actual_by_model["anthropic/claude-mystery-7"]["unknown_pricing_events"],
+                    expected_by_model["anthropic/claude-mystery-7"]["unknown_pricing_events"],
+                )
+                self.assertEqual(
+                    actual_total["unknown_pricing_events"],
+                    expected_total["unknown_pricing_events"],
+                )
+            finally:
+                conn.close()
+
+    def test_aggregate_by_model_filters_by_provider(self):
+        with temporary_events_dir() as tmp:
+            write_jsonl(
+                tmp,
+                "claude-events.jsonl",
+                [event(10, session_id="claude", provider="anthropic", model="claude-sonnet-4")],
+            )
+            write_jsonl(
+                tmp,
+                "codex-events.jsonl",
+                [event(10, session_id="codex", provider="openai", model="gpt-5")],
+            )
+            conn = readmodel.build(Path(tmp))
+            try:
+                fast = readmodel.read_events_fast(
+                    conn,
+                    date(2026, 5, 10),
+                    date(2026, 5, 10),
+                    providers=["claude"],
+                )
+                expected_by_model, expected_total = summary.summarize_by_model(fast)
+                actual_by_model, actual_total = readmodel.aggregate_by_model(
+                    conn,
+                    date(2026, 5, 10),
+                    date(2026, 5, 10),
+                    providers=["claude"],
+                )
+                self.assertEqual(actual_by_model, expected_by_model)
+                self.assertEqual(actual_total, expected_total)
+                self.assertEqual(set(actual_by_model), {"anthropic/claude-sonnet-4"})
             finally:
                 conn.close()
 
