@@ -61,8 +61,8 @@ subscription_usd = 0.0
 display_currency = "RUB"
 
 [cost_regression]
-threshold = 1.2          # 7d/30d cost-per-output-token ratio
-min_calls = 10           # skip pairs with fewer output tokens in 7d window
+threshold = 1.2                # 7d/30d cost-per-output-token ratio
+min_output_tokens = 10         # skip pairs with fewer output tokens in 7d window (was min_calls)
 short_days = 7
 long_days = 30
 output_path = "F:/WorkAI/multi-agent/tracker/regressions.json"

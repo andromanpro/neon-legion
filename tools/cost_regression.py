@@ -25,17 +25,23 @@ def detect_regressions(
     *,
     now: datetime | None = None,
     threshold: float = 1.2,
-    min_calls: int = 10,
+    min_output_tokens: int = 10,
     short_days: int = 7,
     long_days: int = 30,
+    # Backward-compat alias for the misnamed kw (DeepSeek MED #2 on PR #83).
+    # The threshold filters on output token volume, not call count — old name
+    # `min_calls` survives as keyword-only alias so existing callers keep working.
+    min_calls: int | None = None,
 ) -> dict:
     """Return the regressions.json payload dict."""
+    if min_calls is not None:
+        min_output_tokens = min_calls
     current = (now or datetime.now().astimezone()).astimezone()
     today = current.date()
     short_start = today - timedelta(days=max(short_days, 1) - 1)
     long_start = today - timedelta(days=max(long_days, 1) - 1)
     threshold = float(threshold)
-    min_calls = int(min_calls)
+    min_output_tokens = int(min_output_tokens)
 
     buckets: dict[tuple[str, str], dict[date, dict[str, float]]] = defaultdict(
         lambda: defaultdict(lambda: {"cost": 0.0, "output": 0.0})
@@ -51,13 +57,13 @@ def detect_regressions(
         bucket["output"] += summary.as_int(event.get("output_tokens"))
 
     regressions = []
-    pairs_with_min_calls = 0
+    pairs_with_min_output_tokens = 0
     for (provider, model), by_day in buckets.items():
         short_cost, short_output = _window_totals(by_day, short_start, today)
         long_cost, long_output = _window_totals(by_day, long_start, today)
-        if short_output < min_calls:
+        if short_output < min_output_tokens:
             continue
-        pairs_with_min_calls += 1
+        pairs_with_min_output_tokens += 1
         if long_cost == 0 or long_output <= 0 or short_output <= 0:
             continue
 
@@ -89,14 +95,14 @@ def detect_regressions(
         "generated_at": current.isoformat(timespec="seconds"),
         "config": {
             "threshold": threshold,
-            "min_calls": min_calls,
+            "min_output_tokens": min_output_tokens,
             "window_short_days": max(short_days, 1),
             "window_long_days": max(long_days, 1),
         },
         "regressions": regressions,
         "summary": {
             "total_pairs_scanned": len(buckets),
-            "pairs_with_min_calls": pairs_with_min_calls,
+            "pairs_with_min_output_tokens": pairs_with_min_output_tokens,
             "regressions_count": len(regressions),
         },
     }
@@ -121,7 +127,15 @@ def main() -> int:
     """CLI entrypoint."""
     args = _parse_args()
     threshold = args.threshold if args.threshold is not None else cfg.get("cost_regression.threshold", 1.2, float)
-    min_calls = args.min_calls if args.min_calls is not None else cfg.get("cost_regression.min_calls", 10, int)
+    # DeepSeek MED #2 on PR #83: prefer new `min_output_tokens` config key but
+    # fall back to the legacy `min_calls` name for back-compat.
+    min_output_tokens = args.min_output_tokens
+    if min_output_tokens is None:
+        min_output_tokens = cfg.get(
+            "cost_regression.min_output_tokens",
+            cfg.get("cost_regression.min_calls", 10, int),
+            int,
+        )
     short_days = cfg.get("cost_regression.short_days", 7, int)
     long_days = cfg.get("cost_regression.long_days", 30, int)
     output = args.output or cfg.get("cost_regression.output_path", "tracker/regressions.json", str)
@@ -133,7 +147,7 @@ def main() -> int:
         events,
         now=now,
         threshold=threshold,
-        min_calls=min_calls,
+        min_output_tokens=min_output_tokens,
         short_days=short_days,
         long_days=long_days,
     )
@@ -148,7 +162,13 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Detect vendor cost-per-output-token regressions.")
     parser.add_argument("--output", help="Path to write regressions.json.")
     parser.add_argument("--threshold", type=float, help="7d/30d ratio threshold.")
-    parser.add_argument("--min-calls", type=int, help="Minimum 7d output tokens for a pair.")
+    parser.add_argument(
+        "--min-output-tokens",
+        "--min-calls",  # back-compat alias (DeepSeek MED #2 on PR #83)
+        dest="min_output_tokens",
+        type=int,
+        help="Minimum 7d output tokens for a pair to be scanned.",
+    )
     return parser.parse_args()
 
 
@@ -176,6 +196,15 @@ def _narrow_window(
     baseline: float,
     threshold: float,
 ) -> tuple[date, date]:
+    """Return the LONGEST contiguous run of elevated days; tie-break = latest end.
+
+    DeepSeek audit MED #1 on PR #83: the previous version returned only the
+    LAST contiguous run, so a zigzag pattern (elevated days 1,3,5,7) would
+    report a 1-day window despite 4-of-7 days being elevated. Two non-
+    contiguous runs likewise dropped the earlier one. The longest-run pick
+    surfaces the most operationally meaningful window; ties go to the most
+    recent for "what's happening now" framing.
+    """
     elevated: list[date] = []
     day = start
     while day <= end:
@@ -188,12 +217,17 @@ def _narrow_window(
     if not elevated:
         return start, end
 
-    window_end = elevated[-1]
-    window_start = window_end
-    elevated_set = set(elevated)
-    while window_start - timedelta(days=1) in elevated_set:
-        window_start -= timedelta(days=1)
-    return window_start, window_end
+    # Group elevated days into contiguous runs.
+    runs: list[list[date]] = [[elevated[0]]]
+    for d in elevated[1:]:
+        if d - runs[-1][-1] == timedelta(days=1):
+            runs[-1].append(d)
+        else:
+            runs.append([d])
+
+    # Longest run wins; tie-break by latest end date.
+    longest = max(runs, key=lambda r: (len(r), r[-1]))
+    return longest[0], longest[-1]
 
 
 def _event_date(event: dict) -> date | None:
