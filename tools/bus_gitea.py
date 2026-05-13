@@ -37,7 +37,7 @@ def create_issue(title: str, body: str, labels: list[int], milestone: int | None
     return _request("POST", f"/repos/{_repo_path()}/issues", payload)
 
 
-def update_issue(number: int, *, labels: list[int] | None = None, state: str | None = None) -> dict:
+def update_issue(number: int, *, labels: list[int | str] | None = None, state: str | None = None) -> dict:
     """PATCH /repos/{repo}/issues/{number} - return updated issue."""
     payload = {}
     if labels is not None:
@@ -52,6 +52,20 @@ def update_issue(number: int, *, labels: list[int] | None = None, state: str | N
 def comment(number: int, body: str) -> dict:
     """POST /repos/{repo}/issues/{number}/comments - returns comment dict."""
     return _request("POST", f"/repos/{_repo_path()}/issues/{number}/comments", {"body": body})
+
+
+def list_comments(number: int, page: int = 1) -> list[dict]:
+    """GET /repos/{repo}/issues/{number}/comments across all pages."""
+    comments = []
+    current_page = page
+    while True:
+        query = {"page": current_page}
+        path = f"/repos/{_repo_path()}/issues/{number}/comments?{urllib.parse.urlencode(query)}"
+        batch = _request("GET", path)
+        if not batch:
+            return comments
+        comments.extend(batch)
+        current_page += 1
 
 
 def list_issues(state: str = "open", labels: list[str] | None = None, page: int = 1) -> list[dict]:
