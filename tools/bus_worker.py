@@ -232,28 +232,54 @@ def _claim_comment(host: str, exec_id: str, lease_seconds: int) -> str:
 
 
 def _verify_claim_won(issue_number: int, my_exec_id: str, my_comment_id: int | None) -> bool:
-    """Confirm our claim-comment has the highest ID among neon-claim comments."""
+    """Confirm our claim-comment is the *earliest* (lowest-id) on the issue.
+
+    DeepSeek audit on PR #71 found the original "highest id wins" inverts the
+    CAS contract: under an interleaved POST→verify pattern, both racing workers
+    can pass the verify step. The first poster's verify (only its own comment
+    visible) sees its id as the highest and proceeds. The second poster's
+    verify (both comments visible) also sees its own id as the highest and
+    proceeds. Both run the handler.
+
+    Lowest id wins flips that: only the worker whose comment carries the
+    smallest neon-claim:v1 id among all such comments is the canonical winner.
+    The runner-up's verify sees the earlier comment and steps down.
+
+    Both `my_exec_id` AND `my_comment_id` must match — guards against stale
+    `neon-claim:v1` comments from a prior lease cycle that the reaper hasn't
+    cleaned yet (otherwise an old A-comment from cycle 1 could mask A's new
+    comment in cycle 2 if A reuses the host).
+    """
     try:
         comments = bus_gitea.list_comments(issue_number)
     except BusGiteaError as exc:
         log(f"#{issue_number} claim verify list_comments failed: {exc}; assuming lost", level="error")
         return False
 
-    latest_id = -1
-    latest_exec = None
+    lowest_id = None
+    lowest_exec = None
     for comment in comments:
         match = CLAIM_RE.search(comment.get("body") or "")
         if not match:
             continue
-        comment_id = comment.get("id") or 0
-        if comment_id > latest_id:
-            latest_id = comment_id
-            latest_exec = match.group("exec")
+        comment_id = comment.get("id")
+        if comment_id is None:
+            continue
+        if lowest_id is None or comment_id < lowest_id:
+            lowest_id = comment_id
+            lowest_exec = match.group("exec")
 
-    if latest_exec != my_exec_id:
-        log(f"#{issue_number} claim lost to {latest_exec or '<none>'}; my_comment_id={my_comment_id}")
-        return False
-    return True
+    won = (
+        lowest_exec == my_exec_id
+        and my_comment_id is not None
+        and lowest_id == my_comment_id
+    )
+    if not won:
+        log(
+            f"#{issue_number} claim lost: lowest_exec={lowest_exec or '<none>'} "
+            f"lowest_id={lowest_id} my_exec={my_exec_id} my_comment_id={my_comment_id}"
+        )
+    return won
 
 
 def _heartbeat_comment(exec_id: str) -> str:

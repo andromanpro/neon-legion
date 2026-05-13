@@ -122,16 +122,21 @@ class BusWorkerTests(unittest.TestCase):
         self.assertEqual(self.states(), ["neon:state/claimed", "neon:state/in-progress", "neon:state/done"])
         self.assertIn("exec=mine-100", self.comments[0]["body"])
 
-    def test_claim_lost_when_other_worker_comments_after(self):
+    # DeepSeek audit on PR #71 (HIGH): "lowest id wins" — first poster is the
+    # canonical winner. These tests cover the inverted-from-spec semantics.
+
+    def test_claim_lost_when_other_worker_posted_before(self):
+        # Other posted first (id=100) → other wins. We posted second (id=101) → we lose.
         handler = Mock()
         bus_worker.register_handler("echo", handler)
-        mine = "<!-- neon-claim:v1 host=win-codex-01 exec=mine-100 claimed_at=2026-05-13T12:30:00Z lease_seconds=600 -->"
-        other = "<!-- neon-claim:v1 host=win-codex-01 exec=other-101 claimed_at=2026-05-13T12:30:01Z lease_seconds=600 -->"
+        mine_body = "<!-- neon-claim:v1 host=win-codex-01 exec=mine-100 claimed_at=2026-05-13T12:30:01Z lease_seconds=600 -->"
+        other_body = "<!-- neon-claim:v1 host=win-codex-01 exec=other-099 claimed_at=2026-05-13T12:30:00Z lease_seconds=600 -->"
 
         with patch("tools.bus_worker._new_exec_id", return_value="mine-100"), \
+             patch("tools.bus_worker.bus_gitea.comment", return_value={"id": 101}), \
              patch("tools.bus_worker.bus_gitea.list_comments", return_value=[
-                 {"id": 100, "number": 50, "body": mine},
-                 {"id": 101, "number": 50, "body": other},
+                 {"id": 100, "number": 50, "body": other_body},
+                 {"id": 101, "number": 50, "body": mine_body},
              ]), \
              patch("tools.bus_worker._payload_read", return_value=PAYLOAD), \
              patch("tools.bus_worker.log") as log:
@@ -140,21 +145,73 @@ class BusWorkerTests(unittest.TestCase):
         self.assertEqual(self.states(), ["neon:state/claimed"])
         self.assertFalse(any(call["labels"] and call["labels"][-1] == "neon:state/in-progress" for call in self.updates))
         handler.assert_not_called()
-        self.assertTrue(any("lost claim race" in call.args[0] for call in log.call_args_list))
+        self.assertTrue(any("claim lost" in call.args[0] for call in log.call_args_list))
 
-    def test_claim_won_when_other_worker_comments_before(self):
-        mine = "<!-- neon-claim:v1 host=win-codex-01 exec=mine-100 claimed_at=2026-05-13T12:30:01Z lease_seconds=600 -->"
-        other = "<!-- neon-claim:v1 host=win-codex-01 exec=other-099 claimed_at=2026-05-13T12:30:00Z lease_seconds=600 -->"
+    def test_claim_won_when_we_posted_first(self):
+        # We posted first (id=100) → we win. Other posted second (id=101) → other loses.
+        mine_body = "<!-- neon-claim:v1 host=win-codex-01 exec=mine-100 claimed_at=2026-05-13T12:30:00Z lease_seconds=600 -->"
+        other_body = "<!-- neon-claim:v1 host=win-codex-01 exec=other-101 claimed_at=2026-05-13T12:30:01Z lease_seconds=600 -->"
 
         with patch("tools.bus_worker._new_exec_id", return_value="mine-100"), \
+             patch("tools.bus_worker.bus_gitea.comment", return_value={"id": 100}), \
              patch("tools.bus_worker.bus_gitea.list_comments", return_value=[
-                 {"id": 99, "number": 50, "body": other},
-                 {"id": 100, "number": 50, "body": mine},
+                 {"id": 100, "number": 50, "body": mine_body},
+                 {"id": 101, "number": 50, "body": other_body},
              ]), \
              patch("tools.bus_worker._payload_read", return_value=PAYLOAD):
             bus_worker.process_issue(issue(), HOST)
 
         self.assertEqual(self.states(), ["neon:state/claimed", "neon:state/in-progress", "neon:state/done"])
+
+    def test_interleaved_race_only_first_poster_wins(self):
+        # DeepSeek MED #4: the genuinely hard race window. Worker A posts (id=100),
+        # A verifies (sees only its own comment), under "highest id" A would win;
+        # then B posts (id=101), B verifies (sees both), under "highest id" B also wins.
+        # Under "lowest id wins" with my_comment_id guard, A's verify confirms its
+        # own comment is the lowest AND matches my_comment_id → A wins. We simulate
+        # B's path here: B posts second (gets id=101), but list_comments returns A's
+        # earlier comment too. B must lose because lowest_id=100 != B's my_comment_id=101.
+        a_body = "<!-- neon-claim:v1 host=win-codex-01 exec=worker-a claimed_at=2026-05-13T12:30:00Z lease_seconds=600 -->"
+        b_body = "<!-- neon-claim:v1 host=win-codex-01 exec=worker-b claimed_at=2026-05-13T12:30:00Z lease_seconds=600 -->"
+        handler = Mock()
+        bus_worker.register_handler("echo", handler)
+
+        # We are worker B — posted second (id=101). list_comments returns both.
+        with patch("tools.bus_worker._new_exec_id", return_value="worker-b"), \
+             patch("tools.bus_worker.bus_gitea.comment", return_value={"id": 101}), \
+             patch("tools.bus_worker.bus_gitea.list_comments", return_value=[
+                 {"id": 100, "number": 50, "body": a_body},
+                 {"id": 101, "number": 50, "body": b_body},
+             ]), \
+             patch("tools.bus_worker._payload_read", return_value=PAYLOAD), \
+             patch("tools.bus_worker.log"):
+            bus_worker.process_issue(issue(), HOST)
+
+        self.assertEqual(self.states(), ["neon:state/claimed"])
+        handler.assert_not_called()
+
+    def test_claim_lost_when_stale_old_cycle_claim_present(self):
+        # DeepSeek MED #2: my_comment_id guard handles stale claims from prior cycles.
+        # A leftover neon-claim:v1 comment with our same host but old exec_id has
+        # a lower id (it was posted earlier in time / earlier in the issue history).
+        # Without my_comment_id == lowest_id, lowest_exec matches my_exec only if
+        # exec strings collide — but the lowest_id check fails our gate.
+        my_exec = "mine-new"
+        stale = f"<!-- neon-claim:v1 host=win-codex-01 exec={my_exec} claimed_at=2026-05-12T00:00:00Z lease_seconds=600 -->"
+        fresh = f"<!-- neon-claim:v1 host=win-codex-01 exec={my_exec} claimed_at=2026-05-13T12:30:00Z lease_seconds=600 -->"
+
+        with patch("tools.bus_worker._new_exec_id", return_value=my_exec), \
+             patch("tools.bus_worker.bus_gitea.comment", return_value={"id": 200}), \
+             patch("tools.bus_worker.bus_gitea.list_comments", return_value=[
+                 {"id": 5, "number": 50, "body": stale},
+                 {"id": 200, "number": 50, "body": fresh},
+             ]), \
+             patch("tools.bus_worker._payload_read", return_value=PAYLOAD), \
+             patch("tools.bus_worker.log"):
+            bus_worker.process_issue(issue(), HOST)
+
+        # lowest is the stale one (id=5), exec matches but id != my_comment_id (200) → lost.
+        self.assertEqual(self.states(), ["neon:state/claimed"])
 
     def test_claim_verify_handles_list_comments_failure(self):
         from tools.bus_gitea import BusGiteaError
@@ -173,17 +230,22 @@ class BusWorkerTests(unittest.TestCase):
         self.assertTrue(any("list_comments failed" in call.args[0] for call in log.call_args_list))
 
     def test_claim_lost_does_not_revert_label(self):
-        mine = "<!-- neon-claim:v1 host=win-codex-01 exec=mine-100 claimed_at=2026-05-13T12:30:00Z lease_seconds=600 -->"
-        other = "<!-- neon-claim:v1 host=win-codex-01 exec=other-101 claimed_at=2026-05-13T12:30:01Z lease_seconds=600 -->"
+        # Other posted earlier (id=99), mine posted later (id=100) → mine loses
+        # under lowest-id-wins. The lost worker must NOT revert label to pending —
+        # that's the reaper's job via lease expiry.
+        mine_body = "<!-- neon-claim:v1 host=win-codex-01 exec=mine-100 claimed_at=2026-05-13T12:30:01Z lease_seconds=600 -->"
+        other_body = "<!-- neon-claim:v1 host=win-codex-01 exec=other-099 claimed_at=2026-05-13T12:30:00Z lease_seconds=600 -->"
 
         with patch("tools.bus_worker._new_exec_id", return_value="mine-100"), \
+             patch("tools.bus_worker.bus_gitea.comment", return_value={"id": 100}), \
              patch("tools.bus_worker.bus_gitea.list_comments", return_value=[
-                 {"id": 100, "number": 50, "body": mine},
-                 {"id": 101, "number": 50, "body": other},
+                 {"id": 99, "number": 50, "body": other_body},
+                 {"id": 100, "number": 50, "body": mine_body},
              ]), \
              patch("tools.bus_worker._payload_read", return_value=PAYLOAD):
             bus_worker.process_issue(issue(), HOST)
 
+        # Only the initial pending → claimed PATCH; no revert.
         self.assertEqual(len(self.updates), 1)
         self.assertEqual(self.updates[0]["labels"][-1], "neon:state/claimed")
         self.assertNotIn("neon:state/pending", self.updates[0]["labels"])
