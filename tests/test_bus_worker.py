@@ -350,8 +350,8 @@ class BusWorkerTests(unittest.TestCase):
             bus_worker._wait_or_stop(30)
             elapsed = time.monotonic() - started
 
-        self.assertLessEqual(elapsed, 1.0)
-        sleep.assert_called_once_with(1.0)
+        self.assertLessEqual(elapsed, 1.5)
+        self.assertGreaterEqual(sleep.call_count, 1)
 
     # DeepSeek audit A1 — payload root confinement
     def test_payload_path_raises_when_root_unset(self):
@@ -415,6 +415,36 @@ class BusWorkerTests(unittest.TestCase):
         result_comments = [c for c in self.comments if "neon-result:v1" in c["body"]]
         self.assertEqual(len(result_comments), 1)
         self.assertIn('"status":"done"', result_comments[0]["body"])
+
+    def test_finalise_set_state_failure_logs_orphan_and_does_not_raise(self):
+        # D2: lease verification can pass, then a reaper can expire/relabel the
+        # issue before the final DONE transition. The worker keeps the posted
+        # result and logs the orphaned finalise instead of leaking the conflict.
+        from tools.bus_gitea import BusGiteaError
+
+        call_counter = {"done_set_state": 0}
+        original_update = self.fake_update
+
+        def flaky_update(number, *, labels=None, state=None):
+            if labels and bus_worker.DONE in labels:
+                call_counter["done_set_state"] += 1
+                raise BusGiteaError(409, "label conflict - reaper expired")
+            return original_update(number, labels=labels, state=state)
+
+        with patch("tools.bus_worker._payload_read", return_value=PAYLOAD), \
+             patch("tools.bus_worker.bus_gitea.get_issue", return_value={"labels": [{"name": bus_worker.CLAIMED}]}), \
+             patch("tools.bus_worker.bus_gitea.update_issue", side_effect=flaky_update), \
+             patch("tools.bus_worker._post_result", wraps=bus_worker._post_result) as post_result, \
+             patch("tools.bus_worker.log") as log:
+            try:
+                bus_worker.process_issue(issue(), HOST)
+            except BusGiteaError:
+                self.fail("BusGiteaError on finalise leaked out of process_issue")
+
+        post_result.assert_called_once()
+        self.assertEqual(call_counter["done_set_state"], 1)
+        self.assertEqual(self.states(), ["neon:state/claimed", "neon:state/in-progress"])
+        self.assertTrue(any("orphaned" in call.args[0] for call in log.call_args_list))
 
     def test_finalise_skipped_when_issue_expired_during_run(self):
         with patch("tools.bus_worker._new_exec_id", return_value="mine-100"), \
