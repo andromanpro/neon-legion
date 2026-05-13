@@ -4,7 +4,7 @@ Name: codex-developer
 Profile: Codex CLI 0.128+ (gpt-5.5, high reasoning, --sandbox workspace-write)
 Goal: Add `backend/readmodel.py` that hydrates an in-memory SQLite cache from the canonical JSONL event store at backend startup. Wire it into `backend/server.py` so `build_summary` and `build_productivity` can use the cache. JSONL stays canonical — SQLite is a query accelerator only, rebuilt on every restart, never persisted.
 Constraints: stdlib only (`sqlite3` is stdlib), backward-compatible `/api/*` shapes, `--no-readmodel` flag flips the whole pipeline back to JSONL-only.
-Watches: Gitea issue [#53](http://192.168.1.130:3000/androman/neon-legion/issues/53), `backend/server.py` (`build_summary`, `build_productivity`, current JSONL readers in `tracker/summary.py`), `tracker/*-events.jsonl` (canonical shape).
+Watches: Gitea issue [#53](http://localhost:3000/androman/neon-legion/issues/53), `backend/server.py` (`build_summary`, `build_productivity`, current JSONL readers in `tracker/summary.py`), `tracker/*-events.jsonl` (canonical shape).
 Produces: 1 new file (`backend/readmodel.py` ~150 LOC), 1 new test file (`tests/test_readmodel.py` ~120 LOC), 1 new benchmark script (`tools/benchmark_readmodel.py` ~50 LOC), modifications to `backend/server.py` (wire-up + health + `--no-readmodel`).
 
 ## Operational backstory

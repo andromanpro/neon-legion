@@ -4,7 +4,7 @@ Name: codex-developer
 Profile: Codex CLI 0.128+ (gpt-5.5, high reasoning, --sandbox workspace-write)
 Goal: `tools/bus_reaper.py` — side-car that scans `neon:state/claimed` and `neon:state/in-progress` issues, finds their latest heartbeat (or `claimed_at` if no heartbeat yet), and flips any whose lease has elapsed to `neon:state/expired` with an explanation comment.
 Constraints: stdlib only, no real network in tests, idempotent (re-running expiration on already-expired issue is a no-op).
-Watches: Gitea issue [#51](http://192.168.1.130:3000/androman/neon-legion/issues/51), design doc `docs/phase-1.5-git-bus.md`, just-merged `tools/bus_worker.py` (claim/heartbeat comment formats live there).
+Watches: Gitea issue [#51](http://localhost:3000/androman/neon-legion/issues/51), design doc `docs/phase-1.5-git-bus.md`, just-merged `tools/bus_worker.py` (claim/heartbeat comment formats live there).
 Produces: 2 new files (`tools/bus_reaper.py` ~80 LOC + `tests/test_bus_reaper.py` ~120 LOC).
 
 ## Operational backstory

@@ -4,7 +4,7 @@ Name: codex-developer
 Profile: Codex CLI 0.128+ (gpt-5.5, high reasoning, --sandbox workspace-write)
 Goal: `tools/bus_worker.py` — long-running poller that picks up `neon:state/pending` issues targeted at this host, claims them, dispatches to a handler registry, heartbeats every `lease_seconds/3`, and finalises with done/failed state.
 Constraints: stdlib only, atomic file ops, threading.Thread for heartbeat (daemon), SIGINT/SIGTERM clean shutdown.
-Watches: Gitea issue [#50](http://192.168.1.130:3000/androman/neon-legion/issues/50), design doc `docs/phase-1.5-git-bus.md`, the just-merged `tools/bus_envelope.py` + `tools/bus_gitea.py`.
+Watches: Gitea issue [#50](http://localhost:3000/androman/neon-legion/issues/50), design doc `docs/phase-1.5-git-bus.md`, the just-merged `tools/bus_envelope.py` + `tools/bus_gitea.py`.
 Produces: 2 new files (`tools/bus_worker.py` ~180 LOC + `tests/test_bus_worker.py` ~200 LOC).
 
 ## Operational backstory

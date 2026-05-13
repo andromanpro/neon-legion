@@ -4,7 +4,7 @@ Name: codex-developer
 Profile: Codex CLI 0.128+ (gpt-5.5, high reasoning, --sandbox workspace-write)
 Goal: Thin `tools/bus_gitea.py` exposing the Gitea API surface the bus needs (create_issue, update_issue, comment, list_issues, get_issue) with consistent error handling and rate-limit awareness. Stdlib only.
 Constraints: stdlib only (`urllib.request`), UTF-8 everywhere, atomic write where applicable, no third-party deps.
-Watches: Gitea issue [#49](http://192.168.1.130:3000/androman/neon-legion/issues/49), design doc `docs/phase-1.5-git-bus.md`, the just-merged `tools/bus_envelope.py` (style reference, not import).
+Watches: Gitea issue [#49](http://localhost:3000/androman/neon-legion/issues/49), design doc `docs/phase-1.5-git-bus.md`, the just-merged `tools/bus_envelope.py` (style reference, not import).
 Produces: 2 new files (`tools/bus_gitea.py` ~100 LOC + `tests/test_bus_gitea.py` ~150 LOC).
 
 ## Operational backstory
@@ -60,7 +60,7 @@ All calls read these at module load:
 | Env var | Default | Used for |
 |---|---|---|
 | `GITEA_TOKEN_PATH` | `~/.gitea-token` | Read API token from this file (single line) |
-| `GITEA_BASE_URL` | `http://192.168.1.130:3000` | API base URL |
+| `GITEA_BASE_URL` | `http://localhost:3000` | API base URL |
 | `GITEA_REPO` | `androman/neon-legion` | `{owner}/{repo}` slug |
 
 The token is read from the file path (not directly from env) so the same module works for both local dev and any future supervisor that reuses the env conventions of `tools/config.py`.

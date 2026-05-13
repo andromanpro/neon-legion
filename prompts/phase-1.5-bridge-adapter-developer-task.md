@@ -4,7 +4,7 @@ Name: codex-developer
 Profile: Codex CLI 0.128+ (gpt-5.5, high reasoning, --sandbox workspace-write)
 Goal: Wire the existing `tools/openclaw-codex-bridge.py` action handlers (`action_list`, `action_read`, `action_rg`, `action_handoff_to_codex`, `action_codex_exec`) into the Phase 1.5 bus worker via a thin adapter. The action *handlers* stay byte-identical; only the transport changes from SMB inbox/outbox files to Gitea Issues.
 Constraints: stdlib only, **do not** modify any `action_*` function bodies, preserve file-watch mode as the default (`--bus` is opt-in).
-Watches: Gitea issue [#52](http://192.168.1.130:3000/androman/neon-legion/issues/52), design doc `docs/phase-1.5-git-bus.md`, just-merged `tools/bus_worker.py` (handler contract), `tools/openclaw-codex-bridge.py` (action sources).
+Watches: Gitea issue [#52](http://localhost:3000/androman/neon-legion/issues/52), design doc `docs/phase-1.5-git-bus.md`, just-merged `tools/bus_worker.py` (handler contract), `tools/openclaw-codex-bridge.py` (action sources).
 Produces: 1 new file (`tools/bus_adapter_openclaw.py` ~80 LOC + tests `tests/test_bus_adapter_openclaw.py` ~100 LOC), 2 modified files (`tools/openclaw-codex-bridge.py` — add `--bus` flag wiring; `tools/run-openclaw-codex-bridge.cmd` — switch to `--bus`).
 
 ## Operational backstory

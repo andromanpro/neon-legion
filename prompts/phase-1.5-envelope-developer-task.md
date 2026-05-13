@@ -4,7 +4,7 @@ Name: codex-developer
 Profile: Codex CLI 0.128+ (gpt-5.5, high reasoning, --sandbox workspace-write)
 Goal: Self-contained `tools/bus_envelope.py` (stdlib only) that handles the sentinel-wrapped JSON envelope used by the Phase 1.5 Git bus.
 Constraints: stdlib only, UTF-8, atomic write, no third-party deps, **forward-compat** schema versioning.
-Watches: Gitea issue [#48](http://192.168.1.130:3000/androman/neon-legion/issues/48), design doc `docs/phase-1.5-git-bus.md`.
+Watches: Gitea issue [#48](http://localhost:3000/androman/neon-legion/issues/48), design doc `docs/phase-1.5-git-bus.md`.
 Produces: 2 new files (`tools/bus_envelope.py` ~50 LOC + `tests/test_bus_envelope.py` ~80 LOC).
 
 ## Operational backstory
