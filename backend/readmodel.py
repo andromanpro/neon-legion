@@ -145,7 +145,9 @@ def read_events_fast(
             provider, ts, session_id, message_uuid, model, input_tokens,
             output_tokens, cache_read_tokens, cache_creation_tokens,
             total_tokens, cost_estimate_usd, duration_ms, working_dir,
-            tool_uses, stop_reason
+            tool_uses, stop_reason,
+            event_id, tracking_run_id, cached_input_tokens, reasoning_tokens,
+            exit_code, json_provider
         FROM events
     """
     if where:
@@ -169,6 +171,12 @@ def read_events_fast(
             working_dir,
             tool_uses,
             stop_reason,
+            event_id,
+            tracking_run_id,
+            cached_input_tokens,
+            reasoning_tokens,
+            exit_code,
+            json_provider,
         ) = row
 
         parsed_ts = _parse_event_ts(ts)
@@ -180,8 +188,12 @@ def read_events_fast(
         if end is not None and event_date > end:
             continue
 
+        # DeepSeek audit MED #3: surface the JSONL "provider" verbatim so
+        # event["provider"] matches what the slow path returns. Falls back
+        # to the file's default mapping when the JSONL omits the key.
+        provider_default = PROVIDER_FILES.get(str(provider_key), ("", "anthropic"))[1]
         event = {
-            "provider": provider_key,
+            "provider": json_provider or provider_default,
             "ts": ts,
             "session_id": session_id,
             "message_uuid": message_uuid,
@@ -196,6 +208,16 @@ def read_events_fast(
             "working_dir": working_dir,
             "tool_uses": tool_uses if tool_uses is not None else 0,
             "stop_reason": stop_reason,
+            # DeepSeek audit HIGH #1+2: fields slow-path dedup compares.
+            # These were silently absent in the fast-path dict, so events
+            # differing only in these fields collapsed to one row, and
+            # events sharing event_id/tracking_run_id were treated as
+            # distinct. Both behaviours diverged from the slow path.
+            "event_id": event_id,
+            "tracking_run_id": tracking_run_id,
+            "cached_input_tokens": cached_input_tokens if cached_input_tokens is not None else 0,
+            "reasoning_tokens": reasoning_tokens if reasoning_tokens is not None else 0,
+            "exit_code": exit_code,
         }
         rows.append((event, str(provider_key), parsed_ts.timestamp()))
 
@@ -224,6 +246,19 @@ def _create_schema(conn: sqlite3.Connection) -> None:
             working_dir TEXT,
             tool_uses INTEGER DEFAULT 0,
             stop_reason TEXT,
+            -- DeepSeek audit on #60 (HIGH 1+2): dedup parity with slow path.
+            -- event_id/tracking_run_id are the primary dedup keys; the legacy
+            -- token/exit_code fields participate in the fallback key when
+            -- event_id is absent.
+            event_id TEXT,
+            tracking_run_id TEXT,
+            cached_input_tokens INTEGER DEFAULT 0,
+            reasoning_tokens INTEGER DEFAULT 0,
+            exit_code INTEGER,
+            -- The provider field stored on disk in the JSONL (vs. provider_key
+            -- which is the file tag). Slow path returns this verbatim; fast
+            -- path now does too. Falls back to default_provider when absent.
+            json_provider TEXT,
             raw_json TEXT NOT NULL
         );
         CREATE INDEX idx_events_ts ON events(ts);
@@ -275,14 +310,24 @@ def _load_event_file(
 
             event_for_columns = dict(event)
             event_for_columns.setdefault("provider", default_provider)
+            # DeepSeek audit on #60: project the fields slow-path dedup uses
+            # into columns so fast-path dedup can mirror it without raw_json.
+            exit_code = event.get("exit_code")
+            exit_code_int = _as_int(exit_code) if exit_code is not None else None
+            json_provider = event.get("provider") if isinstance(event.get("provider"), str) else None
             conn.execute(
                 """
                 INSERT INTO events (
                     provider, ts, session_id, message_uuid, model, input_tokens,
                     output_tokens, cache_read_tokens, cache_creation_tokens,
                     total_tokens, cost_estimate_usd, duration_ms, working_dir,
-                    tool_uses, stop_reason, raw_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    tool_uses, stop_reason,
+                    event_id, tracking_run_id, cached_input_tokens,
+                    reasoning_tokens, exit_code, json_provider,
+                    raw_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                          ?, ?, ?, ?, ?, ?,
+                          ?)
                 """,
                 (
                     provider_key,
@@ -300,6 +345,12 @@ def _load_event_file(
                     event.get("working_dir"),
                     _as_int(event.get("tool_uses")),
                     event.get("stop_reason"),
+                    event.get("event_id") if isinstance(event.get("event_id"), str) else None,
+                    event.get("tracking_run_id") if isinstance(event.get("tracking_run_id"), str) else None,
+                    _as_int(event.get("cached_input_tokens")),
+                    _as_int(event.get("reasoning_tokens")),
+                    exit_code_int,
+                    json_provider,
                     raw,
                 ),
             )
@@ -414,24 +465,39 @@ def _dedupe_events(rows: list[tuple[dict, str]]) -> list[tuple[dict, str]]:
 
 
 def _dedupe_fast_events(rows: list[tuple[dict, str, float]]) -> list[tuple[dict, str, float]]:
+    """Mirror `_dedupe_events` two-tier logic (primary by event_id /
+    tracking_run_id, fallback by legacy key). DeepSeek audit HIGH #1+2 on
+    PR #68 — the previous single-tier legacy-only dedup diverged from the
+    slow path on two fronts: events sharing event_id were not deduped, and
+    events differing in cached_input_tokens/reasoning_tokens/exit_code
+    incorrectly collapsed because those fields were always None in the
+    fast-path dict.
+    """
     deduped = []
-    seen_legacy = set()
+    seen_event_ids: set[str] = set()
+    seen_legacy: set[tuple] = set()
     for event, provider_key, sort_ts in rows:
-        legacy_key = (
-            _event_provider(event, provider_key),
-            event.get("session_id"),
-            event.get("ts"),
-            event.get("model"),
-            event.get("input_tokens"),
-            event.get("cached_input_tokens"),
-            event.get("output_tokens"),
-            event.get("reasoning_tokens"),
-            event.get("total_tokens"),
-            event.get("exit_code"),
-        )
-        if legacy_key in seen_legacy:
-            continue
-        seen_legacy.add(legacy_key)
+        event_id = event.get("event_id") or event.get("tracking_run_id")
+        if isinstance(event_id, str) and event_id:
+            if event_id in seen_event_ids:
+                continue
+            seen_event_ids.add(event_id)
+        else:
+            legacy_key = (
+                _event_provider(event, provider_key),
+                event.get("session_id"),
+                event.get("ts"),
+                event.get("model"),
+                event.get("input_tokens"),
+                event.get("cached_input_tokens"),
+                event.get("output_tokens"),
+                event.get("reasoning_tokens"),
+                event.get("total_tokens"),
+                event.get("exit_code"),
+            )
+            if legacy_key in seen_legacy:
+                continue
+            seen_legacy.add(legacy_key)
         deduped.append((event, provider_key, sort_ts))
     return deduped
 

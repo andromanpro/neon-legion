@@ -37,6 +37,17 @@ DOCUMENTED_EVENT_FIELDS = {
     "stop_reason",
 }
 
+# DeepSeek audit on #60 (HIGH 1+2): the fast path also surfaces these for
+# dedup parity with the slow path. Slow path may or may not include them
+# depending on what was in the raw JSONL — they are NOT documented baseline.
+FAST_PATH_DEDUP_FIELDS = {
+    "event_id",
+    "tracking_run_id",
+    "cached_input_tokens",
+    "reasoning_tokens",
+    "exit_code",
+}
+
 
 @contextmanager
 def temporary_events_dir():
@@ -218,7 +229,9 @@ class ReadModelTests(unittest.TestCase):
             fast = readmodel.read_events_fast(conn, date(2026, 5, 10), date(2026, 5, 10))
 
             self.assertEqual(len(fast), 1)
-            self.assertEqual(set(fast[0]), DOCUMENTED_EVENT_FIELDS)
+            # Fast path returns documented fields + extra dedup fields.
+            self.assertTrue(DOCUMENTED_EVENT_FIELDS <= set(fast[0]))
+            self.assertTrue(FAST_PATH_DEDUP_FIELDS <= set(fast[0]))
             self.assertEqual(set(slow[0]) & DOCUMENTED_EVENT_FIELDS, DOCUMENTED_EVENT_FIELDS)
             for field in DOCUMENTED_EVENT_FIELDS:
                 self.assertEqual(fast[0][field], slow[0][field])
@@ -286,6 +299,102 @@ class ReadModelTests(unittest.TestCase):
             }
             self.assertTrue({"idx_events_ts", "idx_events_session", "idx_events_provider"} <= indexes)
             conn.close()
+
+    # DeepSeek audit on #60 (HIGH #1) — dedup by event_id parity with slow path.
+    def test_read_events_fast_dedupes_by_event_id_like_slow(self):
+        # Two events with the SAME event_id but different token counts —
+        # slow path drops the second by event_id; fast path now matches.
+        ts = "2026-05-13T12:00:00+03:00"
+        line1 = json.dumps({
+            "event_id": "evt-001",
+            "ts": ts,
+            "model": "gpt-5",
+            "input_tokens": 100,
+            "output_tokens": 50,
+            "session_id": "sess-A",
+            "provider": "openai",
+        })
+        line2 = json.dumps({
+            "event_id": "evt-001",
+            "ts": ts,
+            "model": "gpt-5",
+            "input_tokens": 999,  # different — would be distinct without event_id dedup
+            "output_tokens": 50,
+            "session_id": "sess-A",
+            "provider": "openai",
+        })
+        with temporary_events_dir() as tmp:
+            (Path(tmp) / "codex-events.jsonl").write_text(line1 + "\n" + line2 + "\n", encoding="utf-8")
+            conn = readmodel.build(Path(tmp))
+            try:
+                fast = readmodel.read_events_fast(conn)
+                slow = readmodel.read_events(conn, date(2026, 5, 13), date(2026, 5, 13))
+                self.assertEqual(len(fast), 1, "fast path must dedupe by event_id")
+                self.assertEqual(len(slow), 1, "slow path baseline")
+                self.assertEqual(fast[0]["input_tokens"], slow[0]["input_tokens"])
+            finally:
+                conn.close()
+
+    # DeepSeek audit on #60 (HIGH #2) — legacy-key fields surfaced so events
+    # differing in cached_input_tokens / reasoning_tokens / exit_code remain
+    # distinct (not collapsed to one row).
+    def test_read_events_fast_keeps_events_differing_in_legacy_fields(self):
+        ts = "2026-05-13T12:00:00+03:00"
+        # No event_id — fall through to legacy key. Same session+model+ts+tokens
+        # but DIFFERENT cached_input_tokens. Slow path keeps both; fast path now does too.
+        line1 = json.dumps({
+            "ts": ts,
+            "model": "gpt-5",
+            "input_tokens": 100,
+            "output_tokens": 50,
+            "cached_input_tokens": 10,
+            "session_id": "sess-B",
+            "provider": "openai",
+        })
+        line2 = json.dumps({
+            "ts": ts,
+            "model": "gpt-5",
+            "input_tokens": 100,
+            "output_tokens": 50,
+            "cached_input_tokens": 20,  # different
+            "session_id": "sess-B",
+            "provider": "openai",
+        })
+        with temporary_events_dir() as tmp:
+            (Path(tmp) / "codex-events.jsonl").write_text(line1 + "\n" + line2 + "\n", encoding="utf-8")
+            conn = readmodel.build(Path(tmp))
+            try:
+                fast = readmodel.read_events_fast(conn)
+                slow = readmodel.read_events(conn, date(2026, 5, 13), date(2026, 5, 13))
+                self.assertEqual(len(fast), 2, "fast path must distinguish events differing in cached_input_tokens")
+                self.assertEqual(len(slow), 2, "slow path baseline")
+                self.assertEqual(
+                    sorted(e["cached_input_tokens"] for e in fast),
+                    sorted(e["cached_input_tokens"] for e in slow),
+                )
+            finally:
+                conn.close()
+
+    def test_read_events_fast_provider_matches_slow_path(self):
+        # DeepSeek MED #3: json_provider verbatim from JSONL on both paths.
+        line = json.dumps({
+            "event_id": "evt-prov",
+            "ts": "2026-05-13T12:00:00+03:00",
+            "model": "claude-opus-4",
+            "input_tokens": 1,
+            "provider": "anthropic",
+            "session_id": "sess-P",
+        })
+        with temporary_events_dir() as tmp:
+            (Path(tmp) / "claude-events.jsonl").write_text(line + "\n", encoding="utf-8")
+            conn = readmodel.build(Path(tmp))
+            try:
+                fast = readmodel.read_events_fast(conn)
+                slow = readmodel.read_events(conn, date(2026, 5, 13), date(2026, 5, 13))
+                self.assertEqual(fast[0]["provider"], slow[0]["provider"])
+                self.assertEqual(fast[0]["provider"], "anthropic")
+            finally:
+                conn.close()
 
 
 if __name__ == "__main__":
