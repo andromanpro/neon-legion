@@ -196,7 +196,7 @@ class BusWorkerTests(unittest.TestCase):
             bus_worker.process_issue(issue(body=first_body, number=50), HOST)
 
         handler.assert_called_once()
-        self.assertEqual(bus_worker.IDEMPOTENCY_CACHE["K1"], {"status": "done", "result": {"value": "first"}})
+        self.assertEqual(bus_worker.IDEMPOTENCY_CACHE["dedup:win-codex-01:K1"], {"status": "done", "result": {"value": "first"}})
         handler.reset_mock()
 
         with patch("tools.bus_worker._payload_read") as payload_read:
@@ -220,7 +220,7 @@ class BusWorkerTests(unittest.TestCase):
 
         handler.assert_called_once()
         self.assertEqual(self.result_json(), {"status": "done", "result": {"fresh": True}})
-        self.assertEqual(bus_worker.IDEMPOTENCY_CACHE["K2"], {"status": "done", "result": {"fresh": True}})
+        self.assertEqual(bus_worker.IDEMPOTENCY_CACHE["dedup-miss:win-codex-01:K2"], {"status": "done", "result": {"fresh": True}})
 
     def test_idempotency_cache_does_not_collide_across_keys(self):
         handler = Mock(side_effect=[{"slot": "one"}, {"slot": "two"}])
@@ -234,8 +234,8 @@ class BusWorkerTests(unittest.TestCase):
 
         self.assertEqual(handler.call_count, 2)
         self.assertEqual(self.result_json(), {"status": "done", "result": {"slot": "two"}})
-        self.assertEqual(bus_worker.IDEMPOTENCY_CACHE["K1"], {"status": "done", "result": {"slot": "one"}})
-        self.assertEqual(bus_worker.IDEMPOTENCY_CACHE["K2"], {"status": "done", "result": {"slot": "two"}})
+        self.assertEqual(bus_worker.IDEMPOTENCY_CACHE["dedup-slots:win-codex-01:K1"], {"status": "done", "result": {"slot": "one"}})
+        self.assertEqual(bus_worker.IDEMPOTENCY_CACHE["dedup-slots:win-codex-01:K2"], {"status": "done", "result": {"slot": "two"}})
 
     def test_failed_handler_does_not_populate_idempotency_cache(self):
         handler = Mock(side_effect=[ValueError("bad payload"), {"recovered": True}])
@@ -246,14 +246,59 @@ class BusWorkerTests(unittest.TestCase):
         with patch("tools.bus_worker._payload_read", return_value=PAYLOAD):
             bus_worker.process_issue(issue(body=first_body, number=50), HOST)
 
-        self.assertNotIn("KF", bus_worker.IDEMPOTENCY_CACHE)
+        self.assertNotIn("dedup-fail:win-codex-01:KF", bus_worker.IDEMPOTENCY_CACHE)
 
         with patch("tools.bus_worker._payload_read", return_value=PAYLOAD):
             bus_worker.process_issue(issue(body=second_body, number=51), HOST)
 
         self.assertEqual(handler.call_count, 2)
         self.assertEqual(self.result_json(), {"status": "done", "result": {"recovered": True}})
-        self.assertEqual(bus_worker.IDEMPOTENCY_CACHE["KF"], {"status": "done", "result": {"recovered": True}})
+        self.assertEqual(bus_worker.IDEMPOTENCY_CACHE["dedup-fail:win-codex-01:KF"], {"status": "done", "result": {"recovered": True}})
+
+    # DeepSeek audit on PR #79 (MED #2): cache write must come AFTER _set_state
+    # success. If the DONE transition fails (transient 5xx), the cache MUST NOT
+    # be populated — otherwise a re-issue would replay a result whose original
+    # issue never reached `done`.
+    def test_idempotency_cache_not_populated_when_set_state_done_fails(self):
+        from tools.bus_gitea import BusGiteaError
+
+        handler = Mock(return_value={"v": 1})
+        bus_worker.register_handler("dedup-orphan", handler)
+        body = bus_envelope.serialize(task(kind="dedup-orphan", idempotency_key="KO"))
+
+        original_update = self.fake_update
+
+        def flaky_update(number, *, labels=None, state=None):
+            if labels and bus_worker.DONE in labels:
+                raise BusGiteaError(500, "transient 5xx mid-DONE")
+            return original_update(number, labels=labels, state=state)
+
+        with patch("tools.bus_worker._payload_read", return_value=PAYLOAD), \
+             patch("tools.bus_worker.bus_gitea.update_issue", side_effect=flaky_update):
+            bus_worker.process_issue(issue(body=body), HOST)
+
+        handler.assert_called_once()  # handler ran
+        self.assertNotIn("dedup-orphan:win-codex-01:KO", bus_worker.IDEMPOTENCY_CACHE)
+
+    # DeepSeek audit on PR #79 (MED #1): cache key scoped by kind + host.
+    def test_idempotency_cache_key_scoped_by_kind(self):
+        # Same idempotency_key string under DIFFERENT kinds must NOT cross-poison.
+        handler_a = Mock(return_value={"from": "A"})
+        handler_b = Mock(return_value={"from": "B"})
+        bus_worker.register_handler("scope-A", handler_a)
+        bus_worker.register_handler("scope-B", handler_b)
+        body_a = bus_envelope.serialize(task(kind="scope-A", idempotency_key="K_SHARED"))
+        body_b = bus_envelope.serialize(task(task_id="ulid:01HQZB000000000000000000", kind="scope-B", idempotency_key="K_SHARED"))
+
+        with patch("tools.bus_worker._payload_read", return_value=PAYLOAD):
+            bus_worker.process_issue(issue(body=body_a, number=50), HOST)
+            bus_worker.process_issue(issue(body=body_b, number=51), HOST)
+
+        # Both handlers ran — no cross-kind poisoning.
+        handler_a.assert_called_once()
+        handler_b.assert_called_once()
+        self.assertEqual(bus_worker.IDEMPOTENCY_CACHE["scope-A:win-codex-01:K_SHARED"], {"status": "done", "result": {"from": "A"}})
+        self.assertEqual(bus_worker.IDEMPOTENCY_CACHE["scope-B:win-codex-01:K_SHARED"], {"status": "done", "result": {"from": "B"}})
 
     def test_lost_claim_does_not_emit_bus_event(self):
         mine_body = "<!-- neon-claim:v1 host=win-codex-01 exec=mine-100 claimed_at=2026-05-13T12:30:01Z lease_seconds=600 -->"

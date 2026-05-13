@@ -134,14 +134,14 @@ def process_issue(issue: dict, host: str) -> None:
         log(f"#{number} is no longer pending; skipping")
         return
 
+    # DeepSeek audit MED #1 on PR #79: scope the cache key by kind + target_host
+    # so a task of kind=A on host=X cannot poison the cache for kind=B on host=Y
+    # that happen to share the same idempotency_key string.
     idempotency_key = envelope.get("idempotency_key")
-    cached = (
-        IDEMPOTENCY_CACHE.get(idempotency_key)
-        if isinstance(idempotency_key, str) and idempotency_key
-        else None
-    )
+    cache_key = _idempotency_cache_key(envelope, host) if isinstance(idempotency_key, str) and idempotency_key else None
+    cached = IDEMPOTENCY_CACHE.get(cache_key) if cache_key else None
     if cached is not None:
-        log(f"#{number} idempotency-cache HIT for key={idempotency_key}; replaying prior result")
+        log(f"#{number} idempotency-cache HIT for key={cache_key}; replaying prior result")
         exec_id = _new_exec_id(host)
         try:
             claimed = _set_state(number, labels, CLAIMED)
@@ -234,8 +234,6 @@ def process_issue(issue: dict, host: str) -> None:
         return
 
     _post_result(number, exec_id, result)
-    if isinstance(idempotency_key, str) and idempotency_key and terminal_state == DONE:
-        IDEMPOTENCY_CACHE[idempotency_key] = dict(result)
     try:
         _set_state(number, current_labels, terminal_state, close=True)
     except BusGiteaError as exc:
@@ -245,6 +243,13 @@ def process_issue(issue: dict, host: str) -> None:
             level="error",
         )
         return
+    # DeepSeek audit MED #2 on PR #79: cache write must come AFTER the issue
+    # is confirmed closed. Caching before _set_state would let a transient
+    # 5xx leave the cache populated while the original issue stays in
+    # in-progress — a future re-issue would replay a success result for a
+    # task whose original never reached `done` for any observer.
+    if cache_key and terminal_state == DONE:
+        IDEMPOTENCY_CACHE[cache_key] = dict(result)
     _emit_bus_event(
         envelope,
         exec_id,
@@ -252,6 +257,16 @@ def process_issue(issue: dict, host: str) -> None:
         number,
         "done" if terminal_state == DONE else "failed",
     )
+
+
+def _idempotency_cache_key(envelope: dict, host: str) -> str:
+    """Cache key scoped by kind + target_host + raw key.
+
+    Prevents cross-kind / cross-host poisoning: a task of kind=A on host=X
+    cannot return a cached result for kind=B on host=Y if both happen to
+    share the same idempotency_key string.
+    """
+    return f"{envelope.get('kind', '')}:{host}:{envelope.get('idempotency_key', '')}"
 
 
 def log(message: str, *, level: str = "info") -> None:
