@@ -85,8 +85,14 @@ def expire(issue: dict, reason: str) -> None:
         log(f"#{number} is already expired; skipping")
         return
 
+    # DeepSeek audit E2: close the issue as part of expiring. Without
+    # state="closed" the issue stays open and accumulates in
+    # list_issues(state="open") queries even though it's terminal — clutter
+    # for any dashboard that surfaces open issue counts, no functional impact
+    # on the worker (which filters by PENDING) or the reaper itself (early-
+    # return on EXPIRED label).
     next_labels = _replace_state_label(labels, EXPIRED)
-    bus_gitea.update_issue(number, labels=next_labels)
+    bus_gitea.update_issue(number, labels=next_labels, state="closed")
     bus_gitea.comment(number, _expired_comment(reason))
     log(f"#{number} expired: {reason}")
 

@@ -211,6 +211,74 @@ class BusWorkerTests(unittest.TestCase):
         self.assertLessEqual(elapsed, 1.0)
         sleep.assert_called_once_with(1.0)
 
+    # DeepSeek audit A1 — payload root confinement
+    def test_payload_path_raises_when_root_unset(self):
+        with patch.dict("os.environ", {}, clear=True):
+            with self.assertRaises(bus_worker._WorkerFailure) as raised:
+                bus_worker._payload_path("file:///F:/tmp/payload.json")
+        self.assertEqual(raised.exception.reason, "payload_root_unset")
+
+    def test_payload_path_raises_when_outside_root(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as root:
+            outside = Path(root).parent / "definitely-outside.json"
+            with patch.dict("os.environ", {bus_worker.PAYLOAD_ROOT_ENV: root}):
+                with self.assertRaises(bus_worker._WorkerFailure) as raised:
+                    bus_worker._payload_path(f"file:///{outside.as_posix()}")
+        self.assertEqual(raised.exception.reason, "payload_outside_root")
+
+    def test_payload_path_accepts_path_inside_root(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as root:
+            inside = Path(root) / "payload.json"
+            inside.write_text("{}", encoding="utf-8")
+            with patch.dict("os.environ", {bus_worker.PAYLOAD_ROOT_ENV: root}):
+                resolved = bus_worker._payload_path(f"file:///{inside.as_posix()}")
+        self.assertEqual(resolved, inside.resolve())
+
+    def test_sha_mismatch_result_omits_actual_hash(self):
+        # A1 leak: the failure comment must NOT echo the actual sha — that
+        # would turn the worker into a content-fingerprint oracle.
+        bad_body = bus_envelope.serialize(task(payload_sha256="0" * 64))
+        with patch("tools.bus_worker._payload_read", return_value=PAYLOAD):
+            bus_worker.process_issue(issue(body=bad_body), HOST)
+
+        result = self.result_body()
+        self.assertIn("payload_sha_mismatch", result)
+        self.assertIn('"expected":"0000', result)
+        self.assertNotIn('"actual":', result)
+
+    def test_finalise_failure_does_not_propagate(self):
+        # C1: a transient Gitea error on the final state transition must not
+        # bubble out of process_issue, and must not cause the result envelope
+        # to be re-posted under a contradictory reason.
+        from tools.bus_gitea import BusGiteaError
+
+        call_counter = {"set_state": 0}
+        original_update = self.fake_update
+
+        def flaky_update(number, *, labels=None, state=None):
+            for label in labels or []:
+                if label == bus_worker.DONE:
+                    call_counter["set_state"] += 1
+                    raise BusGiteaError(500, "transient 5xx")
+            return original_update(number, labels=labels, state=state)
+
+        with patch("tools.bus_worker._payload_read", return_value=PAYLOAD), \
+             patch("tools.bus_worker.bus_gitea.update_issue", side_effect=flaky_update):
+            try:
+                bus_worker.process_issue(issue(), HOST)
+            except BusGiteaError:
+                self.fail("BusGiteaError on finalise leaked out of process_issue")
+
+        self.assertEqual(call_counter["set_state"], 1)
+        # Result envelope was posted exactly once, with status=done.
+        result_comments = [c for c in self.comments if "neon-result:v1" in c["body"]]
+        self.assertEqual(len(result_comments), 1)
+        self.assertIn('"status":"done"', result_comments[0]["body"])
+
 
 if __name__ == "__main__":
     unittest.main()

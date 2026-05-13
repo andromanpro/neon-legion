@@ -165,6 +165,15 @@ class BusReaperTests(unittest.TestCase):
         list_issues.assert_called_once_with(state="open", labels=["phase:1.5-git-bus"])
         self.assertEqual(len(self.updates), 1)
 
+    # DeepSeek audit E2 — expired issues must be closed, not left open.
+    def test_expire_closes_issue(self):
+        self.patch_comments([claim("2026-05-13T10:00:00Z", 600)])
+
+        bus_reaper.process_issue(issue(), NOW)
+
+        self.assertEqual(len(self.updates), 1)
+        self.assertEqual(self.updates[0]["state"], "closed")
+
 
 if __name__ == "__main__":
     unittest.main()

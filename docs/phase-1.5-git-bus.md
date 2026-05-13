@@ -156,3 +156,45 @@ result envelope back to the bus. The actions themselves don't change.
 - Encryption at rest of payloads (NAS share is already inside the LAN
   trust boundary; if you need this, encrypt the share, not the bus).
 - Cross-cluster federation. One Gitea, one bus, one trust zone.
+
+## Trust model
+
+Recorded after the DeepSeek pass surfaced two HIGH findings (#A1 path
+traversal, #B1 claim race) that are exploitable only by trusted-side
+adversaries. Documenting the assumptions explicitly so a future operator
+doesn't deploy the bus across a wider trust boundary than it can carry.
+
+1. **Bus tasks are assumed to originate from trusted issuers.** The
+   envelope `payload_sha256` guards against transport corruption and
+   comment vandalism *within* a task — but anyone with Gitea write
+   access can mint a fresh envelope pointing at any payload they
+   control. There is no end-to-end signature beyond the sha256 over
+   the envelope body itself. Operating outside a single-user / single-
+   admin Gitea instance requires adding signatures or moving payload
+   validation upstream.
+
+2. **Payload reads are confined to `BUS_PAYLOAD_ROOT`.** The worker
+   refuses to read any path that is not under the value of the
+   `BUS_PAYLOAD_ROOT` environment variable (which must be set
+   explicitly — there is no default). This prevents `payload_ref`
+   from being used as an arbitrary-file-read oracle. The sha256
+   mismatch failure result no longer echoes the actual hash, removing
+   the file-content fingerprint leak.
+
+3. **One worker per `neon:target/<host>` label.** Two `bus_worker.py`
+   instances watching the same host label can both claim the same
+   issue in a narrow window — Gitea has no CAS on a `PATCH labels`
+   call. The MVP relies on operator discipline (run one worker per
+   host label). A future CAS-via-claim-comment hardening is tracked
+   as a follow-up; until it lands, do not split workload by running
+   multiple workers against the same target label.
+
+4. **`expired` is terminal AND closed.** The reaper passes
+   `state="closed"` alongside the label swap so terminal issues do
+   not accumulate in `list_issues(state="open")` queries.
+
+5. **Finalise transitions are non-fatal.** If the very last
+   `update_issue` to `done`/`failed` fails (network blip, 5xx), the
+   result envelope is still posted to the issue; the worker logs an
+   "orphaned" warning and lets the reaper expire the leftover state.
+   No double-posting under contradictory reasons.
