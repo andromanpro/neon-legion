@@ -39,6 +39,12 @@ FAILED = "neon:state/failed"
 HTTP_SCHEMES = {"http", "https"}
 LOCAL_SCHEMES = {"", "file", "smb"}
 
+# DeepSeek audit A1: payload reads MUST be confined to an allowlisted root.
+# Without this, a malicious envelope with payload_ref=file:///C:/Users/.gitea-token
+# turns the worker into an arbitrary-file-read oracle (the sha256 mismatch comment
+# echoes the actual sha of the file, leaking content fingerprints).
+PAYLOAD_ROOT_ENV = "BUS_PAYLOAD_ROOT"
+
 _STOP = threading.Event()
 
 
@@ -124,13 +130,12 @@ def process_issue(issue: dict, host: str) -> None:
         _stop_heartbeat(heartbeat_done, heartbeat_thread)
         heartbeat_done = heartbeat_thread = None
 
-        _post_result(number, exec_id, {"status": "done", "result": handler_result})
-        _set_state(number, current_labels, DONE, close=True)
+        result = {"status": "done", "result": handler_result}
+        terminal_state = DONE
     except _WorkerFailure as exc:
         _stop_heartbeat(heartbeat_done, heartbeat_thread)
         result = {"status": "failed", "reason": exc.reason, **exc.details}
-        _post_result(number, exec_id, result)
-        _set_state(number, current_labels, FAILED, close=True)
+        terminal_state = FAILED
     except Exception as exc:
         _stop_heartbeat(heartbeat_done, heartbeat_thread)
         result = {
@@ -139,8 +144,22 @@ def process_issue(issue: dict, host: str) -> None:
             "error_type": type(exc).__name__,
             "message": str(exc),
         }
-        _post_result(number, exec_id, result)
-        _set_state(number, current_labels, FAILED, close=True)
+        terminal_state = FAILED
+
+    # DeepSeek audit C1: single finalise point — result is posted exactly once,
+    # state transition is wrapped so a transient Gitea 5xx/4xx at the very end
+    # cannot push the issue into a contradictory state (don/fail double-posted).
+    # On finalise failure the result is still in the issue; the reaper will
+    # expire the issue and a future poll picks it up cleanly.
+    _post_result(number, exec_id, result)
+    try:
+        _set_state(number, current_labels, terminal_state, close=True)
+    except BusGiteaError as exc:
+        log(
+            f"#{number} orphaned: result={result['status']} but {terminal_state} "
+            f"transition failed: {exc}",
+            level="error",
+        )
 
 
 def log(message: str, *, level: str = "info") -> None:
@@ -255,7 +274,10 @@ def _load_payload(envelope: dict) -> dict:
     actual = hashlib.sha256(raw).hexdigest()
     expected = envelope["payload_sha256"].lower()
     if actual.lower() != expected:
-        raise _WorkerFailure("payload_sha_mismatch", expected=expected, actual=actual)
+        # DeepSeek audit A1: do NOT echo the actual sha — that turns the worker
+        # into a file-content fingerprint oracle. Only the expected value is
+        # safe to surface (the issuer already knows it).
+        raise _WorkerFailure("payload_sha_mismatch", expected=expected)
     if not isinstance(payload, dict):
         raise _WorkerFailure("invalid_payload_json", error="payload root must be an object")
     return payload
@@ -264,6 +286,13 @@ def _load_payload(envelope: dict) -> dict:
 def _payload_read(payload_ref: str):
     path = _payload_path(payload_ref)
     return path.read_bytes()
+
+
+def _payload_root() -> Path | None:
+    raw = os.environ.get(PAYLOAD_ROOT_ENV)
+    if not raw:
+        return None
+    return Path(raw).resolve()
 
 
 def _payload_path(payload_ref: str) -> Path:
@@ -275,7 +304,26 @@ def _payload_path(payload_ref: str) -> Path:
     raw_path = urllib.parse.unquote(raw_path)
     if os.name == "nt" and len(raw_path) >= 3 and raw_path[0] == "/" and raw_path[2] == ":":
         raw_path = raw_path[1:]
-    return Path(raw_path)
+    candidate = Path(raw_path).resolve()
+
+    # DeepSeek audit A1: confine reads to BUS_PAYLOAD_ROOT to prevent path
+    # traversal (file:///C:/Users/.gitea-token, smb://host/../etc/passwd, etc.).
+    # If the env var is unset, refuse all reads — operators MUST opt in
+    # explicitly by pointing at a payload directory.
+    root = _payload_root()
+    if root is None:
+        raise _WorkerFailure(
+            "payload_root_unset",
+            hint=f"set {PAYLOAD_ROOT_ENV} to a directory containing task payloads",
+        )
+    try:
+        candidate.relative_to(root)
+    except ValueError as exc:
+        raise _WorkerFailure(
+            "payload_outside_root",
+            root=str(root),
+        ) from exc
+    return candidate
 
 
 def _canonical_bytes(payload: dict) -> bytes:
