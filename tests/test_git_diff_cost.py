@@ -147,6 +147,48 @@ class GitDiffCostTests(unittest.TestCase):
         self.assertEqual([], payload["sessions"])
         self.assertEqual(0, payload["summary"]["total_sessions_scanned"])
 
+    # DeepSeek MED #6 on PR #87: git_errors list is now a structural field.
+    def test_payload_carries_git_errors_field(self) -> None:
+        # Repo with at least one real commit so git log doesn't fatal-out on
+        # "branch has no commits". Session window in the past → no commits in
+        # window but log itself succeeds → git_errors stays empty.
+        when = NOW - timedelta(days=1)
+        self.commit_file("seed.txt", "hello", "seed", when)
+        events = [event("sid", when - timedelta(days=10), 1.0)]
+        payload = build_diff_cost(events, self.repo, now=NOW)
+
+        self.assertIn("git_errors", payload)
+        self.assertIsInstance(payload["git_errors"], list)
+        self.assertEqual(0, payload["summary"]["git_errors_count"])
+
+    # DeepSeek MED #9 on PR #87: sessions with commits but zero line changes
+    # (merges, renames, chmods) are now flagged structurally + excluded from
+    # cost_per_line attribution.
+    def test_zero_line_diff_session_excluded_from_cost_per_line_pool(self) -> None:
+        # `git commit --allow-empty` creates a commit with 0 file changes.
+        when = NOW - timedelta(minutes=5)
+        env = self.env.copy()
+        env["GIT_AUTHOR_DATE"] = when.isoformat()
+        env["GIT_COMMITTER_DATE"] = when.isoformat()
+        subprocess.run(
+            ["git", "commit", "--allow-empty", "-m", "empty merge"],
+            cwd=self.repo, env=env, text=True, capture_output=True, check=True,
+        )
+        events = [event("zero", when, 5.0)]
+        payload = build_diff_cost(events, self.repo, now=NOW)
+
+        # The session has a commit but 0 lines → cost_per_line_usd is None,
+        # session_has_commits_but_zero_lines is True, no_diff True (sharing
+        # the bucket).
+        self.assertEqual(1, len(payload["sessions"]))
+        session = payload["sessions"][0]
+        self.assertEqual(session["total_lines_changed"], 0)
+        self.assertIsNone(session["cost_per_line_usd"])
+        self.assertTrue(session.get("session_has_commits_but_zero_lines"))
+        # And the percentile pool excludes it.
+        self.assertEqual(0, payload["summary"]["sessions_with_commits"])
+        self.assertEqual(0, len(payload["expensive_sessions"]))
+
 
 if __name__ == "__main__":
     unittest.main()

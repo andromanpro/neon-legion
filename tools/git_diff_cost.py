@@ -66,7 +66,7 @@ def build_diff_cost(
     sessions = _session_buckets(events, current, lookback_days)
     if not sessions:
         return base
-    all_commits = _commits_in_range(
+    all_commits, git_errors = _commits_in_range(
         repo,
         min(bucket["start"] for bucket in sessions.values()),
         max(bucket["end"] for bucket in sessions.values()),
@@ -83,6 +83,12 @@ def build_diff_cost(
             continue
 
         total_lines = sum(int(commit["insertions"]) + int(commit["deletions"]) for commit in commits)
+        # DeepSeek audit MED #9 on PR #87: distinguish sessions with commits
+        # but zero line changes (merge-only, rename-only, chmod-only) from
+        # true no_diff sessions. They share `no_diff=true` semantics for the
+        # percentile pool but the structural difference is visible in the
+        # JSON for any consumer that wants it.
+        zero_line_diff = total_lines == 0
         payload_sessions.append(
             {
                 "session_id": session_id,
@@ -92,12 +98,16 @@ def build_diff_cost(
                 "cost_usd": bucket["cost"],
                 "commits": commits,
                 "total_lines_changed": total_lines,
-                "cost_per_line_usd": bucket["cost"] / max(total_lines, 1),
-                "no_diff": False,
+                "cost_per_line_usd": None if zero_line_diff else bucket["cost"] / total_lines,
+                "no_diff": zero_line_diff,
+                "session_has_commits_but_zero_lines": zero_line_diff,
             }
         )
 
-    with_commits = [item for item in payload_sessions if not item["no_diff"]]
+    with_commits = [
+        item for item in payload_sessions
+        if not item["no_diff"] and item.get("cost_per_line_usd") is not None
+    ]
     threshold = _percentile([float(item["cost_per_line_usd"]) for item in with_commits], top_decile_threshold)
     expensive = []
     if threshold is not None:
@@ -107,12 +117,17 @@ def build_diff_cost(
 
     base["sessions"] = payload_sessions
     base["expensive_sessions"] = expensive
+    # DeepSeek audit MED #6 on PR #87: surface git_errors as a structural
+    # JSON field. Operators who only consume diff_cost.json (no stderr access)
+    # can see whether commit reads were silently dropped.
+    base["git_errors"] = list(git_errors)
     base["summary"] = {
         "total_sessions_scanned": len(payload_sessions),
         "sessions_with_commits": len(with_commits),
         "no_diff_count": len(payload_sessions) - len(with_commits),
         "expensive_lines_threshold_usd_per_line": threshold,
         "expensive_sessions_count": len(expensive),
+        "git_errors_count": len(git_errors),
     }
     return base
 
@@ -187,7 +202,11 @@ def _session_buckets(events: list[dict], now: datetime, lookback_days: int) -> d
     return {sid: bucket for sid, bucket in buckets.items() if bucket["start"] is not None and bucket["end"] is not None}
 
 
-def _commits_in_range(repo: Path, start: datetime, end: datetime) -> list[dict[str, Any]]:
+def _commits_in_range(repo: Path, start: datetime, end: datetime) -> tuple[list[dict[str, Any]], list[str]]:
+    """Return (commits, errors). DeepSeek audit MED #6: errors propagated
+    out so callers can surface them in the JSON instead of silently dropping
+    commits with corrupted git objects."""
+    errors: list[str] = []
     result = _git(
         repo,
         "log",
@@ -196,8 +215,10 @@ def _commits_in_range(repo: Path, start: datetime, end: datetime) -> list[dict[s
         "--format=%H%x1f%cI%x1f%s",
     )
     if result.returncode != 0:
-        _log(f"git log failed for {repo}: {result.stderr.strip()}")
-        return []
+        msg = f"git log failed for {repo}: {result.stderr.strip()}"
+        _log(msg)
+        errors.append(msg)
+        return [], errors
 
     commits = []
     for line in result.stdout.splitlines():
@@ -210,18 +231,21 @@ def _commits_in_range(repo: Path, start: datetime, end: datetime) -> list[dict[s
         committed_at = _parse_git_datetime(committed_at_raw)
         if committed_at is None:
             continue
-        stats = _commit_stats(repo, commit_hash.strip(), subject.strip())
+        stats, err = _commit_stats(repo, commit_hash.strip(), subject.strip())
+        if err is not None:
+            errors.append(err)
         if stats is not None:
             stats["_committed_at"] = committed_at
             commits.append(stats)
-    return commits
+    return commits, errors
 
 
-def _commit_stats(repo: Path, commit_hash: str, subject: str) -> dict[str, Any] | None:
+def _commit_stats(repo: Path, commit_hash: str, subject: str) -> tuple[dict[str, Any] | None, str | None]:
     result = _git(repo, "show", "--stat", "--format=", commit_hash)
     if result.returncode != 0:
-        _log(f"git show failed for {commit_hash[:12]}: {result.stderr.strip()}")
-        return None
+        msg = f"git show failed for {commit_hash[:12]}: {result.stderr.strip()}"
+        _log(msg)
+        return None, msg
     files_changed, insertions, deletions = _parse_shortstat(result.stdout)
     return {
         "hash": commit_hash[:7],
@@ -229,7 +253,7 @@ def _commit_stats(repo: Path, commit_hash: str, subject: str) -> dict[str, Any] 
         "deletions": deletions,
         "files_changed": files_changed,
         "subject": subject,
-    }
+    }, None
 
 
 def _parse_shortstat(output: str) -> tuple[int, int, int]:
