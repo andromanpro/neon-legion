@@ -1,10 +1,12 @@
-# Runtime data (event streams, locks, task store)
+# Runtime data (event streams, locks, task store, generated dashboard inputs)
 tracker/*.jsonl
 tracker/*.lock
 tracker/.last-uuids.json
 tracker/tasks.json
 tracker/.estimation-logs/
 tracker/private/
+tracker/regressions.json
+tracker/reputation.json
 prompts/private/
 orchestrate-runs/
 
