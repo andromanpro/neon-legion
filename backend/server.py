@@ -41,6 +41,7 @@ TRACKER_DIR = PROJECT_ROOT / "tracker"
 _READMODEL = None
 _READMODEL_META = None
 _USE_SLOW_READMODEL = False
+_USE_LOOP_SUMMARY = False
 
 
 if hasattr(sys.stdout, "reconfigure"):
@@ -117,6 +118,11 @@ def parse_args():
         "--use-slow-readmodel",
         action="store_true",
         help="Use the raw_json-decoding SQLite read-model path instead of the column fast path.",
+    )
+    parser.add_argument(
+        "--use-loop-summary",
+        action="store_true",
+        help="Use read_events + Python summary loop instead of SQL aggregate summary.",
     )
     return parser.parse_args()
 
@@ -250,6 +256,24 @@ def providers_payload(events):
         "openrouter_openclaw": provider_payload(by_provider.get("openrouter_openclaw", summary.empty_stats())),
         "opencode_openrouter": provider_payload(by_provider.get("opencode_openrouter", summary.empty_stats())),
     }
+
+
+def subscription_from_by_model(by_model, days):
+    providers = {
+        stats.get("provider")
+        for stats in by_model.values()
+        if isinstance(stats, dict)
+    }
+    monthly = 0.0
+    if "anthropic" in providers:
+        monthly += summary.CLAUDE_MONTHLY_SUBSCRIPTION_USD
+    if "openai" in providers:
+        monthly += summary.OPENAI_MONTHLY_SUBSCRIPTION_USD
+    if "openrouter" in providers:
+        monthly += summary.OPENROUTER_MONTHLY_SUBSCRIPTION_USD
+    if "opencode" in providers:
+        monthly += summary.OPENCODE_MONTHLY_SUBSCRIPTION_USD
+    return monthly / summary.PRORATE_DAYS * days
 
 
 def event_ts_local(event):
@@ -387,10 +411,16 @@ def task_estimated_hours(entry):
 def build_summary(query):
     days = parse_days(query)
     start, end = period_for_days(days)
-    events = _read_events_dispatch(start, end)
-    by_model, total = summary.summarize_by_model(events)
+    if _READMODEL is not None and not _USE_SLOW_READMODEL and not _USE_LOOP_SUMMARY:
+        # DeepSeek audit #60 follow-up: keep the hot summary path in SQL so
+        # dashboard requests do not materialize every event dict in Python.
+        by_model, total = readmodel.aggregate_by_model(_READMODEL, start, end)
+        subscription = subscription_from_by_model(by_model, days)
+    else:
+        events = _read_events_dispatch(start, end)
+        by_model, total = summary.summarize_by_model(events)
+        subscription = summary.subscription_prorated_usd(events, days)
 
-    subscription = summary.subscription_prorated_usd(events, days)
     api_cost = summary.as_float(total.get("cost_estimate_usd"))
     totals = stats_payload(total)
     totals["api_equivalent_cost_usd"] = rounded(api_cost)
@@ -1415,9 +1445,10 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
 
 
 def main():
-    global _READMODEL, _READMODEL_META, _USE_SLOW_READMODEL
+    global _READMODEL, _READMODEL_META, _USE_SLOW_READMODEL, _USE_LOOP_SUMMARY
     args = parse_args()
     _USE_SLOW_READMODEL = bool(args.use_slow_readmodel)
+    _USE_LOOP_SUMMARY = bool(args.use_loop_summary)
 
     if args.no_readmodel:
         _READMODEL = None
