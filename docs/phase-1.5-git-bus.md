@@ -181,13 +181,14 @@ doesn't deploy the bus across a wider trust boundary than it can carry.
    mismatch failure result no longer echoes the actual hash, removing
    the file-content fingerprint leak.
 
-3. **One worker per `neon:target/<host>` label.** Two `bus_worker.py`
-   instances watching the same host label can both claim the same
-   issue in a narrow window — Gitea has no CAS on a `PATCH labels`
-   call. The MVP relies on operator discipline (run one worker per
-   host label). A future CAS-via-claim-comment hardening is tracked
-   as a follow-up; until it lands, do not split workload by running
-   multiple workers against the same target label.
+3. **CAS via claim-comment monotonic ID** (was: "One worker per
+   `neon:target/<host>` label"). After the label PATCH, the worker posts
+   a `neon-claim:v1` comment, re-fetches comments, and verifies the
+   highest-ID claim comment is its own `exec_id`. Gitea assigns
+   monotonic IDs to issue comments, so even simultaneous claim-POSTs
+   resolve to exactly one canonical winner. Lost claims do not revert
+   the label; the reaper's lease-expiry path picks up orphan `claimed`
+   state.
 
 4. **`expired` is terminal AND closed.** The reaper passes
    `state="closed"` alongside the label swap so terminal issues do

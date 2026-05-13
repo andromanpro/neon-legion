@@ -10,6 +10,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import secrets
 import signal
 import sys
@@ -38,6 +39,10 @@ DONE = "neon:state/done"
 FAILED = "neon:state/failed"
 HTTP_SCHEMES = {"http", "https"}
 LOCAL_SCHEMES = {"", "file", "smb"}
+CLAIM_RE = re.compile(
+    r"<!--\s*neon-claim:v1\s+host=\S+\s+exec=(?P<exec>\S+)\s+"
+    r"claimed_at=\S+\s+lease_seconds=\d+\s*-->"
+)
 
 # DeepSeek audit A1: payload reads MUST be confined to an allowlisted root.
 # Without this, a malicious envelope with payload_ref=file:///C:/Users/.gitea-token
@@ -103,17 +108,30 @@ def process_issue(issue: dict, host: str) -> None:
 
     exec_id = _new_exec_id(host)
     lease_seconds = int(envelope["lease_seconds"])
+    # Step 1: optimistic label swap. Gitea does not provide CAS for labels, so
+    # a later claim-comment verification decides the canonical winner.
     try:
         claimed = _set_state(number, labels, CLAIMED)
     except BusGiteaError as exc:
-        log(f"#{number} claim failed: {exc}; skipping", level="error")
+        log(f"#{number} claim PATCH failed: {exc}; skipping", level="error")
         return
     claimed_labels = _label_names(claimed)
     if CLAIMED not in claimed_labels:
-        log(f"#{number} claim did not stick; skipping")
+        log(f"#{number} claim PATCH did not stick; skipping")
         return
 
-    bus_gitea.comment(number, _claim_comment(host, exec_id, lease_seconds))
+    # Step 2: post claim-comment carrying our exec_id.
+    try:
+        my_claim_comment = bus_gitea.comment(number, _claim_comment(host, exec_id, lease_seconds))
+    except BusGiteaError as exc:
+        log(f"#{number} claim comment POST failed: {exc}; skipping (lease will expire)", level="error")
+        return
+
+    # Step 3: poor-man's CAS via monotonic issue-comment IDs.
+    if not _verify_claim_won(number, exec_id, my_claim_comment.get("id")):
+        log(f"#{number} lost claim race to a concurrent worker; releasing")
+        return
+
     current_labels = claimed_labels
     heartbeat_done = None
     heartbeat_thread = None
@@ -211,6 +229,31 @@ def _claim_comment(host: str, exec_id: str, lease_seconds: int) -> str:
         f"<!-- neon-claim:v1 host={host} exec={exec_id} "
         f"claimed_at={_now_iso()} lease_seconds={lease_seconds} -->"
     )
+
+
+def _verify_claim_won(issue_number: int, my_exec_id: str, my_comment_id: int | None) -> bool:
+    """Confirm our claim-comment has the highest ID among neon-claim comments."""
+    try:
+        comments = bus_gitea.list_comments(issue_number)
+    except BusGiteaError as exc:
+        log(f"#{issue_number} claim verify list_comments failed: {exc}; assuming lost", level="error")
+        return False
+
+    latest_id = -1
+    latest_exec = None
+    for comment in comments:
+        match = CLAIM_RE.search(comment.get("body") or "")
+        if not match:
+            continue
+        comment_id = comment.get("id") or 0
+        if comment_id > latest_id:
+            latest_id = comment_id
+            latest_exec = match.group("exec")
+
+    if latest_exec != my_exec_id:
+        log(f"#{issue_number} claim lost to {latest_exec or '<none>'}; my_comment_id={my_comment_id}")
+        return False
+    return True
 
 
 def _heartbeat_comment(exec_id: str) -> str:

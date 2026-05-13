@@ -6,7 +6,7 @@ import threading
 import time
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -68,6 +68,7 @@ class BusWorkerTests(unittest.TestCase):
         self.patchers = [
             patch("tools.bus_worker.bus_gitea.list_issues", return_value=[]),
             patch("tools.bus_worker.bus_gitea.get_issue", return_value={}),
+            patch("tools.bus_worker.bus_gitea.list_comments", side_effect=self.fake_list_comments),
             patch("tools.bus_worker.bus_gitea.update_issue", side_effect=self.fake_update),
             patch("tools.bus_worker.bus_gitea.comment", side_effect=self.fake_comment),
         ]
@@ -87,8 +88,12 @@ class BusWorkerTests(unittest.TestCase):
         return {"number": number, "labels": list(labels or []), "state": state or "open"}
 
     def fake_comment(self, number, body):
-        self.comments.append({"number": number, "body": body})
-        return {"id": len(self.comments)}
+        comment = {"id": len(self.comments) + 1, "number": number, "body": body}
+        self.comments.append(comment)
+        return {"id": comment["id"]}
+
+    def fake_list_comments(self, number):
+        return [comment for comment in self.comments if comment["number"] == number]
 
     def result_body(self):
         for comment in reversed(self.comments):
@@ -108,6 +113,80 @@ class BusWorkerTests(unittest.TestCase):
         self.assertIn("neon-claim:v1", self.comments[0]["body"])
         self.assertIn("neon-result:v1", self.result_body())
         self.assertIn('"status":"done"', self.result_body())
+
+    def test_claim_win_when_no_concurrent_claim(self):
+        with patch("tools.bus_worker._new_exec_id", return_value="mine-100"), \
+             patch("tools.bus_worker._payload_read", return_value=PAYLOAD):
+            bus_worker.process_issue(issue(), HOST)
+
+        self.assertEqual(self.states(), ["neon:state/claimed", "neon:state/in-progress", "neon:state/done"])
+        self.assertIn("exec=mine-100", self.comments[0]["body"])
+
+    def test_claim_lost_when_other_worker_comments_after(self):
+        handler = Mock()
+        bus_worker.register_handler("echo", handler)
+        mine = "<!-- neon-claim:v1 host=win-codex-01 exec=mine-100 claimed_at=2026-05-13T12:30:00Z lease_seconds=600 -->"
+        other = "<!-- neon-claim:v1 host=win-codex-01 exec=other-101 claimed_at=2026-05-13T12:30:01Z lease_seconds=600 -->"
+
+        with patch("tools.bus_worker._new_exec_id", return_value="mine-100"), \
+             patch("tools.bus_worker.bus_gitea.list_comments", return_value=[
+                 {"id": 100, "number": 50, "body": mine},
+                 {"id": 101, "number": 50, "body": other},
+             ]), \
+             patch("tools.bus_worker._payload_read", return_value=PAYLOAD), \
+             patch("tools.bus_worker.log") as log:
+            bus_worker.process_issue(issue(), HOST)
+
+        self.assertEqual(self.states(), ["neon:state/claimed"])
+        self.assertFalse(any(call["labels"] and call["labels"][-1] == "neon:state/in-progress" for call in self.updates))
+        handler.assert_not_called()
+        self.assertTrue(any("lost claim race" in call.args[0] for call in log.call_args_list))
+
+    def test_claim_won_when_other_worker_comments_before(self):
+        mine = "<!-- neon-claim:v1 host=win-codex-01 exec=mine-100 claimed_at=2026-05-13T12:30:01Z lease_seconds=600 -->"
+        other = "<!-- neon-claim:v1 host=win-codex-01 exec=other-099 claimed_at=2026-05-13T12:30:00Z lease_seconds=600 -->"
+
+        with patch("tools.bus_worker._new_exec_id", return_value="mine-100"), \
+             patch("tools.bus_worker.bus_gitea.list_comments", return_value=[
+                 {"id": 99, "number": 50, "body": other},
+                 {"id": 100, "number": 50, "body": mine},
+             ]), \
+             patch("tools.bus_worker._payload_read", return_value=PAYLOAD):
+            bus_worker.process_issue(issue(), HOST)
+
+        self.assertEqual(self.states(), ["neon:state/claimed", "neon:state/in-progress", "neon:state/done"])
+
+    def test_claim_verify_handles_list_comments_failure(self):
+        from tools.bus_gitea import BusGiteaError
+
+        handler = Mock()
+        bus_worker.register_handler("echo", handler)
+
+        with patch("tools.bus_worker._new_exec_id", return_value="mine-100"), \
+             patch("tools.bus_worker.bus_gitea.list_comments", side_effect=BusGiteaError(500, "comments down")), \
+             patch("tools.bus_worker._payload_read", return_value=PAYLOAD), \
+             patch("tools.bus_worker.log") as log:
+            bus_worker.process_issue(issue(), HOST)
+
+        self.assertEqual(self.states(), ["neon:state/claimed"])
+        handler.assert_not_called()
+        self.assertTrue(any("list_comments failed" in call.args[0] for call in log.call_args_list))
+
+    def test_claim_lost_does_not_revert_label(self):
+        mine = "<!-- neon-claim:v1 host=win-codex-01 exec=mine-100 claimed_at=2026-05-13T12:30:00Z lease_seconds=600 -->"
+        other = "<!-- neon-claim:v1 host=win-codex-01 exec=other-101 claimed_at=2026-05-13T12:30:01Z lease_seconds=600 -->"
+
+        with patch("tools.bus_worker._new_exec_id", return_value="mine-100"), \
+             patch("tools.bus_worker.bus_gitea.list_comments", return_value=[
+                 {"id": 100, "number": 50, "body": mine},
+                 {"id": 101, "number": 50, "body": other},
+             ]), \
+             patch("tools.bus_worker._payload_read", return_value=PAYLOAD):
+            bus_worker.process_issue(issue(), HOST)
+
+        self.assertEqual(len(self.updates), 1)
+        self.assertEqual(self.updates[0]["labels"][-1], "neon:state/claimed")
+        self.assertNotIn("neon:state/pending", self.updates[0]["labels"])
 
     def test_process_issue_payload_sha_mismatch(self):
         bad_body = bus_envelope.serialize(task(payload_sha256="0" * 64))
@@ -219,23 +298,18 @@ class BusWorkerTests(unittest.TestCase):
         self.assertEqual(raised.exception.reason, "payload_root_unset")
 
     def test_payload_path_raises_when_outside_root(self):
-        import tempfile
-
-        with tempfile.TemporaryDirectory() as root:
-            outside = Path(root).parent / "definitely-outside.json"
-            with patch.dict("os.environ", {bus_worker.PAYLOAD_ROOT_ENV: root}):
-                with self.assertRaises(bus_worker._WorkerFailure) as raised:
-                    bus_worker._payload_path(f"file:///{outside.as_posix()}")
+        root = ROOT
+        outside = root.parent / "definitely-outside.json"
+        with patch.dict("os.environ", {bus_worker.PAYLOAD_ROOT_ENV: str(root)}):
+            with self.assertRaises(bus_worker._WorkerFailure) as raised:
+                bus_worker._payload_path(f"file:///{outside.as_posix()}")
         self.assertEqual(raised.exception.reason, "payload_outside_root")
 
     def test_payload_path_accepts_path_inside_root(self):
-        import tempfile
-
-        with tempfile.TemporaryDirectory() as root:
-            inside = Path(root) / "payload.json"
-            inside.write_text("{}", encoding="utf-8")
-            with patch.dict("os.environ", {bus_worker.PAYLOAD_ROOT_ENV: root}):
-                resolved = bus_worker._payload_path(f"file:///{inside.as_posix()}")
+        root = ROOT
+        inside = root / "payload.json"
+        with patch.dict("os.environ", {bus_worker.PAYLOAD_ROOT_ENV: str(root)}):
+            resolved = bus_worker._payload_path(f"file:///{inside.as_posix()}")
         self.assertEqual(resolved, inside.resolve())
 
     def test_sha_mismatch_result_omits_actual_hash(self):
