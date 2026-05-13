@@ -1,10 +1,14 @@
 import hashlib
 import json
+import os
 import re
+import shutil
 import sys
+import tempfile
 import threading
 import time
 import unittest
+import uuid
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -60,12 +64,39 @@ class FakeDone:
         self.set_called = True
 
 
+def temporary_project_root():
+    temp = tempfile.TemporaryDirectory(dir=ROOT / "tracker", ignore_cleanup_errors=True)
+    try:
+        probe = Path(temp.name) / ".probe"
+        try:
+            probe.write_text("ok", encoding="utf-8")
+            probe.unlink()
+            return Path(temp.name), temp.cleanup
+        except PermissionError:
+            pass
+    finally:
+        try:
+            temp.cleanup()
+        except PermissionError:
+            temp._finalizer.detach()
+
+    fallback = ROOT / "tracker" / f"tmpbusworker{uuid.uuid4().hex[:8]}"
+    os.mkdir(fallback)
+
+    def cleanup():
+        shutil.rmtree(fallback)
+
+    return fallback, cleanup
+
+
 class BusWorkerTests(unittest.TestCase):
     def setUp(self):
         self.original_handlers = dict(bus_worker.HANDLERS)
         self.comments = []
         self.updates = []
+        self.temp_project_path, cleanup_temp_project = temporary_project_root()
         self.patchers = [
+            patch("tools.bus_worker.PROJECT_ROOT", self.temp_project_path),
             patch("tools.bus_worker.bus_gitea.list_issues", return_value=[]),
             patch("tools.bus_worker.bus_gitea.get_issue", return_value={"labels": [{"name": bus_worker.CLAIMED}]}),
             patch("tools.bus_worker.bus_gitea.list_comments", side_effect=self.fake_list_comments),
@@ -75,6 +106,7 @@ class BusWorkerTests(unittest.TestCase):
         for patcher in self.patchers:
             patcher.start()
             self.addCleanup(patcher.stop)
+        self.addCleanup(cleanup_temp_project)
         self.addCleanup(self.restore_handlers)
         bus_worker._STOP.clear()
         self.addCleanup(bus_worker._STOP.clear)
@@ -103,6 +135,63 @@ class BusWorkerTests(unittest.TestCase):
 
     def states(self):
         return [call["labels"][-1] for call in self.updates if call["labels"]]
+
+    def bus_events(self):
+        path = self.temp_project_path / "tracker" / "bus-events.jsonl"
+        if not path.exists():
+            return []
+        return [
+            json.loads(line)
+            for line in path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+
+    def test_emit_bus_event_writes_jsonl_line(self):
+        bus_worker._emit_bus_event(task(), "exec-1", HOST, 50, "claimed")
+
+        rows = self.bus_events()
+        self.assertEqual(len(rows), 1)
+        event = rows[0]
+        self.assertEqual(event["schema_version"], 1)
+        self.assertEqual(event["provider"], "bus")
+        self.assertTrue(event["ts"].endswith("Z"))
+        self.assertEqual(event["task_id"], "ulid:01HQZWORKER000000000000")
+        self.assertEqual(event["session_id"], "ulid:01HQZWORKER000000000000")
+        self.assertEqual(event["kind"], "echo")
+        self.assertEqual(event["transition"], "claimed")
+        self.assertEqual(event["exec_id"], "exec-1")
+        self.assertEqual(event["target_host"], HOST)
+        self.assertEqual(event["issue_number"], 50)
+        self.assertEqual(event["lease_seconds"], 600)
+        self.assertEqual(event["input_tokens"], 0)
+        self.assertEqual(event["output_tokens"], 0)
+        self.assertEqual(event["cost_estimate_usd"], 0)
+        self.assertEqual(event["duration_ms"], 0)
+
+    def test_process_issue_happy_path_emits_three_transitions(self):
+        with patch("tools.bus_worker._new_exec_id", return_value="exec-1"), \
+             patch("tools.bus_worker._payload_read", return_value=PAYLOAD):
+            bus_worker.process_issue(issue(), HOST)
+
+        self.assertEqual(
+            [event["transition"] for event in self.bus_events()],
+            ["claimed", "in-progress", "done"],
+        )
+
+    def test_lost_claim_does_not_emit_bus_event(self):
+        mine_body = "<!-- neon-claim:v1 host=win-codex-01 exec=mine-100 claimed_at=2026-05-13T12:30:01Z lease_seconds=600 -->"
+        other_body = "<!-- neon-claim:v1 host=win-codex-01 exec=other-099 claimed_at=2026-05-13T12:30:00Z lease_seconds=600 -->"
+
+        with patch("tools.bus_worker._new_exec_id", return_value="mine-100"), \
+             patch("tools.bus_worker.bus_gitea.comment", return_value={"id": 100}), \
+             patch("tools.bus_worker.bus_gitea.list_comments", return_value=[
+                 {"id": 99, "number": 50, "body": other_body},
+                 {"id": 100, "number": 50, "body": mine_body},
+             ]), \
+             patch("tools.bus_worker._payload_read", return_value=PAYLOAD):
+            bus_worker.process_issue(issue(), HOST)
+
+        self.assertEqual(self.bus_events(), [])
 
     def test_process_issue_happy_path(self):
         with patch("tools.bus_worker._payload_read", return_value=PAYLOAD):

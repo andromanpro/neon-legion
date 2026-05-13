@@ -3,8 +3,8 @@
 
 JSONL files under tracker/ remain canonical. This module rebuilds an in-memory
 SQLite cache on each backend start and uses it only to accelerate event-window
-reads. A future `bus_tasks` table belongs here once bus events are written to a
-local JSONL stream.
+reads. Bus worker state transitions hydrate `bus_tasks` from the local
+bus-events JSONL stream.
 """
 
 from __future__ import annotations
@@ -56,10 +56,12 @@ def build_with_meta(
         )
 
     tasks_count = _load_tasks(conn, events_dir / "tasks.json")
+    bus_tasks_count = _load_bus_events(conn, events_dir / "bus-events.jsonl")
     conn.commit()
     return conn, {
         "events": events_count,
         "tasks": tasks_count,
+        "bus_tasks": bus_tasks_count,
         "built_at": datetime.now().astimezone().isoformat(timespec="seconds"),
     }
 
@@ -278,6 +280,21 @@ def _create_schema(conn: sqlite3.Connection) -> None:
             transcript_path TEXT,
             raw_json TEXT NOT NULL
         );
+
+        CREATE TABLE bus_tasks (
+            id INTEGER PRIMARY KEY,
+            ts TEXT NOT NULL,
+            task_id TEXT,
+            kind TEXT,
+            transition TEXT NOT NULL,
+            exec_id TEXT,
+            target_host TEXT,
+            issue_number INTEGER,
+            lease_seconds INTEGER DEFAULT 0,
+            raw_json TEXT NOT NULL
+        );
+        CREATE INDEX idx_bus_tasks_task ON bus_tasks(task_id);
+        CREATE INDEX idx_bus_tasks_ts ON bus_tasks(ts);
         """
     )
 
@@ -399,6 +416,50 @@ def _load_tasks(conn: sqlite3.Connection, path: Path) -> int:
             ),
         )
         count += 1
+    return count
+
+
+def _load_bus_events(conn: sqlite3.Connection, path: Path) -> int:
+    if not path.exists():
+        return 0
+
+    count = 0
+    with path.open("r", encoding="utf-8") as source:
+        for line_no, line in enumerate(source, 1):
+            raw = line.rstrip("\n")
+            if not raw.strip():
+                continue
+            try:
+                event = json.loads(raw)
+            except json.JSONDecodeError as exc:
+                _log(f"{path.name}:{line_no}: corrupt JSON skipped: {exc}")
+                continue
+            if not isinstance(event, dict):
+                continue
+            ts = _parse_event_ts(event.get("ts"))
+            transition = event.get("transition")
+            if ts is None or not isinstance(transition, str) or not transition:
+                continue
+            conn.execute(
+                """
+                INSERT INTO bus_tasks (
+                    ts, task_id, kind, transition, exec_id, target_host,
+                    issue_number, lease_seconds, raw_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    event["ts"],
+                    event.get("task_id"),
+                    event.get("kind"),
+                    transition,
+                    event.get("exec_id"),
+                    event.get("target_host"),
+                    _as_int_or_none(event.get("issue_number")),
+                    _as_int(event.get("lease_seconds")),
+                    raw,
+                ),
+            )
+            count += 1
     return count
 
 
