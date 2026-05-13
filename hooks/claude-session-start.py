@@ -18,6 +18,8 @@ RECENT_WINDOW = timedelta(hours=24)
 INFLIGHT_TTL_SECONDS = 10 * 60
 MAX_DISPATCH_PER_FIRE = 5
 
+if hasattr(sys.stdin, "reconfigure"):
+    sys.stdin.reconfigure(encoding="utf-8", errors="replace")
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 if hasattr(sys.stderr, "reconfigure"):

@@ -42,10 +42,13 @@ These keep the project credible. Anything below a tick here is a quiet
 1. **Live OpenClaw tracking** — currently only backfill exists. Real-time path:
    tail container log from host (50 lines), not HTTP callback. Without this the
    "4 providers" claim in `README.md` is a stretch.
-2. **Mojibake retroactive normalization** — one-time pass over historical
-   `tracker/*-events.jsonl` to fix `cp1251 → utf-8` survivors plus a UTF-8
-   enforcement step in the hook. Already enforced going forward, the historical
-   tail is the remaining work.
+2. ~~**Mojibake retroactive normalization**~~ ✅ done — historical events
+   (`claude-events.jsonl` 88k, `codex-events.jsonl` 5k, `openclaw-events.jsonl`
+   326, `opencode-events.jsonl` 73) all clean (`tracker/normalize-cp1251.py`
+   idempotent, 0 fixes on latest pass). UTF-8 stdin enforcement landed on both
+   Stop and SessionStart Claude hooks (`hooks/claude-track-calls.py`,
+   `hooks/claude-session-start.py`); Codex/OpenClaw/OpenCode write paths
+   already used `ensure_ascii=False` + `encoding="utf-8"`.
 
 ### P1 — Phase 1.5 Git bus (next major architectural piece)
 
