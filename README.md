@@ -270,6 +270,14 @@ sessions without their explicit consent.
 в углу пока я разбирался как сосчитать что она стоила. Этот тул — то, что
 из этого вышло.
 
+### Конвейер агентов
+
+Что связывается в один процесс: Telegram → OpenClaw → Claude → Codex →
+DeepSeek → human approve. События каждого шага оседают в локальный JSONL
+трекер и затем попадают на дашборд.
+
+![Конвейер агентов neon-legion](docs/branding/neon-legion-flow.ru.svg)
+
 ### Что делает
 
 Связывает агентов и шпионит за ними. Три цифры на дашборде:
@@ -344,7 +352,7 @@ local-first, без SaaS.
 | `dashboard/page-multi-agent.php` | Шаблон WordPress-страницы |
 | `tools/openclaw-codex-bridge.py` | Опц. cross-machine bridge: OpenClaw на NAS → Codex на Windows |
 
-Полная архитектура: [docs/architecture.md](docs/architecture.md).
+Полная архитектура: [docs/architecture.ru.md](docs/architecture.ru.md).
 
 ### Лицензия
 
