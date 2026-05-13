@@ -49,17 +49,21 @@ def main() -> int:
 
     conn, meta = readmodel.build_with_meta(events_dir)
     try:
-        cached = median_seconds(lambda: readmodel.read_events(conn, start, end), args.runs)
+        slow = median_seconds(lambda: readmodel.read_events(conn, start, end), args.runs)
+        fast = median_seconds(lambda: readmodel.read_events_fast(conn, start, end), args.runs)
         jsonl = median_seconds(lambda: summary.read_events(start, end), args.runs)
     finally:
         conn.close()
 
-    ratio = jsonl / cached if cached > 0 else float("inf")
+    fast_jsonl_ratio = fast / jsonl if jsonl > 0 else float("inf")
+    fast_slow_ratio = fast / slow if slow > 0 else float("inf")
     print(f"window: {start.isoformat()}..{end.isoformat()} ({args.days} days)")
     print(f"events indexed: {meta['events']} tasks indexed: {meta['tasks']}")
-    print(f"readmodel median: {cached:.6f}s ({args.runs} runs)")
-    print(f"jsonl median:      {jsonl:.6f}s ({args.runs} runs)")
-    print(f"speedup:           {ratio:.2f}x")
+    print(f"readmodel slow median: {slow:.6f}s ({args.runs} runs)")
+    print(f"readmodel fast median: {fast:.6f}s ({args.runs} runs)")
+    print(f"jsonl     median:      {jsonl:.6f}s ({args.runs} runs)")
+    print(f"speedup vs jsonl:      {fast_jsonl_ratio:.2f}x")
+    print(f"speedup vs slow:       {fast_slow_ratio:.2f}x")
     return 0
 
 
