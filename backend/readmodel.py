@@ -63,7 +63,8 @@ def aggregate_by_model(
             SUM(cached_input_tokens_norm) AS cached_input_tokens,
             SUM(reasoning_tokens_norm) AS reasoning_tokens,
             SUM(total_tokens_norm) AS total_tokens,
-            SUM(cost_estimate_usd_norm) AS cost_estimate_usd
+            SUM(cost_estimate_usd_norm) AS cost_estimate_usd,
+            SUM(unknown_pricing_flag) AS unknown_pricing_events
         FROM deduped
         GROUP BY provider_norm, model_name
     """
@@ -83,6 +84,7 @@ def aggregate_by_model(
             reasoning_tokens,
             total_tokens,
             cost_estimate_usd,
+            unknown_pricing_events,
         ) = row
         stats = _stats_from_aggregate_row(
             calls,
@@ -94,6 +96,7 @@ def aggregate_by_model(
             reasoning_tokens,
             total_tokens,
             cost_estimate_usd,
+            unknown_pricing_events,
         )
         stats["provider"] = provider
         stats["model"] = model
@@ -125,7 +128,8 @@ def aggregate_totals(
             SUM(cached_input_tokens_norm) AS cached_input_tokens,
             SUM(reasoning_tokens_norm) AS reasoning_tokens,
             SUM(total_tokens_norm) AS total_tokens,
-            SUM(cost_estimate_usd_norm) AS cost_estimate_usd
+            SUM(cost_estimate_usd_norm) AS cost_estimate_usd,
+            SUM(unknown_pricing_flag) AS unknown_pricing_events
         FROM deduped
     """
     row = conn.execute(sql, params).fetchone()
@@ -156,7 +160,8 @@ def aggregate_by_provider(
             SUM(cached_input_tokens_norm) AS cached_input_tokens,
             SUM(reasoning_tokens_norm) AS reasoning_tokens,
             SUM(total_tokens_norm) AS total_tokens,
-            SUM(cost_estimate_usd_norm) AS cost_estimate_usd
+            SUM(cost_estimate_usd_norm) AS cost_estimate_usd,
+            SUM(unknown_pricing_flag) AS unknown_pricing_events
         FROM deduped
         GROUP BY provider_norm, model_name
     """
@@ -175,6 +180,7 @@ def aggregate_by_provider(
             reasoning_tokens,
             total_tokens,
             cost_estimate_usd,
+            unknown_pricing_events,
         ) = row
         key = PROVIDER_KEYS.get(str(provider), str(provider))
         if key not in by_provider:
@@ -192,6 +198,7 @@ def aggregate_by_provider(
             reasoning_tokens,
             total_tokens,
             cost_estimate_usd,
+            unknown_pricing_events,
         )
         _add_stats(by_provider[key], stats)
         by_provider[key]["models"][model] = by_provider[key]["models"].get(model, 0) + _as_int(calls)
@@ -382,7 +389,10 @@ def read_events_fast(
             "cache_read_tokens": cache_read_tokens if cache_read_tokens is not None else 0,
             "cache_creation_tokens": cache_creation_tokens if cache_creation_tokens is not None else 0,
             "total_tokens": total_tokens if total_tokens is not None else 0,
-            "cost_estimate_usd": cost_estimate_usd if cost_estimate_usd is not None else 0.0,
+            # Preserve NULL → None semantic for cost so summarize can detect
+            # missing-pricing events (DeepSeek HIGH #1 on PR #81). Consumers
+            # using .get() with default still work for the zero-cost path.
+            "cost_estimate_usd": cost_estimate_usd,
             "duration_ms": duration_ms if duration_ms is not None else 0,
             "working_dir": working_dir,
             "tool_uses": tool_uses if tool_uses is not None else 0,
@@ -433,6 +443,9 @@ def _deduped_events_cte(
                 COALESCE(reasoning_tokens, 0) AS reasoning_tokens_norm,
                 COALESCE(aggregate_total_tokens, 0) AS total_tokens_norm,
                 COALESCE(cost_estimate_usd, 0.0) AS cost_estimate_usd_norm,
+                -- DeepSeek HIGH #1 on PR #81: NULL cost = missing pricing in source.
+                CASE WHEN cost_estimate_usd IS NULL THEN 1 ELSE 0 END
+                    AS unknown_pricing_flag,
                 dedupe_group
             FROM events
             WHERE {" AND ".join(where)}
@@ -477,6 +490,7 @@ def _stats_from_aggregate_row(
     reasoning_tokens: object,
     total_tokens: object,
     cost_estimate_usd: object,
+    unknown_pricing_events: object = 0,
 ) -> dict:
     stats = _empty_stats()
     stats["calls"] = _as_int(calls)
@@ -489,6 +503,10 @@ def _stats_from_aggregate_row(
     stats["total_tokens"] = _as_int(total_tokens)
     stats["cost_estimate_usd"] = _as_float(cost_estimate_usd)
     stats["api_equivalent_cost_usd"] = stats["cost_estimate_usd"]
+    # DeepSeek HIGH #1 on PR #81: count events whose JSONL source had no
+    # cost_estimate_usd key. summarize_by_model's add_event uses this to
+    # flag pricing-table gaps; the aggregate path must report the same.
+    stats["unknown_pricing_events"] = _as_int(unknown_pricing_events)
     return stats
 
 
@@ -608,7 +626,10 @@ def _create_schema(conn: sqlite3.Connection) -> None:
             cache_read_tokens INTEGER DEFAULT 0,
             cache_creation_tokens INTEGER DEFAULT 0,
             total_tokens INTEGER DEFAULT 0,
-            cost_estimate_usd REAL DEFAULT 0,
+            -- DeepSeek audit HIGH #1 on PR #81: nullable. NULL means the
+            -- source JSONL did not include cost_estimate_usd at all, which
+            -- is the signal summarize uses to increment unknown_pricing.
+            cost_estimate_usd REAL,
             duration_ms INTEGER DEFAULT 0,
             working_dir TEXT,
             tool_uses INTEGER DEFAULT 0,
@@ -755,7 +776,15 @@ def _load_event_file(
                     cache_read_tokens,
                     _as_int(event.get("cache_creation_tokens")),
                     total_tokens,
-                    _as_float(event.get("cost_estimate_usd")),
+                    # DeepSeek audit HIGH #1 on PR #81: preserve NULL when the
+                    # source JSONL has no cost_estimate_usd key, so summarize
+                    # can distinguish "missing pricing" (→ unknown_pricing
+                    # increment) from "zero cost" (e.g. cache-only tokens at 0
+                    # rate). The raw_json loop path sees a missing key as None
+                    # via dict.get; mirror that semantic here.
+                    (_as_float(event["cost_estimate_usd"])
+                     if event.get("cost_estimate_usd") is not None
+                     else None),
                     _as_int(event.get("duration_ms")),
                     event.get("working_dir"),
                     _as_int(event.get("tool_uses")),

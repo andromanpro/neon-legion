@@ -174,7 +174,10 @@ class ReadModelTests(unittest.TestCase):
             row = conn.execute(
                 "SELECT session_id, message_uuid, model, input_tokens, cost_estimate_usd FROM events"
             ).fetchone()
-            self.assertEqual(row, (None, None, None, 0, 0.0))
+            # cost_estimate_usd is NULL (not 0.0) when the JSONL omits the
+            # key — this is the signal summarize uses to count
+            # unknown_pricing_events (DeepSeek HIGH #1 fix on PR #81).
+            self.assertEqual(row, (None, None, None, 0, None))
             conn.close()
 
     def test_build_populates_tasks_from_json(self):
@@ -600,6 +603,74 @@ class ReadModelTests(unittest.TestCase):
                 self.assertEqual(actual_by_model, expected_by_model)
                 self.assertEqual(actual_total, expected_total)
                 self.assertEqual(set(actual_by_model), {"anthropic/claude-sonnet-4"})
+            finally:
+                conn.close()
+
+    # DeepSeek HIGH #1 on PR #81: unknown_pricing_events must increment when
+    # the source JSONL row has no cost_estimate_usd key. Both raw-JSONL loop
+    # path (via summary.summarize_by_model + summary.read_events) AND the SQL
+    # aggregate path must agree on a non-zero count for missing-pricing events.
+    def test_aggregate_unknown_pricing_matches_raw_jsonl_loop(self):
+        # Two events: one with cost_estimate_usd present, one without.
+        line_with_cost = json.dumps({
+            "ts": "2026-05-10T12:00:00+03:00",
+            "provider": "anthropic",
+            "model": "claude-sonnet-4",
+            "session_id": "s1",
+            "message_uuid": "u1",
+            "input_tokens": 100,
+            "output_tokens": 50,
+            "cost_estimate_usd": 0.0042,
+        })
+        line_without_cost = json.dumps({
+            "ts": "2026-05-10T13:00:00+03:00",
+            "provider": "anthropic",
+            "model": "claude-mystery-7",  # no pricing entry
+            "session_id": "s2",
+            "message_uuid": "u2",
+            "input_tokens": 200,
+            "output_tokens": 75,
+            # cost_estimate_usd intentionally absent
+        })
+
+        with temporary_events_dir() as tmp:
+            (Path(tmp) / "claude-events.jsonl").write_text(
+                line_with_cost + "\n" + line_without_cost + "\n",
+                encoding="utf-8",
+            )
+            conn = readmodel.build(Path(tmp))
+            try:
+                # Aggregate path
+                _agg_by_model, agg_total = readmodel.aggregate_by_model(
+                    conn, date(2026, 5, 10), date(2026, 5, 10),
+                )
+                # Raw JSONL loop path baseline — feed summarize_by_model the
+                # parsed dicts directly (avoid the tracker_dir global lookup
+                # which reads from the canonical project tree, not our fixture).
+                import summary as summary_mod
+                jsonl_events = [
+                    json.loads(line_with_cost),
+                    json.loads(line_without_cost),
+                ]
+                _loop_by_model, loop_total = summary_mod.summarize_by_model(jsonl_events)
+
+                # Both paths must report unknown_pricing_events >= 1
+                # (one event has no cost key).
+                self.assertGreaterEqual(
+                    summary_mod.as_int(agg_total.get("unknown_pricing_events")),
+                    1,
+                    "aggregate path must count missing-cost events",
+                )
+                self.assertGreaterEqual(
+                    summary_mod.as_int(loop_total.get("unknown_pricing_events")),
+                    1,
+                    "JSONL loop path baseline",
+                )
+                # And both must agree on the EXACT count.
+                self.assertEqual(
+                    summary_mod.as_int(agg_total.get("unknown_pricing_events")),
+                    summary_mod.as_int(loop_total.get("unknown_pricing_events")),
+                )
             finally:
                 conn.close()
 
