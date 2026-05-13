@@ -67,6 +67,12 @@ short_days = 7
 long_days = 30
 output_path = "F:/WorkAI/multi-agent/tracker/regressions.json"
 
+[reputation]
+lookback_days = 30
+min_runs = 1
+output_reputation_path = "F:/WorkAI/multi-agent/tracker/reputation.json"
+output_roles_suggested_path = "F:/WorkAI/multi-agent/orchestrate-runs/roles.suggested.toml"
+
 [hooks]
 # Where Claude Code stores per-project state. Default works for stock Claude
 # Code; override if you've moved ~/.claude.
