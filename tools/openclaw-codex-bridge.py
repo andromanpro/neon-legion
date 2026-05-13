@@ -847,6 +847,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--bridge-root", type=Path, default=DEFAULT_BRIDGE_ROOT)
     parser.add_argument("--once", action="store_true", help="process inbox once")
     parser.add_argument("--watch", action="store_true", help="poll inbox continuously")
+    parser.add_argument("--bus", action="store_true", help="run as a Phase 1.5 bus worker")
+    parser.add_argument("--host", help="worker host name for --bus")
+    parser.add_argument("--poll-interval", type=int, default=30, help="bus poll interval seconds")
     parser.add_argument("--sleep", type=float, default=2.0, help="watch sleep seconds")
     parser.add_argument("--run-codex-job", type=Path, help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
@@ -860,7 +863,20 @@ def main(argv: list[str] | None = None) -> int:
     if args.run_codex_job:
         return run_codex_job(args.run_codex_job.resolve(), workai_root, bridge_root)
 
+    if args.bus:
+        if not args.host:
+            raise SystemExit("--host is required with --bus")
+        from tools.bus_adapter_openclaw import register_all
+        from tools import bus_worker
+
+        register_all(workai_root, bridge_root)
+        return bus_worker.main(["--host", args.host, "--poll-interval", str(args.poll_interval)])
+
     if args.watch:
+        print(
+            "[bridge] file-watch mode (legacy); --bus available for Phase 1.5 transport",
+            file=sys.stderr,
+        )
         print(f"Watching {bridge_root} for requests against {workai_root}")
         processed_total = 0
         while True:
