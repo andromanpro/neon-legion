@@ -73,6 +73,12 @@ min_runs = 1
 output_reputation_path = "F:/WorkAI/multi-agent/tracker/reputation.json"
 output_roles_suggested_path = "F:/WorkAI/multi-agent/orchestrate-runs/roles.suggested.toml"
 
+[git_diff_cost]
+repo_path = "F:/WorkAI/multi-agent"
+lookback_days = 30
+top_decile_threshold = 0.9
+output_path = "F:/WorkAI/multi-agent/tracker/diff_cost.json"
+
 [hooks]
 # Where Claude Code stores per-project state. Default works for stock Claude
 # Code; override if you've moved ~/.claude.
