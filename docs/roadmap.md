@@ -39,9 +39,13 @@ Pre-publish boring stuff that landed in v0.3:
 These keep the project credible. Anything below a tick here is a quiet
 "weekend project" signal to the first GitHub visitor.
 
-1. **Live OpenClaw tracking** — currently only backfill exists. Real-time path:
-   tail container log from host (50 lines), not HTTP callback. Without this the
-   "4 providers" claim in `README.md` is a stretch.
+1. ~~**Live OpenClaw tracking**~~ ✅ done — `tracker/openclaw-watch.py`
+   mirrors the OpenCode watcher (poll the same per-session JSONL tree the
+   backfill walks; 30s interval default; `--once` for cron / supervisor;
+   dedup by `event_id` + semantic key, so a tight cadence is safe). Wired
+   into `deploy-snapshot.sh` ahead of the snapshot regen step, so every
+   public-snapshot refresh picks up new sessions without a long-lived
+   daemon. Standalone `--once` loop is also available for tighter cadence.
 2. ~~**Mojibake retroactive normalization**~~ ✅ done — historical events
    (`claude-events.jsonl` 88k, `codex-events.jsonl` 5k, `openclaw-events.jsonl`
    326, `opencode-events.jsonl` 73) all clean (`tracker/normalize-cp1251.py`
