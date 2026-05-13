@@ -49,16 +49,28 @@ def build_ledger(
         scanned += 1
         roles = _read_roles(run_dir / "roles.used.toml")
         for step in state.get("steps", []):
-            if not isinstance(step, dict) or step.get("status") not in {"completed", "failed"}:
+            if not isinstance(step, dict) or not isinstance(step.get("status"), str):
                 continue
-            result = step.get("result")
-            if not isinstance(result, dict):
+            status = step["status"]
+            # DeepSeek MED #3 on PR #85: cancelled/expired/timed-out steps
+            # must count in the runs denominator (they're attempts that
+            # didn't succeed) — otherwise success_rate is inflated by
+            # silently dropping every non-success path. Only skip steps
+            # with no status at all.
+            if status not in {"completed", "failed", "cancelled", "expired", "timed_out"}:
                 continue
             role = step.get("role") if isinstance(step.get("role"), str) else "unknown"
             agent = _agent(roles.get(role, {}))
             item = buckets[(role, agent)]
             item["runs"] += 1
-            item["successes"] += 1 if result.get("ok") is True else 0
+            result = step.get("result") if isinstance(step.get("result"), dict) else None
+            if result is not None and result.get("ok") is True and status == "completed":
+                item["successes"] += 1
+            else:
+                item.setdefault("non_success_statuses", {}).setdefault(status, 0)
+                item["non_success_statuses"][status] += 1
+            if result is None:
+                continue
             if isinstance(result.get("duration_ms"), (int, float)):
                 item["durations"].append(float(result["duration_ms"]))
             started = _step_at(step, current.tzinfo)
@@ -71,6 +83,7 @@ def build_ledger(
     for (role, agent), item in sorted(buckets.items()):
         runs = item["runs"]
         durations = item["durations"]
+        non_success = item.get("non_success_statuses", {})
         ledger.append(
             {
                 "role": role,
@@ -82,6 +95,10 @@ def build_ledger(
                 "mean_cost_usd": None,
                 "task_fingerprint": item["fingerprint"],
                 "last_run_at": item["last"].isoformat(timespec="seconds") if item["last"] else None,
+                # DeepSeek MED #3 on PR #85: surface non-success status breakdown so
+                # consumers can distinguish a flaky agent (cancelled/timed_out) from
+                # a buggy one (failed) without re-reading state.json.
+                "non_success_counts": dict(sorted(non_success.items())),
             }
         )
 
@@ -197,20 +214,65 @@ def _read_roles(path: Path | None) -> dict[str, dict[str, Any]]:
 
 
 def _agent(role: dict[str, Any]) -> str:
+    """Identify the agent backing a role from invocation/model strings.
+
+    DeepSeek MED #2 on PR #85: don't conflate OpenAI API with Codex CLI;
+    `openai` substring used to collapse to `codex`, which is wrong — they're
+    distinct delivery systems. `openai` now stays as its own agent key; only
+    `codex` substring routes to `codex`.
+    """
     provider = role.get("provider") if isinstance(role.get("provider"), str) else ""
     text = " ".join(str(role.get(k, "")) for k in ("invocation", "model")).lower()
-    for marker, agent in (("claude", "claude"), ("anthropic", "claude"), ("codex", "codex"), ("openai", "codex"), ("opencode", "opencode"), ("deepseek", "opencode"), ("openclaw", "openclaw"), ("human", "human")):
+    for marker, agent in (
+        ("claude", "claude"),
+        ("anthropic", "claude"),
+        ("codex", "codex"),       # Codex CLI specifically
+        ("opencode", "opencode"),
+        ("deepseek", "opencode"),
+        ("openclaw", "openclaw"),
+        ("openai", "openai"),     # OpenAI API direct — distinct from Codex CLI
+        ("human", "human"),
+    ):
         if marker in text:
             return agent
     return provider or "unknown"
 
 
+def _wilson_lower_bound(successes: int, runs: int, z: float = 1.96) -> float:
+    """95% Wilson score lower bound for a binomial proportion.
+
+    DeepSeek HIGH #1 on PR #85: previous scoring tuple `(success_rate, runs,
+    -duration)` made a 1-run 100% agent outrank a 10-run 90% agent. Wilson
+    lower bound returns ~0.21 for 1/1, ~0.55 for 9/10, ~0.82 for 90/100,
+    ~0.96 for 1000/1000 — small samples carry uncertainty in the score
+    itself, not just in a confidence label.
+    """
+    if runs <= 0:
+        return 0.0
+    import math
+    p = successes / runs
+    n = runs
+    numerator = p + z * z / (2 * n) - z * math.sqrt((p * (1 - p) + z * z / (4 * n)) / n)
+    denominator = 1 + z * z / n
+    return max(0.0, numerator / denominator)
+
+
 def _best_by_role(ledger: Any) -> dict[str, dict[str, Any]]:
+    """Pick the best (role, agent) candidate per role.
+
+    Scoring: Wilson 95% lower bound on success_rate as primary axis (DeepSeek
+    HIGH #1 fix), with sample-size and lower-mean-duration as tie-breakers.
+    Sample-size weighting is now intrinsic to the primary score, not just a
+    secondary key.
+    """
     best = {}
     for entry in ledger if isinstance(ledger, list) else []:
         if not isinstance(entry, dict) or not isinstance(entry.get("role"), str):
             continue
-        score = (float(entry.get("success_rate") or 0), int(entry.get("runs") or 0), -(entry.get("mean_duration_ms") or 10**18))
+        successes = int(entry.get("successes") or 0)
+        runs = int(entry.get("runs") or 0)
+        wilson = _wilson_lower_bound(successes, runs)
+        score = (wilson, runs, -(entry.get("mean_duration_ms") or 10**18))
         if entry["role"] not in best or score > best[entry["role"]][0]:
             best[entry["role"]] = (score, entry)
     return {role: entry for role, (_score, entry) in best.items()}

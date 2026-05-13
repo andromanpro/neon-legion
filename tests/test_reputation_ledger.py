@@ -168,6 +168,55 @@ class ReputationLedgerTests(unittest.TestCase):
         self.assertIn("No historical runs found", text)
         self.assertNotIn("[role.", text)
 
+    # DeepSeek HIGH #1 on PR #85: Wilson lower bound prevents 1-run 100%
+    # from outranking 10-run 90%. Sample size is intrinsic to the score.
+    def test_wilson_scoring_prefers_stable_over_flash_perfect(self) -> None:
+        from tools.reputation_ledger import _best_by_role, _wilson_lower_bound
+
+        # 1-run 100% vs 10-run 90% — old logic preferred flash, Wilson prefers stable.
+        flash = {"role": "architect", "agent": "flash", "runs": 1, "successes": 1,
+                 "success_rate": 1.0, "mean_duration_ms": 50}
+        stable = {"role": "architect", "agent": "stable", "runs": 10, "successes": 9,
+                  "success_rate": 0.9, "mean_duration_ms": 50}
+
+        best = _best_by_role([flash, stable])
+
+        self.assertEqual(best["architect"]["agent"], "stable",
+                         "Wilson score must rank stable 10-run agent above flash 1-run")
+        # Quick sanity: Wilson(1, 1) ≈ 0.21, Wilson(9, 10) ≈ 0.59
+        self.assertLess(_wilson_lower_bound(1, 1), _wilson_lower_bound(9, 10))
+
+    # DeepSeek MED #3 on PR #85: cancelled/expired steps count in runs denominator.
+    def test_cancelled_steps_count_as_runs_not_successes(self) -> None:
+        steps = [
+            {"index": 0, "role": "architect", "status": "completed",
+             "result": {"ok": True, "duration_ms": 10}, "started_at": (NOW.timestamp() - 100)},
+            {"index": 1, "role": "architect", "status": "cancelled",
+             "result": None, "started_at": (NOW.timestamp() - 90)},
+            {"index": 2, "role": "architect", "status": "expired",
+             "result": None, "started_at": (NOW.timestamp() - 80)},
+        ]
+        self.write_run("run-mixed", steps=steps)
+
+        payload = build_ledger(self.runs_dir, now=NOW)
+        arch = next(e for e in payload["ledger"] if e["role"] == "architect")
+        self.assertEqual(arch["runs"], 3, "all 3 statuses count as attempted runs")
+        self.assertEqual(arch["successes"], 1, "only the completed+ok step counts as success")
+        self.assertAlmostEqual(arch["success_rate"], 1 / 3, places=4)
+        # non_success_counts surfaces the breakdown
+        self.assertEqual(arch["non_success_counts"].get("cancelled"), 1)
+        self.assertEqual(arch["non_success_counts"].get("expired"), 1)
+
+    # DeepSeek MED #2 on PR #85: openai-API invocation no longer collapses to codex agent.
+    def test_agent_openai_does_not_collapse_to_codex(self) -> None:
+        from tools.reputation_ledger import _agent
+
+        openai_role = {"invocation": "openai-direct", "model": "gpt-5"}
+        codex_role = {"invocation": "codex-exec", "model": "gpt-5"}
+
+        self.assertEqual(_agent(openai_role), "openai")
+        self.assertEqual(_agent(codex_role), "codex")
+
 
 if __name__ == "__main__":
     unittest.main()
