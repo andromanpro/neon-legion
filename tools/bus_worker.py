@@ -169,7 +169,7 @@ def process_issue(issue: dict, host: str) -> None:
     # cannot push the issue into a contradictory state (don/fail double-posted).
     # On finalise failure the result is still in the issue; the reaper will
     # expire the issue and a future poll picks it up cleanly.
-    if not _verify_lease_held(number, exec_id):
+    if not _verify_lease_held(number, exec_id, my_claim_comment.get("id")):
         log(
             f"#{number} lease lost during handler run (reaper expired or "
             f"another worker re-claimed); skipping finalise. Result was: "
@@ -280,11 +280,21 @@ def _verify_claim_won(issue_number: int, my_exec_id: str, my_comment_id: int | N
     return won
 
 
-def _verify_lease_held(issue_number: int, my_exec_id: str) -> bool:
+def _verify_lease_held(
+    issue_number: int, my_exec_id: str, my_comment_id: int | None
+) -> bool:
     """True if the issue is still leased to this worker.
 
     Conservative: any Gitea read error is treated as a lost lease, so a
     recovering worker cannot overwrite an expired or re-claimed issue.
+
+    DeepSeek audit on PR #73 found that checking only `lowest_exec == my_exec`
+    misses the re-claim scenario: worker A's lease expires → reaper closes →
+    worker B re-claims (new comment id, new labels flipped back to CLAIMED) →
+    A's network recovers → A's `_verify_lease_held` sees its OWN old comment
+    as the lowest id, `lowest_exec` matches → A finalises over B's work.
+    Gate on `my_comment_id == lowest_id` to require BOTH ownership signals
+    match — same fix shape as `_verify_claim_won`.
     """
     try:
         issue = bus_gitea.get_issue(issue_number)
@@ -300,8 +310,12 @@ def _verify_lease_held(issue_number: int, my_exec_id: str) -> bool:
     except BusGiteaError:
         return False
 
-    _lowest_id, lowest_exec = _lowest_claim(comments)
-    return lowest_exec == my_exec_id
+    lowest_id, lowest_exec = _lowest_claim(comments)
+    return (
+        lowest_exec == my_exec_id
+        and my_comment_id is not None
+        and lowest_id == my_comment_id
+    )
 
 
 def _lowest_claim(comments: list[dict]) -> tuple[int | None, str | None]:

@@ -488,6 +488,48 @@ class BusWorkerTests(unittest.TestCase):
         self.assertNotIn("neon:state/failed", self.states())
         self.assertTrue(any("lease lost" in call.args[0] for call in log.call_args_list))
 
+    # DeepSeek audit on PR #73 (MED #1): _verify_lease_held must gate on
+    # my_comment_id, not just my_exec, to be symmetric with _verify_claim_won.
+    # This is defense in depth — currently no resurrection mechanism exists
+    # (reaper closes the issue, expired issues stay closed), but if/when
+    # resurrection lands, this guard prevents a zombie worker from finalising
+    # over a re-claim where exec_id happens to collide.
+    def test_finalise_skipped_when_lowest_claim_id_differs_from_mine(self):
+        # Worker A posts claim at fake_comment id=1 (registered in setUp).
+        # We mock list_comments at lease-check time to return a DIFFERENT
+        # neon-claim:v1 with the same exec text but a different (lower) id —
+        # this would have passed the my_exec-only check. With my_comment_id
+        # gate, it correctly reports lost.
+        my_exec = "win-codex-01-1700000000-abc123"
+        # The lease check sees an "older" claim with the same exec but id=0
+        # (somehow predating ours). Without the my_comment_id gate, this
+        # would pass lowest_exec == my_exec. With the gate, lowest_id (0) !=
+        # my_comment_id (1) → lost.
+        ghost = f"<!-- neon-claim:v1 host=win-codex-01 exec={my_exec} claimed_at=2026-05-12T00:00:00Z lease_seconds=600 -->"
+
+        # Patch list_comments to return the ghost-only on the LEASE check
+        # (second call). The first call (claim verify) sees the worker's
+        # own posted comment normally.
+        original_list = self.fake_list_comments
+        call_count = {"n": 0}
+
+        def list_comments_seq(number):
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                return original_list(number)
+            return [{"id": 0, "number": number, "body": ghost}]
+
+        with patch("tools.bus_worker._new_exec_id", return_value=my_exec), \
+             patch("tools.bus_worker._payload_read", return_value=PAYLOAD), \
+             patch("tools.bus_worker.bus_gitea.list_comments", side_effect=list_comments_seq), \
+             patch("tools.bus_worker._post_result") as post_result, \
+             patch("tools.bus_worker.log") as log:
+            bus_worker.process_issue(issue(), HOST)
+
+        post_result.assert_not_called()
+        self.assertNotIn("neon:state/done", self.states())
+        self.assertTrue(any("lease lost" in call.args[0] for call in log.call_args_list))
+
 
 if __name__ == "__main__":
     unittest.main()
