@@ -64,7 +64,7 @@ class CostRegressionTests(unittest.TestCase):
         payload = detect_regressions(events, now=NOW, threshold=1.2)
 
         self.assertEqual([], payload["regressions"])
-        self.assertEqual(1, payload["summary"]["pairs_with_min_calls"])
+        self.assertEqual(1, payload["summary"]["pairs_with_min_output_tokens"])
 
     def test_regression_detected_when_threshold_exceeded(self) -> None:
         events = make_series(short_rate=0.0015, long_target_rate=0.001)
@@ -85,7 +85,7 @@ class CostRegressionTests(unittest.TestCase):
         payload = detect_regressions(events, now=NOW, threshold=1.2, min_calls=10)
 
         self.assertEqual([], payload["regressions"])
-        self.assertEqual(0, payload["summary"]["pairs_with_min_calls"])
+        self.assertEqual(0, payload["summary"]["pairs_with_min_output_tokens"])
 
     def test_window_narrowing_finds_contiguous_elevated_days(self) -> None:
         events = []
@@ -128,6 +128,60 @@ class CostRegressionTests(unittest.TestCase):
 
         self.assertEqual(["claude-high", "gpt-mid"], [item["model"] for item in payload["regressions"]])
         self.assertGreater(payload["regressions"][0]["ratio"], payload["regressions"][1]["ratio"])
+
+    # DeepSeek MED #1 on PR #83: longest contiguous elevated run wins; zigzag
+    # pattern no longer collapses to a 1-day window.
+    def test_zigzag_window_picks_longest_run_not_last(self) -> None:
+        # 30d baseline. 7d window has zigzag: days 0,2 normal; days 4,5,6 elevated (3-day run).
+        # Without longest-run logic, _narrow_window returned just day 0 (the last elevated singleton).
+        # Now it should return the 3-day run (days 4..6 offset, i.e. earliest 3 days).
+        events = [event(day, rate=0.001) for day in range(30)]
+        # Replace days 4, 5, 6 (offsets — earlier in time) with elevated rates.
+        # In day_offset terms: 0 = today, 6 = 6 days ago. Days 4-6 = 4-6 days ago = earliest part of 7d.
+        elevated_events = [event(day, rate=0.005) for day in (4, 5, 6)]
+        # Remove the baseline-rate entries for those days, replace with elevated.
+        events = [e for e in events if e["ts"] not in {ev["ts"] for ev in elevated_events}]
+        events.extend(elevated_events)
+
+        payload = detect_regressions(events, now=NOW, threshold=1.2)
+
+        # A regression should be flagged.
+        self.assertGreaterEqual(payload["summary"]["regressions_count"], 1)
+        reg = payload["regressions"][0]
+        window_start = reg["window_start"]
+        window_end = reg["window_end"]
+        # The narrowing should reflect the 3-day run (days -6, -5, -4 from today),
+        # not collapse to a 1-day singleton.
+        start_date = datetime.fromisoformat(window_start).date()
+        end_date = datetime.fromisoformat(window_end).date()
+        span = (end_date - start_date).days + 1
+        self.assertGreaterEqual(span, 3, f"expected ≥3-day run, got {span}-day window {window_start}..{window_end}")
+
+    # DeepSeek LOW #3 on PR #83: boundary guards (zero cost/output).
+    def test_zero_long_cost_skipped(self) -> None:
+        # All events have zero cost; should never flag a regression.
+        events = [event(day, rate=0.0) for day in range(30)]
+        payload = detect_regressions(events, now=NOW, threshold=1.2)
+        self.assertEqual(0, payload["summary"]["regressions_count"])
+
+    def test_zero_short_output_skipped(self) -> None:
+        # Only old events (day_offset > 6); 7d window has 0 output_tokens.
+        events = [event(day, rate=0.001) for day in range(7, 30)]
+        payload = detect_regressions(events, now=NOW, threshold=1.2)
+        self.assertEqual(0, payload["summary"]["regressions_count"])
+
+    def test_zero_long_output_skipped(self) -> None:
+        # All events have output_tokens=0 but non-zero cost (cache-only scenario).
+        events = [
+            {"ts": (NOW - timedelta(days=d)).isoformat(),
+             "provider": "openai",
+             "model": "cache-only",
+             "output_tokens": 0,
+             "cost_estimate_usd": 0.001}
+            for d in range(30)
+        ]
+        payload = detect_regressions(events, now=NOW, threshold=1.2)
+        self.assertEqual(0, payload["summary"]["regressions_count"])
 
 
 if __name__ == "__main__":
