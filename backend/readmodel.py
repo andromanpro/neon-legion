@@ -110,6 +110,100 @@ def read_events(
     return [event for event, _provider_key in events]
 
 
+def read_events_fast(
+    conn: sqlite3.Connection,
+    start: date | None = None,
+    end: date | None = None,
+    providers: list[str] | None = None,
+) -> list[dict]:
+    """Fast path: assemble event dicts from column values directly.
+
+    Returns dicts with the documented schema fields (no raw_json). For callers
+    that need full event payload, use read_events() which decodes raw_json.
+    """
+    if start is not None and end is not None and start > end:
+        return []
+
+    provider_keys = _provider_keys(providers) if providers else None
+    where = []
+    params: list[object] = []
+
+    if start is not None:
+        where.append("ts >= ?")
+        params.append(_safe_date_offset(start, -1).isoformat())
+    if end is not None:
+        where.append("ts < ?")
+        params.append(_safe_date_offset(end, 2).isoformat())
+
+    if provider_keys:
+        placeholders = ",".join("?" for _ in provider_keys)
+        where.append(f"provider IN ({placeholders})")
+        params.extend(provider_keys)
+
+    sql = """
+        SELECT
+            provider, ts, session_id, message_uuid, model, input_tokens,
+            output_tokens, cache_read_tokens, cache_creation_tokens,
+            total_tokens, cost_estimate_usd, duration_ms, working_dir,
+            tool_uses, stop_reason
+        FROM events
+    """
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+
+    rows: list[tuple[dict, str, float]] = []
+    for row in conn.execute(sql, params):
+        (
+            provider_key,
+            ts,
+            session_id,
+            message_uuid,
+            model,
+            input_tokens,
+            output_tokens,
+            cache_read_tokens,
+            cache_creation_tokens,
+            total_tokens,
+            cost_estimate_usd,
+            duration_ms,
+            working_dir,
+            tool_uses,
+            stop_reason,
+        ) = row
+
+        parsed_ts = _parse_event_ts(ts)
+        if parsed_ts is None:
+            continue
+        event_date = parsed_ts.astimezone().date()
+        if start is not None and event_date < start:
+            continue
+        if end is not None and event_date > end:
+            continue
+
+        event = {
+            "provider": provider_key,
+            "ts": ts,
+            "session_id": session_id,
+            "message_uuid": message_uuid,
+            "model": model,
+            "input_tokens": input_tokens if input_tokens is not None else 0,
+            "output_tokens": output_tokens if output_tokens is not None else 0,
+            "cache_read_tokens": cache_read_tokens if cache_read_tokens is not None else 0,
+            "cache_creation_tokens": cache_creation_tokens if cache_creation_tokens is not None else 0,
+            "total_tokens": total_tokens if total_tokens is not None else 0,
+            "cost_estimate_usd": cost_estimate_usd if cost_estimate_usd is not None else 0.0,
+            "duration_ms": duration_ms if duration_ms is not None else 0,
+            "working_dir": working_dir,
+            "tool_uses": tool_uses if tool_uses is not None else 0,
+            "stop_reason": stop_reason,
+        }
+        rows.append((event, str(provider_key), parsed_ts.timestamp()))
+
+    events = _dedupe_fast_events(rows)
+    events.sort(key=lambda item: item[2])
+    return [event for event, _provider_key, _sort_ts in events]
+
+
 def _create_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(
         """
@@ -316,6 +410,29 @@ def _dedupe_events(rows: list[tuple[dict, str]]) -> list[tuple[dict, str]]:
                 continue
             seen_legacy.add(legacy_key)
         deduped.append((event, provider_key))
+    return deduped
+
+
+def _dedupe_fast_events(rows: list[tuple[dict, str, float]]) -> list[tuple[dict, str, float]]:
+    deduped = []
+    seen_legacy = set()
+    for event, provider_key, sort_ts in rows:
+        legacy_key = (
+            _event_provider(event, provider_key),
+            event.get("session_id"),
+            event.get("ts"),
+            event.get("model"),
+            event.get("input_tokens"),
+            event.get("cached_input_tokens"),
+            event.get("output_tokens"),
+            event.get("reasoning_tokens"),
+            event.get("total_tokens"),
+            event.get("exit_code"),
+        )
+        if legacy_key in seen_legacy:
+            continue
+        seen_legacy.add(legacy_key)
+        deduped.append((event, provider_key, sort_ts))
     return deduped
 
 

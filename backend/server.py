@@ -40,6 +40,7 @@ CUSTOMERS_BLOCKLIST_DEFAULT = cfg.get("paths.customers_blocklist", None, str)
 TRACKER_DIR = PROJECT_ROOT / "tracker"
 _READMODEL = None
 _READMODEL_META = None
+_USE_SLOW_READMODEL = False
 
 
 if hasattr(sys.stdout, "reconfigure"):
@@ -111,6 +112,11 @@ def parse_args():
         "--no-readmodel",
         action="store_true",
         help="Disable the in-memory SQLite read-model and read canonical JSONL directly.",
+    )
+    parser.add_argument(
+        "--use-slow-readmodel",
+        action="store_true",
+        help="Use the raw_json-decoding SQLite read-model path instead of the column fast path.",
     )
     return parser.parse_args()
 
@@ -269,7 +275,9 @@ def read_recent_events(since, now):
 
 def _read_events_dispatch(start, end, providers=None):
     if _READMODEL is not None:
-        return readmodel.read_events(_READMODEL, start, end, providers=providers)
+        if _USE_SLOW_READMODEL:
+            return readmodel.read_events(_READMODEL, start, end, providers=providers)
+        return readmodel.read_events_fast(_READMODEL, start, end, providers=providers)
     return summary.read_events(start, end)
 
 
@@ -1403,8 +1411,9 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
 
 
 def main():
-    global _READMODEL, _READMODEL_META
+    global _READMODEL, _READMODEL_META, _USE_SLOW_READMODEL
     args = parse_args()
+    _USE_SLOW_READMODEL = bool(args.use_slow_readmodel)
 
     if args.no_readmodel:
         _READMODEL = None

@@ -19,6 +19,25 @@ if str(ROOT) not in sys.path:
 from backend import readmodel
 
 
+DOCUMENTED_EVENT_FIELDS = {
+    "provider",
+    "ts",
+    "session_id",
+    "message_uuid",
+    "model",
+    "input_tokens",
+    "output_tokens",
+    "cache_read_tokens",
+    "cache_creation_tokens",
+    "total_tokens",
+    "cost_estimate_usd",
+    "duration_ms",
+    "working_dir",
+    "tool_uses",
+    "stop_reason",
+}
+
+
 @contextmanager
 def temporary_events_dir():
     temp = tempfile.TemporaryDirectory(dir=ROOT, ignore_cleanup_errors=True)
@@ -175,6 +194,87 @@ class ReadModelTests(unittest.TestCase):
             conn = readmodel.build(Path(tmp))
             result = readmodel.read_events(conn, date(2026, 5, 10), date(2026, 5, 10))
             self.assertEqual(result, [json.loads(json.dumps(original, separators=(",", ":")))])
+            conn.close()
+
+    def test_read_events_fast_returns_same_shape(self):
+        with temporary_events_dir() as tmp:
+            original = event(
+                10,
+                session_id="shape",
+                provider="claude",
+                message_uuid="msg-1",
+                cache_read_tokens=4,
+                cache_creation_tokens=5,
+                cost_estimate_usd=1.25,
+                duration_ms=600,
+                working_dir="/work",
+                tool_uses=2,
+                stop_reason="end_turn",
+            )
+            write_jsonl(tmp, "claude-events.jsonl", [original])
+            conn = readmodel.build(Path(tmp))
+
+            slow = readmodel.read_events(conn, date(2026, 5, 10), date(2026, 5, 10))
+            fast = readmodel.read_events_fast(conn, date(2026, 5, 10), date(2026, 5, 10))
+
+            self.assertEqual(len(fast), 1)
+            self.assertEqual(set(fast[0]), DOCUMENTED_EVENT_FIELDS)
+            self.assertEqual(set(slow[0]) & DOCUMENTED_EVENT_FIELDS, DOCUMENTED_EVENT_FIELDS)
+            for field in DOCUMENTED_EVENT_FIELDS:
+                self.assertEqual(fast[0][field], slow[0][field])
+            conn.close()
+
+    def test_read_events_fast_omits_raw_json(self):
+        with temporary_events_dir() as tmp:
+            write_jsonl(tmp, "claude-events.jsonl", [event(10, provider="claude")])
+            conn = readmodel.build(Path(tmp))
+            result = readmodel.read_events_fast(conn, date(2026, 5, 10), date(2026, 5, 10))
+            self.assertNotIn("raw_json", result[0])
+            conn.close()
+
+    def test_read_events_fast_handles_nulls(self):
+        with temporary_events_dir() as tmp:
+            write_jsonl(
+                tmp,
+                "claude-events.jsonl",
+                [
+                    {
+                        "provider": "claude",
+                        "ts": "2026-05-10T10:00:00+03:00",
+                        "session_id": None,
+                        "message_uuid": None,
+                        "model": None,
+                        "working_dir": None,
+                    }
+                ],
+            )
+            conn = readmodel.build(Path(tmp))
+            result = readmodel.read_events_fast(conn, date(2026, 5, 10), date(2026, 5, 10))
+            self.assertEqual(result[0]["session_id"], None)
+            self.assertEqual(result[0]["message_uuid"], None)
+            self.assertEqual(result[0]["model"], None)
+            self.assertEqual(result[0]["working_dir"], None)
+            conn.close()
+
+    def test_read_events_fast_filters(self):
+        with temporary_events_dir() as tmp:
+            write_jsonl(tmp, "claude-events.jsonl", [event(10, session_id="claude", provider="claude")])
+            write_jsonl(
+                tmp,
+                "codex-events.jsonl",
+                [
+                    event(10, session_id="codex-in", provider="codex"),
+                    event(11, session_id="codex-out", provider="codex"),
+                ],
+            )
+            conn = readmodel.build(Path(tmp))
+            result = readmodel.read_events_fast(
+                conn,
+                date(2026, 5, 10),
+                date(2026, 5, 10),
+                providers=["codex"],
+            )
+            self.assertEqual([row["session_id"] for row in result], ["codex-in"])
             conn.close()
 
     def test_indexes_exist(self):
