@@ -151,6 +151,8 @@ def process_issue(issue: dict, host: str) -> None:
         log(f"#{number} lost claim race to a concurrent worker; releasing")
         return
 
+    _emit_bus_event(envelope, exec_id, host, number, "claimed")
+
     current_labels = claimed_labels
     heartbeat_done = None
     heartbeat_thread = None
@@ -158,6 +160,7 @@ def process_issue(issue: dict, host: str) -> None:
     try:
         payload = _load_payload(envelope)
         current_labels = _label_names(_set_state(number, current_labels, IN_PROGRESS))
+        _emit_bus_event(envelope, exec_id, host, number, "in-progress")
         handler = HANDLERS.get(envelope["kind"])
         if handler is None:
             raise WorkerFailure("unknown_kind", kind=envelope["kind"])
@@ -206,6 +209,14 @@ def process_issue(issue: dict, host: str) -> None:
             f"transition failed: {exc}",
             level="error",
         )
+        return
+    _emit_bus_event(
+        envelope,
+        exec_id,
+        host,
+        number,
+        "done" if terminal_state == DONE else "failed",
+    )
 
 
 def log(message: str, *, level: str = "info") -> None:
@@ -250,6 +261,47 @@ def _new_exec_id(host: str) -> str:
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _emit_bus_event(envelope: dict, exec_id: str, host: str, issue_number: int, transition: str) -> None:
+    """Append a bus-events.jsonl entry. Best-effort: log and continue on error."""
+    path = PROJECT_ROOT / "tracker" / "bus-events.jsonl"
+    tmp = path.with_suffix(path.suffix + f".tmp.{os.getpid()}")
+    try:
+        event = {
+            "schema_version": 1,
+            "provider": "bus",
+            "ts": datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+            "task_id": envelope.get("task_id"),
+            "session_id": envelope.get("task_id"),
+            "kind": envelope.get("kind"),
+            "transition": transition,
+            "exec_id": exec_id,
+            "target_host": host,
+            "issue_number": issue_number,
+            "lease_seconds": int(envelope.get("lease_seconds", 0)),
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cost_estimate_usd": 0,
+            "duration_ms": 0,
+        }
+        path.parent.mkdir(parents=True, exist_ok=True)
+        existing = path.read_text(encoding="utf-8") if path.exists() else ""
+        line = json.dumps(event, ensure_ascii=False, separators=(",", ":")) + "\n"
+        with tmp.open("w", encoding="utf-8", newline="\n") as target:
+            target.write(existing)
+            if existing and not existing.endswith("\n"):
+                target.write("\n")
+            target.write(line)
+            target.flush()
+            os.fsync(target.fileno())
+        os.replace(tmp, path)
+    except Exception as exc:
+        log(f"failed to emit bus event for #{issue_number} {transition}: {exc}", level="error")
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
 
 
 def _claim_comment(host: str, exec_id: str, lease_seconds: int) -> str:

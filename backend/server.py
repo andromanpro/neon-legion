@@ -610,11 +610,15 @@ def build_sessions(query):
 
 
 def build_health():
+    bus_tasks_total = 0
+    if isinstance(_READMODEL_META, dict):
+        bus_tasks_total = summary.as_int(_READMODEL_META.get("bus_tasks"))
     return {
         "status": "ok",
         "timestamp": now_local().isoformat(timespec="seconds"),
         "events_total": len(read_all_events()),
         "tasks_total": len(summary.read_tasks()),
+        "bus_tasks_total": bus_tasks_total,
         "readmodel": _READMODEL_META,
     }
 
@@ -1422,7 +1426,8 @@ def main():
         _READMODEL, _READMODEL_META = readmodel.build_with_meta(TRACKER_DIR)
         print(
             f"[readmodel] built events={_READMODEL_META['events']} "
-            f"tasks={_READMODEL_META['tasks']}",
+            f"tasks={_READMODEL_META['tasks']} "
+            f"bus_tasks={_READMODEL_META['bus_tasks']}",
             file=sys.stderr,
         )
 

@@ -100,12 +100,35 @@ def event(day, session_id="s1", provider=None, **extra):
     return row
 
 
+def bus_event(transition, task_id="ulid:01HQZBUS0000000000000", **extra):
+    row = {
+        "schema_version": 1,
+        "provider": "bus",
+        "ts": "2026-05-13T22:30:00.123+03:00",
+        "task_id": task_id,
+        "session_id": task_id,
+        "kind": "echo",
+        "transition": transition,
+        "exec_id": "win-codex-01-1700000000-abc123",
+        "target_host": "win-codex-01",
+        "issue_number": 50,
+        "lease_seconds": 600,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cost_estimate_usd": 0,
+        "duration_ms": 0,
+    }
+    row.update(extra)
+    return row
+
+
 class ReadModelTests(unittest.TestCase):
     def test_build_empty_dir_returns_connection(self):
         with temporary_events_dir() as tmp:
             conn = readmodel.build(Path(tmp))
             self.assertEqual(conn.execute("SELECT COUNT(*) FROM events").fetchone()[0], 0)
             self.assertEqual(conn.execute("SELECT COUNT(*) FROM tasks").fetchone()[0], 0)
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM bus_tasks").fetchone()[0], 0)
             conn.close()
 
     def test_build_populates_events_from_one_provider(self):
@@ -172,7 +195,43 @@ class ReadModelTests(unittest.TestCase):
             conn, meta = readmodel.build_with_meta(Path(tmp))
             self.assertEqual(meta["events"], 2)
             self.assertEqual(meta["tasks"], 2)
+            self.assertEqual(meta["bus_tasks"], 0)
             self.assertIn("built_at", meta)
+            conn.close()
+
+    def test_bus_events_jsonl_populates_bus_tasks(self):
+        with temporary_events_dir() as tmp:
+            write_jsonl(
+                tmp,
+                "bus-events.jsonl",
+                [bus_event("claimed"), bus_event("in-progress"), bus_event("done")],
+            )
+            conn, meta = readmodel.build_with_meta(Path(tmp))
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM bus_tasks").fetchone()[0], 3)
+            self.assertEqual(meta["bus_tasks"], 3)
+            rows = conn.execute(
+                "SELECT task_id, kind, transition, exec_id, target_host, issue_number, lease_seconds "
+                "FROM bus_tasks ORDER BY id"
+            ).fetchall()
+            self.assertEqual([row[2] for row in rows], ["claimed", "in-progress", "done"])
+            self.assertEqual(rows[0][0], "ulid:01HQZBUS0000000000000")
+            self.assertEqual(rows[0][1], "echo")
+            self.assertEqual(rows[0][3], "win-codex-01-1700000000-abc123")
+            self.assertEqual(rows[0][4], "win-codex-01")
+            self.assertEqual(rows[0][5], 50)
+            self.assertEqual(rows[0][6], 600)
+            conn.close()
+
+    def test_bus_events_corrupt_line_skipped(self):
+        with temporary_events_dir() as tmp:
+            write_jsonl(tmp, "bus-events.jsonl", [bus_event("claimed"), "{bad json"])
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                conn, meta = readmodel.build_with_meta(Path(tmp))
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM bus_tasks").fetchone()[0], 1)
+            self.assertEqual(meta["bus_tasks"], 1)
+            self.assertIn("[readmodel]", stderr.getvalue())
+            self.assertIn("corrupt JSON skipped", stderr.getvalue())
             conn.close()
 
     def test_read_events_filters_by_date(self):
@@ -298,6 +357,11 @@ class ReadModelTests(unittest.TestCase):
                 for row in conn.execute("PRAGMA index_list('events')").fetchall()
             }
             self.assertTrue({"idx_events_ts", "idx_events_session", "idx_events_provider"} <= indexes)
+            bus_indexes = {
+                row[1]
+                for row in conn.execute("PRAGMA index_list('bus_tasks')").fetchall()
+            }
+            self.assertTrue({"idx_bus_tasks_task", "idx_bus_tasks_ts"} <= bus_indexes)
             conn.close()
 
     # DeepSeek audit on #60 (HIGH #1) — dedup by event_id parity with slow path.
