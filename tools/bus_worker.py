@@ -61,11 +61,30 @@ def echo_handler(envelope: dict, payload: dict) -> dict:
 HANDLERS: dict[str, Callable[[dict, dict], dict]] = {"echo": echo_handler}
 
 
-class _WorkerFailure(Exception):
+class WorkerFailure(Exception):
+    """Structured failure from a bus handler.
+
+    `reason` is a short snake_case identifier the result envelope keys off
+    (e.g. `unknown_kind`, `payload_sha_mismatch`). `details` is a free-form
+    dict that the result envelope spreads alongside the reason. Used by
+    `process_issue` to fail an issue with a meaningful body without
+    leaking raw exception strings.
+
+    Public API — adapters in other modules raise it to opt into the
+    structured-failure path. DeepSeek audit C2 (PR #74 follow-up): public
+    name without the leading underscore so external imports are not
+    relying on a private symbol.
+    """
+
     def __init__(self, reason: str, **details):
         super().__init__(reason)
         self.reason = reason
         self.details = details
+
+
+# Backwards-compatibility alias for any caller still importing the original
+# underscore-prefixed name. Safe to remove once all consumers migrate.
+_WorkerFailure = WorkerFailure
 
 
 def register_handler(kind: str, handler) -> None:
@@ -141,7 +160,7 @@ def process_issue(issue: dict, host: str) -> None:
         current_labels = _label_names(_set_state(number, current_labels, IN_PROGRESS))
         handler = HANDLERS.get(envelope["kind"])
         if handler is None:
-            raise _WorkerFailure("unknown_kind", kind=envelope["kind"])
+            raise WorkerFailure("unknown_kind", kind=envelope["kind"])
 
         heartbeat_done, heartbeat_thread = _start_heartbeat(number, exec_id, lease_seconds)
         handler_result = handler(envelope, payload)
@@ -150,7 +169,7 @@ def process_issue(issue: dict, host: str) -> None:
 
         result = {"status": "done", "result": handler_result}
         terminal_state = DONE
-    except _WorkerFailure as exc:
+    except WorkerFailure as exc:
         _stop_heartbeat(heartbeat_done, heartbeat_thread)
         result = {"status": "failed", "reason": exc.reason, **exc.details}
         terminal_state = FAILED
@@ -377,9 +396,9 @@ def _load_payload(envelope: dict) -> dict:
     payload_ref = envelope["payload_ref"]
     scheme = urllib.parse.urlparse(payload_ref).scheme.lower()
     if scheme in HTTP_SCHEMES:
-        raise _WorkerFailure("unsupported_payload_scheme", scheme=scheme)
+        raise WorkerFailure("unsupported_payload_scheme", scheme=scheme)
     if scheme not in LOCAL_SCHEMES:
-        raise _WorkerFailure("unsupported_payload_scheme", scheme=scheme or "<empty>")
+        raise WorkerFailure("unsupported_payload_scheme", scheme=scheme or "<empty>")
 
     raw_or_payload = _payload_read(payload_ref)
     if isinstance(raw_or_payload, bytes):
@@ -387,7 +406,7 @@ def _load_payload(envelope: dict) -> dict:
         try:
             payload = json.loads(raw.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise _WorkerFailure("invalid_payload_json", error=str(exc)) from exc
+            raise WorkerFailure("invalid_payload_json", error=str(exc)) from exc
     else:
         payload = raw_or_payload
         raw = _canonical_bytes(payload)
@@ -398,9 +417,9 @@ def _load_payload(envelope: dict) -> dict:
         # DeepSeek audit A1: do NOT echo the actual sha — that turns the worker
         # into a file-content fingerprint oracle. Only the expected value is
         # safe to surface (the issuer already knows it).
-        raise _WorkerFailure("payload_sha_mismatch", expected=expected)
+        raise WorkerFailure("payload_sha_mismatch", expected=expected)
     if not isinstance(payload, dict):
-        raise _WorkerFailure("invalid_payload_json", error="payload root must be an object")
+        raise WorkerFailure("invalid_payload_json", error="payload root must be an object")
     return payload
 
 
@@ -433,14 +452,14 @@ def _payload_path(payload_ref: str) -> Path:
     # explicitly by pointing at a payload directory.
     root = _payload_root()
     if root is None:
-        raise _WorkerFailure(
+        raise WorkerFailure(
             "payload_root_unset",
             hint=f"set {PAYLOAD_ROOT_ENV} to a directory containing task payloads",
         )
     try:
         candidate.relative_to(root)
     except ValueError as exc:
-        raise _WorkerFailure(
+        raise WorkerFailure(
             "payload_outside_root",
             root=str(root),
         ) from exc

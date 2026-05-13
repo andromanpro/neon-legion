@@ -15,7 +15,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from tools import bus_worker  # noqa: E402
-from tools.bus_worker import _WorkerFailure as WorkerFailure  # noqa: E402
+from tools.bus_worker import WorkerFailure  # noqa: E402  (public API since PR #75)
 
 
 ACTION_MAP = {
