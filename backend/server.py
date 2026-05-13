@@ -16,6 +16,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 from tools import config as cfg  # noqa: E402
+from backend import readmodel  # noqa: E402
 
 DASHBOARD_DIR = PROJECT_ROOT / "dashboard"
 sys.path.insert(0, str(PROJECT_ROOT / "tracker"))
@@ -36,6 +37,9 @@ SNAPSHOT_DEFAULT_SESSIONS = 8
 SNAPSHOT_DEFAULT_PATH = cfg.get("paths.snapshot_output", None, str)
 SALT_FILE_DEFAULT = cfg.get("paths.salt_file", str(Path.home() / ".multi-agent-snapshot-salt"), str)
 CUSTOMERS_BLOCKLIST_DEFAULT = cfg.get("paths.customers_blocklist", None, str)
+TRACKER_DIR = PROJECT_ROOT / "tracker"
+_READMODEL = None
+_READMODEL_META = None
 
 
 if hasattr(sys.stdout, "reconfigure"):
@@ -102,6 +106,11 @@ def parse_args():
         default=CUSTOMERS_BLOCKLIST_DEFAULT,
         help="Optional path to file listing customer names to scrub from desc/top_session "
              "(one name per line, # comments allowed). Only used with --public.",
+    )
+    parser.add_argument(
+        "--no-readmodel",
+        action="store_true",
+        help="Disable the in-memory SQLite read-model and read canonical JSONL directly.",
     )
     return parser.parse_args()
 
@@ -245,17 +254,23 @@ def event_ts_local(event):
 
 
 def read_all_events():
-    return summary.read_events(date.min, date.max)
+    return _read_events_dispatch(date.min, date.max)
 
 
 def read_recent_events(since, now):
-    events = summary.read_events(since.date(), now.date())
+    events = _read_events_dispatch(since.date(), now.date())
     recent = []
     for event in events:
         ts = event_ts_local(event)
         if ts is not None and since <= ts <= now:
             recent.append(event)
     return recent
+
+
+def _read_events_dispatch(start, end, providers=None):
+    if _READMODEL is not None:
+        return readmodel.read_events(_READMODEL, start, end, providers=providers)
+    return summary.read_events(start, end)
 
 
 def total_tokens(stats):
@@ -364,7 +379,7 @@ def task_estimated_hours(entry):
 def build_summary(query):
     days = parse_days(query)
     start, end = period_for_days(days)
-    events = summary.read_events(start, end)
+    events = _read_events_dispatch(start, end)
     by_model, total = summary.summarize_by_model(events)
 
     subscription = summary.subscription_prorated_usd(events, days)
@@ -389,14 +404,14 @@ def build_productivity(query):
     days = parse_days(query)
     gap_minutes = parse_positive_int(query, "gap_minutes", 2)
     start, end = period_for_days(days)
-    events = summary.read_events(start, end)
+    events = _read_events_dispatch(start, end)
     return productivity_payload(events, gap_minutes)
 
 
 def build_sentiment(query):
     days = parse_days(query)
     start, end = period_for_days(days)
-    events = summary.read_events(start, end)
+    events = _read_events_dispatch(start, end)
     sentiment = summary.summarize_sentiment(events, start, end)
     if sentiment is None:
         return None
@@ -499,7 +514,7 @@ def build_timeseries(query):
 
     days = parse_days(query)
     start, end = period_for_days(days)
-    events = summary.read_events(start, end)
+    events = _read_events_dispatch(start, end)
     if metric in {"profanity", "frustration"}:
         data = build_sentiment_timeseries(metric, start, end, events)
     else:
@@ -592,6 +607,7 @@ def build_health():
         "timestamp": now_local().isoformat(timespec="seconds"),
         "events_total": len(read_all_events()),
         "tasks_total": len(summary.read_tasks()),
+        "readmodel": _READMODEL_META,
     }
 
 
@@ -1156,7 +1172,7 @@ def build_wp_snapshot(
     period = summary_data["period"]
     start_date = date.fromisoformat(period["start"])
     end_date = date.fromisoformat(period["end"])
-    events_window = summary.read_events(start_date, end_date)
+    events_window = _read_events_dispatch(start_date, end_date)
     providers = providers_payload(events_window)
 
     # Build models list with cost share %
@@ -1387,7 +1403,19 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
 
 
 def main():
+    global _READMODEL, _READMODEL_META
     args = parse_args()
+
+    if args.no_readmodel:
+        _READMODEL = None
+        _READMODEL_META = None
+    else:
+        _READMODEL, _READMODEL_META = readmodel.build_with_meta(TRACKER_DIR)
+        print(
+            f"[readmodel] built events={_READMODEL_META['events']} "
+            f"tasks={_READMODEL_META['tasks']}",
+            file=sys.stderr,
+        )
 
     salt = None
     customer_pattern = None
