@@ -46,8 +46,8 @@ def task(**overrides):
     return data
 
 
-def issue(body=None, labels=None):
-    return {"number": 50, "body": bus_envelope.serialize(task()) if body is None else body, "labels": labels or list(BASE_LABELS)}
+def issue(body=None, labels=None, number=50):
+    return {"number": number, "body": bus_envelope.serialize(task()) if body is None else body, "labels": labels or list(BASE_LABELS)}
 
 
 class FakeDone:
@@ -108,6 +108,8 @@ class BusWorkerTests(unittest.TestCase):
             self.addCleanup(patcher.stop)
         self.addCleanup(cleanup_temp_project)
         self.addCleanup(self.restore_handlers)
+        bus_worker.clear_idempotency_cache()
+        self.addCleanup(bus_worker.clear_idempotency_cache)
         bus_worker._STOP.clear()
         self.addCleanup(bus_worker._STOP.clear)
 
@@ -132,6 +134,12 @@ class BusWorkerTests(unittest.TestCase):
             if "neon-result:v1" in comment["body"]:
                 return comment["body"]
         self.fail("result comment was not posted")
+
+    def result_json(self):
+        body = self.result_body()
+        start = body.index("{")
+        end = body.rindex("}") + 1
+        return json.loads(body[start:end])
 
     def states(self):
         return [call["labels"][-1] for call in self.updates if call["labels"]]
@@ -177,6 +185,75 @@ class BusWorkerTests(unittest.TestCase):
             [event["transition"] for event in self.bus_events()],
             ["claimed", "in-progress", "done"],
         )
+
+    def test_idempotency_cache_hit_replays_without_running_handler(self):
+        handler = Mock(return_value={"value": "first"})
+        bus_worker.register_handler("dedup", handler)
+        first_body = bus_envelope.serialize(task(task_id="ulid:01HQZIDEMPOTENCY001", kind="dedup", idempotency_key="K1"))
+        second_body = bus_envelope.serialize(task(task_id="ulid:01HQZIDEMPOTENCY002", kind="dedup", idempotency_key="K1"))
+
+        with patch("tools.bus_worker._payload_read", return_value=PAYLOAD):
+            bus_worker.process_issue(issue(body=first_body, number=50), HOST)
+
+        handler.assert_called_once()
+        self.assertEqual(bus_worker.IDEMPOTENCY_CACHE["K1"], {"status": "done", "result": {"value": "first"}})
+        handler.reset_mock()
+
+        with patch("tools.bus_worker._payload_read") as payload_read:
+            bus_worker.process_issue(issue(body=second_body, number=51), HOST)
+
+        handler.assert_not_called()
+        payload_read.assert_not_called()
+        self.assertEqual(self.states()[-3:], [bus_worker.CLAIMED, bus_worker.IN_PROGRESS, bus_worker.DONE])
+        replayed = self.result_json()
+        self.assertEqual(replayed["status"], "done")
+        self.assertEqual(replayed["result"], {"value": "first"})
+        self.assertEqual(replayed["replay_of_idempotency_key"], "K1")
+
+    def test_idempotency_cache_miss_runs_handler(self):
+        handler = Mock(return_value={"fresh": True})
+        bus_worker.register_handler("dedup-miss", handler)
+        body = bus_envelope.serialize(task(kind="dedup-miss", idempotency_key="K2"))
+
+        with patch("tools.bus_worker._payload_read", return_value=PAYLOAD):
+            bus_worker.process_issue(issue(body=body), HOST)
+
+        handler.assert_called_once()
+        self.assertEqual(self.result_json(), {"status": "done", "result": {"fresh": True}})
+        self.assertEqual(bus_worker.IDEMPOTENCY_CACHE["K2"], {"status": "done", "result": {"fresh": True}})
+
+    def test_idempotency_cache_does_not_collide_across_keys(self):
+        handler = Mock(side_effect=[{"slot": "one"}, {"slot": "two"}])
+        bus_worker.register_handler("dedup-slots", handler)
+        first_body = bus_envelope.serialize(task(task_id="ulid:01HQZIDEMPOTENCYK1", kind="dedup-slots", idempotency_key="K1"))
+        second_body = bus_envelope.serialize(task(task_id="ulid:01HQZIDEMPOTENCYK2", kind="dedup-slots", idempotency_key="K2"))
+
+        with patch("tools.bus_worker._payload_read", return_value=PAYLOAD):
+            bus_worker.process_issue(issue(body=first_body, number=50), HOST)
+            bus_worker.process_issue(issue(body=second_body, number=51), HOST)
+
+        self.assertEqual(handler.call_count, 2)
+        self.assertEqual(self.result_json(), {"status": "done", "result": {"slot": "two"}})
+        self.assertEqual(bus_worker.IDEMPOTENCY_CACHE["K1"], {"status": "done", "result": {"slot": "one"}})
+        self.assertEqual(bus_worker.IDEMPOTENCY_CACHE["K2"], {"status": "done", "result": {"slot": "two"}})
+
+    def test_failed_handler_does_not_populate_idempotency_cache(self):
+        handler = Mock(side_effect=[ValueError("bad payload"), {"recovered": True}])
+        bus_worker.register_handler("dedup-fail", handler)
+        first_body = bus_envelope.serialize(task(task_id="ulid:01HQZIDEMPOTENCYF1", kind="dedup-fail", idempotency_key="KF"))
+        second_body = bus_envelope.serialize(task(task_id="ulid:01HQZIDEMPOTENCYF2", kind="dedup-fail", idempotency_key="KF"))
+
+        with patch("tools.bus_worker._payload_read", return_value=PAYLOAD):
+            bus_worker.process_issue(issue(body=first_body, number=50), HOST)
+
+        self.assertNotIn("KF", bus_worker.IDEMPOTENCY_CACHE)
+
+        with patch("tools.bus_worker._payload_read", return_value=PAYLOAD):
+            bus_worker.process_issue(issue(body=second_body, number=51), HOST)
+
+        self.assertEqual(handler.call_count, 2)
+        self.assertEqual(self.result_json(), {"status": "done", "result": {"recovered": True}})
+        self.assertEqual(bus_worker.IDEMPOTENCY_CACHE["KF"], {"status": "done", "result": {"recovered": True}})
 
     def test_lost_claim_does_not_emit_bus_event(self):
         mine_body = "<!-- neon-claim:v1 host=win-codex-01 exec=mine-100 claimed_at=2026-05-13T12:30:01Z lease_seconds=600 -->"

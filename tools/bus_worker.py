@@ -60,6 +60,11 @@ def echo_handler(envelope: dict, payload: dict) -> dict:
 
 HANDLERS: dict[str, Callable[[dict, dict], dict]] = {"echo": echo_handler}
 
+# DeepSeek E3 - idempotency dedup. Process-lifetime cache; worker restart
+# drops it. A re-issued task within the same process returns the cached
+# result without re-running the handler.
+IDEMPOTENCY_CACHE: dict[str, dict] = {}
+
 
 class WorkerFailure(Exception):
     """Structured failure from a bus handler.
@@ -89,6 +94,10 @@ _WorkerFailure = WorkerFailure
 
 def register_handler(kind: str, handler) -> None:
     HANDLERS[kind] = handler
+
+
+def clear_idempotency_cache() -> None:
+    IDEMPOTENCY_CACHE.clear()
 
 
 def run(host: str, poll_interval: int = 30) -> None:
@@ -123,6 +132,30 @@ def process_issue(issue: dict, host: str) -> None:
     labels = _label_names(issue)
     if PENDING not in labels:
         log(f"#{number} is no longer pending; skipping")
+        return
+
+    idempotency_key = envelope.get("idempotency_key")
+    cached = (
+        IDEMPOTENCY_CACHE.get(idempotency_key)
+        if isinstance(idempotency_key, str) and idempotency_key
+        else None
+    )
+    if cached is not None:
+        log(f"#{number} idempotency-cache HIT for key={idempotency_key}; replaying prior result")
+        exec_id = _new_exec_id(host)
+        try:
+            claimed = _set_state(number, labels, CLAIMED)
+            claimed_labels = _label_names(claimed)
+            lease_seconds = int(envelope.get("lease_seconds", 0))
+            bus_gitea.comment(number, _claim_comment(host, exec_id, lease_seconds))
+            _emit_bus_event(envelope, exec_id, host, number, "claimed")
+            in_progress_labels = _label_names(_set_state(number, claimed_labels, IN_PROGRESS))
+            _emit_bus_event(envelope, exec_id, host, number, "in-progress")
+            _post_result(number, exec_id, {**cached, "replay_of_idempotency_key": idempotency_key})
+            _set_state(number, in_progress_labels, DONE, close=True)
+            _emit_bus_event(envelope, exec_id, host, number, "done")
+        except BusGiteaError as exc:
+            log(f"#{number} idempotency replay failed mid-transition: {exc}", level="error")
         return
 
     exec_id = _new_exec_id(host)
@@ -201,6 +234,8 @@ def process_issue(issue: dict, host: str) -> None:
         return
 
     _post_result(number, exec_id, result)
+    if isinstance(idempotency_key, str) and idempotency_key and terminal_state == DONE:
+        IDEMPOTENCY_CACHE[idempotency_key] = dict(result)
     try:
         _set_state(number, current_labels, terminal_state, close=True)
     except BusGiteaError as exc:
