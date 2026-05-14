@@ -127,7 +127,11 @@ def extract_findings(role: str, text: str) -> list[Finding]:
     in_code = False
     for raw in text.splitlines():
         line = raw.rstrip()
-        if line.startswith("```"):
+        # CommonMark fences come in two flavors: ` ``` ` and `~~~`. Either
+        # opens/closes a code block. Indented fences also count — strip
+        # leading whitespace before the check (DeepSeek MED).
+        stripped = line.lstrip()
+        if stripped.startswith("```") or stripped.startswith("~~~"):
             in_code = not in_code
             continue
         if in_code:

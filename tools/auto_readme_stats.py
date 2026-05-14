@@ -96,23 +96,65 @@ def replace_block(readme_text: str, new_block: str) -> tuple[str, bool, str]:
 
     `changed` is True iff the file content would differ. `reason` is a short
     diagnostic string suitable for --check output.
-    """
-    if START_MARKER not in readme_text or END_MARKER not in readme_text:
-        return readme_text, False, "markers missing"
 
-    start = readme_text.index(START_MARKER)
-    end = readme_text.index(END_MARKER, start)
-    if end < start:
+    Scans line-by-line tracking fenced-code-block state so markers that
+    appear INSIDE a code block (e.g. a tutorial showing the marker syntax)
+    are ignored. Only markers at non-fenced positions count (DeepSeek MED —
+    naive `.index()` could eat content between a fence-embedded marker and
+    the real one).
+    """
+    start_idx = _find_marker_outside_fences(readme_text, START_MARKER)
+    if start_idx is None:
+        return readme_text, False, "markers missing"
+    end_idx = _find_marker_outside_fences(readme_text, END_MARKER, after=start_idx)
+    if end_idx is None:
+        return readme_text, False, "markers missing"
+    if end_idx < start_idx:
         return readme_text, False, "end-marker precedes start-marker"
 
     # Preserve the marker lines verbatim. Place new content between them with
     # blank lines around the body for Markdown readability.
-    head = readme_text[: start + len(START_MARKER)]
-    tail = readme_text[end:]
+    head = readme_text[: start_idx + len(START_MARKER)]
+    tail = readme_text[end_idx:]
     new_section = head + "\n\n" + new_block.rstrip() + "\n\n" + tail
     changed = new_section != readme_text
     reason = "block updated" if changed else "block already current"
     return new_section, changed, reason
+
+
+def _find_marker_outside_fences(text: str, marker: str, *, after: int = 0) -> int | None:
+    """Return the absolute index of `marker` ignoring matches inside ``` or ~~~ fences.
+
+    A fence opens / closes when a line (after lstrip) starts with three or
+    more backticks OR three or more tildes. Marker matches inside an open
+    fence are skipped. Returns None if no eligible match found.
+    """
+    in_fence = False
+    offset = 0
+    cursor = after
+    for line in text.splitlines(keepends=True):
+        line_end = offset + len(line)
+        if line_end <= cursor:
+            # Still scanning fence state up to the start cursor.
+            stripped = line.lstrip()
+            if stripped.startswith("```") or stripped.startswith("~~~"):
+                in_fence = not in_fence
+            offset = line_end
+            continue
+
+        stripped = line.lstrip()
+        if stripped.startswith("```") or stripped.startswith("~~~"):
+            in_fence = not in_fence
+            offset = line_end
+            continue
+        if not in_fence:
+            local_idx = line.find(marker)
+            if local_idx >= 0:
+                absolute = offset + local_idx
+                if absolute >= cursor:
+                    return absolute
+        offset = line_end
+    return None
 
 
 def atomic_write(path: Path, content: str) -> None:

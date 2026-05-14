@@ -90,12 +90,15 @@ WORD_RE = re.compile(r"[A-Za-zА-Яа-яЁё][A-Za-zА-Яа-яЁё']*")
 def score_text(text: str, *, config: dict | None = None) -> dict:
     """Score one message / role deliverable. Returns components + 0-100 total."""
     cfg_ = _resolve_config(config or {})
+    lower_text = text.lower()
     words = [w.lower() for w in WORD_RE.findall(text)]
     word_count = len(words)
 
     trigram = _trigram_repetition(words)
-    generic = _generic_density(text.lower(), cfg_["generic_phrases"], word_count)
-    hedge = _hedge_imperative(words, cfg_["hedge_words"], cfg_["imperative_words"])
+    generic = _generic_density(lower_text, cfg_["generic_phrases"], word_count)
+    hedge = _hedge_imperative(
+        words, lower_text, cfg_["hedge_words"], cfg_["imperative_words"]
+    )
 
     weights = cfg_["weights"]
     overall = 100.0 * (
@@ -281,13 +284,28 @@ def _generic_density(lower_text: str, phrases: tuple[str, ...], word_count: int)
 
 def _hedge_imperative(
     words: list[str],
+    lower_text: str,
     hedge: tuple[str, ...],
     imperative: tuple[str, ...],
 ) -> float:
-    hedge_set = set(hedge)
-    imperative_set = set(imperative)
-    h = sum(1 for w in words if w in hedge_set)
-    i = sum(1 for w in words if w in imperative_set)
+    """Return hedge:imperative ratio, capped at 1.0.
+
+    Splits hedge entries into single-word (set membership against tokenized
+    words) vs multi-word phrases (substring count against lowered text).
+    Previously the multi-word entries («consider that», «it seems», etc.)
+    were silently dead code because tokenization broke them apart before
+    the set check — DeepSeek MED.
+    """
+    hedge_single = {w for w in hedge if " " not in w}
+    hedge_phrases = [w for w in hedge if " " in w]
+    imperative_single = {w for w in imperative if " " not in w}
+    imperative_phrases = [w for w in imperative if " " in w]
+
+    h = sum(1 for w in words if w in hedge_single)
+    h += sum(lower_text.count(p) for p in hedge_phrases)
+    i = sum(1 for w in words if w in imperative_single)
+    i += sum(lower_text.count(p) for p in imperative_phrases)
+
     if h == 0:
         return 0.0
     if i == 0:
@@ -326,24 +344,12 @@ def _resolve_config(overrides: dict) -> dict:
 
 
 def _read_role_providers(roles_path: Path) -> dict[str, str]:
-    """Stdlib-only TOML parse — we only need [role.<name>] → provider."""
-    out: dict[str, str] = {}
-    if not roles_path.exists():
-        return out
-    current_role = None
-    role_pat = re.compile(r"^\s*\[role\.([^\]]+)\]\s*$")
-    provider_pat = re.compile(r"^\s*provider\s*=\s*\"([^\"]*)\"\s*$")
-    for line in roles_path.read_text(encoding="utf-8").splitlines():
-        m = role_pat.match(line)
-        if m:
-            current_role = m.group(1).strip()
-            continue
-        if current_role:
-            m = provider_pat.match(line)
-            if m:
-                out[current_role] = m.group(1).strip()
-                current_role = None
-    return out
+    """Thin wrapper around the shared `tools.config.read_role_providers`.
+
+    Centralized in `tools/config.py` to handle ALL TOML quote styles
+    (DeepSeek MED — the old in-file regex only matched `"double"` quotes).
+    """
+    return cfg.read_role_providers(roles_path)
 
 
 if __name__ == "__main__":

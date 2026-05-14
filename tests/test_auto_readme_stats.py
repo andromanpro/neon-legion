@@ -118,6 +118,52 @@ class ReplaceBlockTests(unittest.TestCase):
         self.assertEqual(updated, no_markers)
         self.assertEqual(reason, "markers missing")
 
+    def test_marker_inside_code_fence_ignored(self) -> None:
+        # DeepSeek MED: naive `.index()` could grab a START_STATS marker
+        # that appears inside a code block (tutorial showing the marker
+        # syntax) instead of the real one. Result: tool eats arbitrary
+        # README content between fence-embedded marker and real END.
+        readme = (
+            "# Project\n\n"
+            "Here's how the live block looks:\n\n"
+            "```\n"
+            f"{START_MARKER}\n"
+            "documentation example block\n"
+            f"{END_MARKER}\n"
+            "```\n\n"
+            "## Actual live block\n\n"
+            f"{START_MARKER}\n\n"
+            "OLD\n\n"
+            f"{END_MARKER}\n\n"
+            "Trailing content.\n"
+        )
+        updated, changed, reason = replace_block(readme, "NEW")
+        self.assertTrue(changed)
+        self.assertEqual(reason, "block updated")
+        # The fence-embedded "documentation example block" must remain untouched:
+        self.assertIn("documentation example block", updated)
+        # OLD between real markers gets replaced:
+        self.assertNotIn("\nOLD\n", updated)
+        self.assertIn("NEW", updated)
+        # Section header and trailing content preserved:
+        self.assertIn("## Actual live block", updated)
+        self.assertIn("Trailing content.", updated)
+
+    def test_tilde_fence_also_protects(self) -> None:
+        # Symmetric with ``` — ~~~ fences should also hide markers.
+        readme = (
+            "# Project\n\n"
+            "~~~\n"
+            f"{START_MARKER}\nfake\n{END_MARKER}\n"
+            "~~~\n\n"
+            f"{START_MARKER}\n\nOLD\n\n{END_MARKER}\n"
+        )
+        updated, changed, _ = replace_block(readme, "NEW")
+        self.assertTrue(changed)
+        self.assertIn("fake", updated)  # fence-embedded survives
+        self.assertNotIn("\nOLD\n", updated)
+        self.assertIn("NEW", updated)
+
 
 class CliTests(unittest.TestCase):
     def setUp(self) -> None:

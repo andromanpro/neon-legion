@@ -129,5 +129,46 @@ class ModelSlippageTests(unittest.TestCase):
         self.assertEqual(["gpt-high", "gpt-mid"], [item["model"] for item in payload["slippages"]])
 
 
+class BaselineWindowExcludesShortTests(unittest.TestCase):
+    """Regression cover for DeepSeek MED: baseline window MUST NOT include
+    the recent short window (otherwise the spike pulls up its own baseline)."""
+
+    def test_baseline_excludes_short_window_in_payload(self) -> None:
+        events = make_series(short_cost=0.05, long_cost=0.01)
+        payload = detect_slippages(events, now=NOW, threshold=1.3)
+        slippage = payload["slippages"][0]
+        # New field — explicit baseline count (23 days = long_days - short_days)
+        self.assertIn("events_baseline", slippage)
+        self.assertEqual(23, slippage["events_baseline"])
+        # median_cost_baseline reflects clean baseline (no contamination)
+        self.assertIn("median_cost_baseline", slippage)
+        self.assertAlmostEqual(0.01, slippage["median_cost_baseline"])
+
+    def test_overlap_signal_sharpens_in_14d_vs_30d_config(self) -> None:
+        # 14 events at 0.05 in the recent 14d, 16 events at 0.01 in the prior 16d.
+        # OLD overlap-included code: 30d median is pulled up by the 14 high
+        # values → median ≈ 0.03 → ratio 0.05/0.03 ≈ 1.67 (dampened).
+        # NEW baseline-only code: baseline median = 0.01 (only the 16 prior
+        # days) → ratio 0.05/0.01 = 5.0 (full signal).
+        events = []
+        for d in range(14):
+            events.append(event(d, cost=0.05))
+        for d in range(14, 30):
+            events.append(event(d, cost=0.01))
+        payload = detect_slippages(
+            events, now=NOW, threshold=1.3, short_days=14, long_days=30
+        )
+        slippage = payload["slippages"][0]
+        # Ratio should be ~5.0 (full signal), not ~1.67 (dampened).
+        self.assertGreaterEqual(slippage["ratio"], 4.0)
+
+    def test_no_slippage_when_baseline_empty(self) -> None:
+        # Only the recent 7d has data — no events in the prior 23d window.
+        # Should skip (median_baseline <= 0), not divide by zero / produce NaN.
+        events = [event(day, cost=0.05) for day in range(7)]
+        payload = detect_slippages(events, now=NOW, threshold=1.3)
+        self.assertEqual([], payload["slippages"])
+
+
 if __name__ == "__main__":
     unittest.main()

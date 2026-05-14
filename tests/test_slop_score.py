@@ -98,6 +98,24 @@ class ScoreTextTests(unittest.TestCase):
         self.assertIn("generic_phrase_density", result["components"])
         self.assertIn("hedge_imperative_ratio", result["components"])
 
+    def test_multi_word_hedges_now_count(self) -> None:
+        # DeepSeek MED: «consider that», «it seems», «in general», etc. were
+        # in DEFAULT_HEDGE_WORDS but never matched because `_hedge_imperative`
+        # tokenized text into single words then did set membership. Fixed
+        # by splitting hedge entries into single-word vs phrase passes.
+        text = "Consider that you might want to run the build."
+        # 1 multi-word hedge ("consider that") + 1 single hedge ("might")
+        # + 1 imperative ("run", "want" not in list — only "run")
+        # = h≥2, i=1 → ratio = min(2/1, 1.0) = 1.0
+        result = score_text(text)
+        self.assertGreater(result["components"]["hedge_imperative_ratio"], 0.5)
+
+    def test_phrase_only_hedges_no_imperatives_caps_at_one(self) -> None:
+        # Pure multi-word hedges, no imperatives → cap at 1.0
+        text = "It seems that in general the approach tends to work."
+        result = score_text(text)
+        self.assertAlmostEqual(1.0, result["components"]["hedge_imperative_ratio"])
+
 
 class AggregateTests(unittest.TestCase):
     def test_aggregate_buckets_by_session_agent_role(self) -> None:
@@ -189,6 +207,20 @@ class ScoreRunTests(unittest.TestCase):
         empty_dir = self.tmp / "no-state"
         empty_dir.mkdir()
         self.assertEqual([], score_run(empty_dir))
+
+    def test_score_run_handles_single_quoted_roles_toml(self) -> None:
+        # DeepSeek MED: the old in-file regex only matched provider = "double".
+        # Single-quoted values were silently agent="unknown".
+        # Centralized in tools.config.read_role_providers (uses tomllib).
+        (self.run_dir / "roles.used.toml").write_text(
+            "[role.architect]\nprovider = 'claude'\n\n"
+            "[role.developer]\nprovider = 'codex'\n",
+            encoding="utf-8",
+        )
+        scored = score_run(self.run_dir)
+        by_role = {s["role"]: s["agent"] for s in scored}
+        self.assertEqual("claude", by_role["architect"])
+        self.assertEqual("codex", by_role["developer"])
 
 
 class CliTests(unittest.TestCase):
