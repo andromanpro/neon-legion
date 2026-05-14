@@ -75,6 +75,40 @@ class ExtractFindingsTests(unittest.TestCase):
         titles = [f.title for f in findings]
         self.assertEqual(["Real finding"], titles)
 
+    def test_tilde_fences_also_ignored(self) -> None:
+        # CommonMark allows ~~~ as an alternative fence — must be treated
+        # the same as ``` (DeepSeek MED in #92).
+        # Note: "another" / "real" / "finding" are in STOP_TOKENS, so use
+        # tokens outside the stop list so each heading hashes distinctly.
+        text = (
+            "## Path traversal hazard\n\n"
+            "~~~\n"
+            "## fake heading inside tilde fence\n"
+            "- fake bullet\n"
+            "~~~\n"
+            "## Schema versioning gap\n"
+        )
+        findings = extract_findings("Architect", text)
+        titles = [f.title for f in findings]
+        self.assertEqual(
+            ["Path traversal hazard", "Schema versioning gap"],
+            titles,
+        )
+
+    def test_indented_fence_still_toggles(self) -> None:
+        # Common markdown rendering: fence indented by spaces. Should still
+        # toggle in/out of code-block state.
+        text = (
+            "## Real finding\n\n"
+            "   ```\n"
+            "## hidden inside indented fence\n"
+            "   ```\n"
+            "## After fence\n"
+        )
+        findings = extract_findings("Architect", text)
+        titles = [f.title for f in findings]
+        self.assertEqual(["Real finding", "After fence"], titles)
+
     def test_finding_id_is_stable_across_runs(self) -> None:
         a = extract_findings("Architect", "### Atomic writes missing on snapshot writer\n")
         b = extract_findings("Developer", "### Atomic writes missing on snapshot writer\n")

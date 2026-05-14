@@ -55,13 +55,24 @@ def detect_slippages(
             continue
         fingerprints_with_min_events += 1
 
+        # Baseline must EXCLUDE the recent short window — otherwise a real
+        # spike in the last 7d pulls up the 30d median and hides itself.
+        # Compare 7d against the preceding (long_days - short_days) days
+        # (DeepSeek MED — overlap dampening masks the very slippage the
+        # tool was built to detect).
+        baseline_costs = [
+            cost for day, cost in entries if long_start <= day < short_start
+        ]
+        # `long_costs` retained in the output for backward compatibility
+        # with any downstream that read the total window — but the RATIO
+        # is now computed against the clean baseline.
         long_costs = [cost for day, cost in entries if long_start <= day <= today]
-        median_cost_30d = _median(long_costs)
-        if median_cost_30d <= 0:
+        median_baseline = _median(baseline_costs)
+        if median_baseline <= 0:
             continue
 
         median_cost_7d = _median(short_costs)
-        ratio = median_cost_7d / median_cost_30d
+        ratio = median_cost_7d / median_baseline
         if ratio <= threshold:
             continue
 
@@ -72,8 +83,10 @@ def detect_slippages(
                 "prompt_size_bucket": prompt_size_bucket,
                 "events_7d": len(short_costs),
                 "events_30d": len(long_costs),
+                "events_baseline": len(baseline_costs),
                 "median_cost_7d": median_cost_7d,
-                "median_cost_30d": median_cost_30d,
+                "median_cost_baseline": median_baseline,
+                "median_cost_30d": _median(long_costs),
                 "p95_cost_7d": _p95(short_costs),
                 "ratio": ratio,
                 "delta_pct": (ratio - 1.0) * 100.0,

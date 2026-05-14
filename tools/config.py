@@ -103,3 +103,37 @@ def _read_toml(path: Path) -> dict[str, Any]:
         return data if isinstance(data, dict) else {}
     except (OSError, tomllib.TOMLDecodeError):
         return {}
+
+
+def read_role_providers(roles_path: Path | str) -> dict[str, str]:
+    """Parse `[role.<name>].provider` → returns {role_name: agent_provider}.
+
+    Uses `tomllib` (stdlib) so it correctly handles all TOML quote styles:
+    double-quoted, single-quoted, and triple-quoted multiline literals.
+
+    Returns empty dict on missing/unreadable file. Never raises.
+
+    Used by `tools/slop_score.py` and `tools/disagreement_router.py` (both
+    previously rolled their own double-quote-only regex parser — DeepSeek
+    flagged that as a shared blind spot that breaks on single-quoted
+    `roles.toml` files).
+    """
+    p = Path(roles_path)
+    if not p.exists():
+        return {}
+    try:
+        with p.open("rb") as handle:
+            data = tomllib.load(handle)
+    except (OSError, tomllib.TOMLDecodeError):
+        return {}
+
+    out: dict[str, str] = {}
+    roles_table = data.get("role")
+    if not isinstance(roles_table, dict):
+        return out
+    for name, cfg in roles_table.items():
+        if isinstance(cfg, dict):
+            provider = cfg.get("provider")
+            if isinstance(provider, str) and provider:
+                out[str(name)] = provider
+    return out

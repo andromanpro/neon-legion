@@ -153,6 +153,57 @@ class ApplyDecisionsTests(unittest.TestCase):
         self.assertEqual(["architect", "reviewer"], result)
 
 
+class ReviewerInjectionCapTests(unittest.TestCase):
+    """DeepSeek MED: 3 unknown roles → 3 injected reviewers without a cap.
+    Now we cap CONSECUTIVE injections — after one inject the next risky
+    step keeps without injecting."""
+
+    def test_all_unknown_flow_does_not_inject_after_every_step(self) -> None:
+        decisions = score_flow(
+            flow=["a", "b", "c"],
+            role_assignments={},  # all unknown → all MED
+            reputation_ledger=[],
+        )
+        actions = [d["action"] for d in decisions]
+        # First MED step gets inject; second skips (chain cap); third gets
+        # inject again (cap reset after the skip).
+        self.assertEqual("inject_reviewer", actions[0])
+        self.assertEqual("keep", actions[1])
+        # The skip should be reflected in the reason string:
+        self.assertIn("chain cap", decisions[1]["reason"])
+
+    def test_explicit_reviewer_resets_chain_cap(self) -> None:
+        # Without the cap, an all-MED flow `[a, b, reviewer, c, d]` would
+        # inject after every MED step. With the cap + explicit-reviewer
+        # reset: step 0 injects, step 1 caps, explicit reviewer resets the
+        # chain, then step 3 injects again, step 4 caps.
+        decisions = score_flow(
+            flow=["a", "b", "reviewer", "c", "d"],
+            role_assignments={},
+            reputation_ledger=[],
+        )
+        actions = [d["action"] for d in decisions]
+        self.assertEqual("inject_reviewer", actions[0])  # 1st MED → inject
+        self.assertEqual("keep", actions[1])             # chain cap
+        self.assertEqual("keep", actions[2])             # explicit reviewer, resets cap
+        # `c` is after explicit reviewer with `next_role="d"` (not reviewer) →
+        # cap was reset → can inject again.
+        self.assertEqual("inject_reviewer", actions[3])
+        self.assertEqual("keep", actions[4])             # chain cap again
+
+    def test_apply_decisions_respects_cap(self) -> None:
+        # Full integration: 3-step flow with all-unknown roles + cap →
+        # final flow has 2 reviewers, not 3.
+        decisions = score_flow(
+            flow=["a", "b", "c"],
+            role_assignments={},
+            reputation_ledger=[],
+        )
+        new_flow = apply_decisions(["a", "b", "c"], decisions)
+        reviewer_count = new_flow.count("reviewer")
+        self.assertLess(reviewer_count, 3, f"got {new_flow}")
+
+
 class RenderProposedManifestTests(unittest.TestCase):
     def test_reasoning_log_included_as_comments(self) -> None:
         text = render_proposed_manifest(

@@ -148,6 +148,10 @@ def score_flow(
     """
     ledger_by_pair = _ledger_by_pair(reputation_ledger)
     decisions: list[dict] = []
+    # Cap consecutive reviewer injections — without this an all-unknown flow
+    # of N steps gets N reviewers injected (e.g. ["a","r","b","r","c","r"]),
+    # which is more cost than signal (DeepSeek MED).
+    just_injected = False
     for idx, role in enumerate(flow):
         agent = role_assignments.get(role, "unknown")
         entry = ledger_by_pair.get((role, agent))
@@ -161,12 +165,21 @@ def score_flow(
         next_role = flow[idx + 1] if idx + 1 < len(flow) else None
         if role == "reviewer":
             action = "keep"
+            just_injected = False  # explicit reviewer in flow resets the cap
         elif risk in ("HIGH", "MED") and next_role != "reviewer":
-            action = "inject_reviewer"
+            if just_injected:
+                action = "keep"
+                reason = f"{reason} (skipped — previous step already gets a reviewer; chain cap)"
+                just_injected = False
+            else:
+                action = "inject_reviewer"
+                just_injected = True
         elif risk == "LOW" and next_role == "reviewer":
             action = "trim_reviewer"
+            just_injected = False
         else:
             action = "keep"
+            just_injected = False
         decisions.append({
             "index": idx,
             "role": role,
@@ -319,24 +332,14 @@ def _resolve_roles_path(explicit: str | None) -> Path | None:
 
 
 def _read_role_assignments(roles_path: Path) -> dict[str, str]:
-    """Parse `[role.<name>].provider` → returns dict {role: agent}."""
-    import re
+    """Thin wrapper around `tools.config.read_role_providers`.
 
-    out: dict[str, str] = {}
-    current_role = None
-    role_pat = re.compile(r"^\s*\[role\.([^\]]+)\]\s*$")
-    provider_pat = re.compile(r"^\s*provider\s*=\s*\"([^\"]*)\"\s*$")
-    for line in roles_path.read_text(encoding="utf-8").splitlines():
-        m = role_pat.match(line)
-        if m:
-            current_role = m.group(1).strip()
-            continue
-        if current_role:
-            m = provider_pat.match(line)
-            if m:
-                out[current_role] = m.group(1).strip()
-                current_role = None
-    return out
+    Centralized in `tools/config.py` to handle ALL TOML quote styles
+    (DeepSeek MED — the old in-file regex only matched `"double"` quotes,
+    silently giving agent="unknown" for `provider = 'single-quoted'` roles,
+    which then defaulted to MED risk → inject_reviewer spam).
+    """
+    return cfg.read_role_providers(roles_path)
 
 
 def _toml_str(value: str) -> str:
