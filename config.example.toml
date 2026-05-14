@@ -90,6 +90,13 @@ weights = { trigram = 0.4, generic = 0.3, hedge = 0.3 }
 # imperative_words = ["run", "build", "verify"]
 output_path = "F:/WorkAI/multi-agent/tracker/slop.json"
 
+[disagreement_router]
+# Per-step risk thresholds. Below high_risk_threshold success rate → HIGH
+# risk → reviewer auto-injected after the step. Below min_runs_for_confidence
+# runs → MED risk (sparse / uncertain).
+high_risk_threshold = 0.7
+min_runs_for_confidence = 5
+
 [git_diff_cost]
 repo_path = "F:/WorkAI/multi-agent"
 lookback_days = 30
