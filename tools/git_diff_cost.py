@@ -306,8 +306,22 @@ def _is_git_repo(repo: Path) -> bool:
 
 
 def _git(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    """Run git subprocess and decode stdout/stderr as UTF-8.
+
+    Without explicit `encoding`, `text=True` defaults to the system locale
+    encoding (cp1251 on Windows-RU), which mangles non-ASCII commit subjects
+    into cp1251 mojibake (e.g. `демо с` → `РґРµРјРѕ СЃ`). git emits UTF-8
+    by default for log/diff output, so force UTF-8 decode.
+    """
     try:
-        return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, check=False)
+        return subprocess.run(
+            ["git", "-C", str(repo), *args],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
     except (OSError, FileNotFoundError) as exc:
         return subprocess.CompletedProcess(["git", "-C", str(repo), *args], 127, "", str(exc))
 
