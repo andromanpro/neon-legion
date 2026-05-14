@@ -89,16 +89,15 @@ class CostRegressionTests(unittest.TestCase):
         self.assertEqual(0, payload["summary"]["pairs_with_min_output_tokens"])
 
     def test_window_narrowing_finds_contiguous_elevated_days(self) -> None:
+        # Short window has 4 elevated days (offset 0-3 = days 2026-05-10..13)
+        # followed by 3 normal days; baseline period is uniform.
         events = []
         for day in range(0, 4):
-            events.append(event(day, rate=0.002))
+            events.append(event(day, rate=0.002))  # elevated
         for day in range(4, 7):
-            events.append(event(day, rate=0.001))
-        short_cost = (4 * 10 * 0.002) + (3 * 10 * 0.001)
-        total_output = 30 * 10
-        old_rate = ((total_output * 0.0012) - short_cost) / (23 * 10)
+            events.append(event(day, rate=0.001))  # normal
         for day in range(7, 30):
-            events.append(event(day, rate=old_rate))
+            events.append(event(day, rate=0.001))  # baseline
 
         payload = detect_regressions(events, now=NOW, threshold=1.2)
 
@@ -199,7 +198,9 @@ class BaselineWindowExcludesShortTests(unittest.TestCase):
 
         regression = payload["regressions"][0]
         # baseline rate equals the constructed baseline_rate exactly — proof
-        # that days 0-6 are not aggregated into cost_per_otok_30d.
+        # that days 0-6 are not aggregated into cost_per_otok_baseline.
+        self.assertAlmostEqual(0.001, regression["cost_per_otok_baseline"])
+        # Deprecated alias mirrors the same value for backward compat.
         self.assertAlmostEqual(0.001, regression["cost_per_otok_30d"])
         self.assertAlmostEqual(0.005, regression["cost_per_otok_7d"])
         self.assertAlmostEqual(5.0, regression["ratio"])

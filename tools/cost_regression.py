@@ -87,6 +87,10 @@ def detect_regressions(
                 "provider": provider,
                 "model": model,
                 "cost_per_otok_7d": short_rate,
+                "cost_per_otok_baseline": baseline_rate,
+                # Deprecated alias for cost_per_otok_baseline — kept while
+                # downstream WP widget 10 (page-neon-legion.php) reads this name.
+                # Remove once the widget switches to cost_per_otok_baseline.
                 "cost_per_otok_30d": baseline_rate,
                 "ratio": ratio,
                 "window_start": window_start.isoformat(),
@@ -144,6 +148,9 @@ def main() -> int:
         )
     short_days = cfg.get("cost_regression.short_days", 7, int)
     long_days = cfg.get("cost_regression.long_days", 30, int)
+    if short_days >= long_days:
+        _log(f"ERROR: short_days ({short_days}) must be < long_days ({long_days}) — baseline window would be empty")
+        return 1
     output = args.output or cfg.get("cost_regression.output_path", "tracker/regressions.json", str)
 
     now = datetime.now().astimezone()
