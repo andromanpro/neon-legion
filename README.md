@@ -32,7 +32,9 @@ This tool is what came out of that.
 - **75,725 AI calls** across Claude Code + Codex CLI + OpenClaw + OpenCode
 - **$71,791 saved** vs equivalent API rate (API would cost $72,191, subscriptions cost a fraction)
 - **×7.17 productivity multiplier** — 1,236 human-hours of work compressed
-- **Most stressed day:** 2026-04-22 (10 frustrated mentions — yes, we count them)
+- **Sentiment markers:** 4,633 thanks / 106 swears — ratio 44:1, mostly happy
+- **Most stressed day:** 2026-05-09 (23 frustrated mentions — yes, we count them)
+- **Most grateful day:** 2026-04-15 (705 positive markers — we count those too)
 
 _Numbers refresh whenever the snapshot writer runs. Your mileage will vary; see the [dashboard](docs/screenshots/hero.png) for what it looks like locally._
 

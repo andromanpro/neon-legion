@@ -38,6 +38,11 @@ def format_stats_block(snapshot: dict) -> str:
 
     top_day = sentiment.get("top_day") or {}
     top_date = top_day.get("date") or ""
+    top_appr = sentiment.get("top_appreciation_day") or {}
+    top_appr_date = top_appr.get("date") or ""
+
+    profanity_total = _safe_int(sentiment.get("profanity_total"))
+    appreciation_total = _safe_int(sentiment.get("appreciation_total"))
 
     period_start = totals.get("period_start") or ""
     period_end = totals.get("period_end") or ""
@@ -52,12 +57,31 @@ def format_stats_block(snapshot: dict) -> str:
         f"- **×{multiplier:.2f} productivity multiplier** "
         f"— {hours_saved:,.0f} human-hours of work compressed",
     ]
+    if appreciation_total or profanity_total:
+        ratio_note = ""
+        if profanity_total > 0:
+            ratio = appreciation_total / profanity_total
+            ratio_note = f" — ratio {ratio:.0f}:1, mostly happy"
+        elif appreciation_total > 0:
+            ratio_note = " — zero profanity this window"
+        lines.append(
+            f"- **Sentiment markers:** {appreciation_total:,} thanks / "
+            f"{profanity_total:,} swears{ratio_note}"
+        )
     if top_date:
         top_profanity = _safe_int(top_day.get("profanity"))
-        lines.append(
-            f"- **Most stressed day:** {top_date} "
-            f"({top_profanity} frustrated mentions — yes, we count them)"
-        )
+        if top_profanity > 0:
+            lines.append(
+                f"- **Most stressed day:** {top_date} "
+                f"({top_profanity} frustrated mentions — yes, we count them)"
+            )
+    if top_appr_date:
+        top_appr_count = _safe_int(top_appr.get("appreciation"))
+        if top_appr_count > 0:
+            lines.append(
+                f"- **Most grateful day:** {top_appr_date} "
+                f"({top_appr_count} positive markers — we count those too)"
+            )
     lines.append("")
     lines.append(
         "_Numbers refresh whenever the snapshot writer runs. Your mileage will "

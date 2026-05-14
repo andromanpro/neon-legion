@@ -379,6 +379,11 @@ def normalize_stress_trend(value):
 
 def sentiment_payload(sentiment):
     top_day, top_day_stats = sentiment["top_day"]
+    top_appr_raw = sentiment.get("top_appreciation_day")
+    if top_appr_raw and isinstance(top_appr_raw, tuple) and len(top_appr_raw) == 2:
+        top_appr_day, top_appr_stats = top_appr_raw
+    else:
+        top_appr_day, top_appr_stats = "", {}
     mood_arcs_top = [
         {"arc": arc, "count": count}
         for arc, count in sorted(
@@ -389,12 +394,17 @@ def sentiment_payload(sentiment):
 
     return {
         "profanity_total": summary.as_int(sentiment.get("profanity_total")),
+        "appreciation_total": summary.as_int(sentiment.get("appreciation_total")),
         "frustration_avg": rounded(sentiment.get("frustration_avg", 0.0)),
         "appreciation_avg": rounded(sentiment.get("appreciation_avg", 0.0)),
         "stress_trend": normalize_stress_trend(sentiment.get("stress_trend")),
         "top_day": {
             "date": str(top_day),
             "profanity": summary.as_int(top_day_stats.get("profanity")),
+        },
+        "top_appreciation_day": {
+            "date": str(top_appr_day) if top_appr_day else "",
+            "appreciation": summary.as_int(top_appr_stats.get("appreciation")) if top_appr_stats else 0,
         },
         "mood_arcs_top": mood_arcs_top,
         "sessions_covered": summary.as_int(sentiment.get("sessions_covered")),
@@ -1291,10 +1301,12 @@ def build_wp_snapshot(
         },
         "sentiment": {
             "profanity_total": int(sentiment_data.get("profanity_total") or 0),
+            "appreciation_total": int(sentiment_data.get("appreciation_total") or 0),
             "frustration_avg": rounded(sentiment_data.get("frustration_avg"), 2),
             "appreciation_avg": rounded(sentiment_data.get("appreciation_avg"), 2),
             "stress_trend": sentiment_data.get("stress_trend") or "stable",
             "top_day": sentiment_data.get("top_day") or {"date": "", "profanity": 0},
+            "top_appreciation_day": sentiment_data.get("top_appreciation_day") or {"date": "", "appreciation": 0},
         },
         "today": today_payload,
         "models": models_list,
