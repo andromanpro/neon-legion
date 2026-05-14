@@ -41,6 +41,11 @@ orchestrate-runs/*/consensus.md
 docs/capability/*.md
 !docs/capability/README.md
 
+# Reverse-autopilot proposals — derived from local transcript history.
+# May surface project paths / private details; review by hand before
+# committing any individual proposal.
+proposals/repeat-*.md
+
 # IDE / OS / build artifacts
 .serena/
 .idea/
