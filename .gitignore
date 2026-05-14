@@ -8,6 +8,7 @@ tracker/private/
 tracker/diff_cost.json
 tracker/regressions.json
 tracker/slippage.json
+tracker/slop.json
 tracker/reputation.json
 prompts/private/
 orchestrate-runs/
