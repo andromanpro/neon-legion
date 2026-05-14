@@ -80,6 +80,16 @@ min_runs = 1
 output_reputation_path = "F:/WorkAI/multi-agent/tracker/reputation.json"
 output_roles_suggested_path = "F:/WorkAI/multi-agent/orchestrate-runs/roles.suggested.toml"
 
+[slop_score]
+# Per-message score = weighted sum of three signals.
+# Defaults sum to 1.0; override any to bias the score.
+weights = { trigram = 0.4, generic = 0.3, hedge = 0.3 }
+# Override blocklists by listing your own arrays; omit to use the builtin defaults.
+# generic_phrases = ["in summary", "it is important to note"]
+# hedge_words = ["might", "could", "perhaps"]
+# imperative_words = ["run", "build", "verify"]
+output_path = "F:/WorkAI/multi-agent/tracker/slop.json"
+
 [git_diff_cost]
 repo_path = "F:/WorkAI/multi-agent"
 lookback_days = 30
