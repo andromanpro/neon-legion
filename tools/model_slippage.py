@@ -148,7 +148,7 @@ def main() -> int:
         short_days=short_days,
         long_days=long_days,
     )
-    output_path = _output_path(output)
+    output_path = Path(output)
     write_slippages(payload, output_path)
     _log(f"wrote {output_path}")
     _log(
@@ -167,13 +167,6 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--short-days", type=int, help="Short comparison window in days.")
     parser.add_argument("--long-days", type=int, help="Long baseline window in days.")
     return parser.parse_args()
-
-
-def _output_path(value: str) -> Path:
-    path = Path(value)
-    if os.name == "nt" and path.root and not path.drive:
-        return Path(f"{Path.cwd().drive}{value}")
-    return path
 
 
 def _fingerprint(event: dict) -> tuple[str, str, str]:

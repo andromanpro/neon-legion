@@ -32,19 +32,20 @@ def make_series(
     provider: str = "openai",
     model: str = "gpt-test",
     short_rate: float,
-    long_target_rate: float,
+    baseline_rate: float,
     output_per_day: int = 10,
 ) -> list[dict]:
+    """Synthesize events with `short_rate` for the recent 7d and `baseline_rate`
+    for the prior 23d (days 7-29 ago). Baseline period is constructed directly
+    — no compensation math — so tests assert the rates the detector should see
+    after the fix that excludes the short window from the baseline.
+    """
     events = [
         event(day, provider=provider, model=model, output=output_per_day, rate=short_rate)
         for day in range(0, 7)
     ]
-    short_cost = 7 * output_per_day * short_rate
-    total_output = 30 * output_per_day
-    old_output = 23 * output_per_day
-    old_rate = ((total_output * long_target_rate) - short_cost) / old_output
     events.extend(
-        event(day, provider=provider, model=model, output=output_per_day, rate=old_rate)
+        event(day, provider=provider, model=model, output=output_per_day, rate=baseline_rate)
         for day in range(7, 30)
     )
     return events
@@ -67,7 +68,7 @@ class CostRegressionTests(unittest.TestCase):
         self.assertEqual(1, payload["summary"]["pairs_with_min_output_tokens"])
 
     def test_regression_detected_when_threshold_exceeded(self) -> None:
-        events = make_series(short_rate=0.0015, long_target_rate=0.001)
+        events = make_series(short_rate=0.0015, baseline_rate=0.001)
 
         payload = detect_regressions(events, now=NOW, threshold=1.2)
 
@@ -80,7 +81,7 @@ class CostRegressionTests(unittest.TestCase):
         self.assertAlmostEqual(1.5, regression["ratio"])
 
     def test_min_calls_filter_excludes_low_volume(self) -> None:
-        events = make_series(short_rate=0.01, long_target_rate=0.001, output_per_day=1)
+        events = make_series(short_rate=0.01, baseline_rate=0.001, output_per_day=1)
 
         payload = detect_regressions(events, now=NOW, threshold=1.2, min_calls=10)
 
@@ -112,7 +113,7 @@ class CostRegressionTests(unittest.TestCase):
                 provider="openai",
                 model="gpt-mid",
                 short_rate=0.0015,
-                long_target_rate=0.001,
+                baseline_rate=0.001,
             )
         )
         events.extend(
@@ -120,7 +121,7 @@ class CostRegressionTests(unittest.TestCase):
                 provider="anthropic",
                 model="claude-high",
                 short_rate=0.002,
-                long_target_rate=0.001,
+                baseline_rate=0.001,
             )
         )
 
@@ -182,6 +183,54 @@ class CostRegressionTests(unittest.TestCase):
         ]
         payload = detect_regressions(events, now=NOW, threshold=1.2)
         self.assertEqual(0, payload["summary"]["regressions_count"])
+
+
+class BaselineWindowExcludesShortTests(unittest.TestCase):
+    """Baseline window MUST NOT include the recent short window — otherwise the
+    spike pulls up its own baseline and dampens the ratio (the bug fixed for
+    model_slippage in PR #99 fix #4 was architecturally identical here).
+    """
+
+    def test_baseline_rate_excludes_short_window_in_payload(self) -> None:
+        # Recent 7d at 5x baseline; if baseline overlaps short, cost_per_otok_30d
+        # is contaminated upward and ratio dampens.
+        events = make_series(short_rate=0.005, baseline_rate=0.001)
+        payload = detect_regressions(events, now=NOW, threshold=1.2)
+
+        regression = payload["regressions"][0]
+        # baseline rate equals the constructed baseline_rate exactly — proof
+        # that days 0-6 are not aggregated into cost_per_otok_30d.
+        self.assertAlmostEqual(0.001, regression["cost_per_otok_30d"])
+        self.assertAlmostEqual(0.005, regression["cost_per_otok_7d"])
+        self.assertAlmostEqual(5.0, regression["ratio"])
+
+    def test_overlap_signal_sharpens_in_14d_vs_30d_config(self) -> None:
+        # 14 days elevated + 16 days normal in a 14d/30d config. With overlap-
+        # included logic, the 30d aggregate is pulled up by the 14 elevated
+        # days → ratio dampens. With baseline-only logic, ratio is sharp.
+        events = []
+        for d in range(14):
+            events.append(event(d, rate=0.005))
+        for d in range(14, 30):
+            events.append(event(d, rate=0.001))
+
+        payload = detect_regressions(
+            events, now=NOW, threshold=1.2, short_days=14, long_days=30
+        )
+
+        regression = payload["regressions"][0]
+        self.assertAlmostEqual(0.005, regression["cost_per_otok_7d"])
+        self.assertAlmostEqual(0.001, regression["cost_per_otok_30d"])
+        # Sharp 5.0; old overlap-included logic gave ~2.78 here.
+        self.assertGreaterEqual(regression["ratio"], 4.0)
+
+    def test_no_regression_when_baseline_empty(self) -> None:
+        # Only the recent 7d has data; baseline period has zero events.
+        # baseline_cost == 0 → skip (no division-by-zero, no false-positive
+        # against a non-existent baseline).
+        events = [event(day, rate=0.005) for day in range(7)]
+        payload = detect_regressions(events, now=NOW, threshold=1.2)
+        self.assertEqual([], payload["regressions"])
 
 
 if __name__ == "__main__":
