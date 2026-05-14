@@ -26,8 +26,14 @@ Set needs_manual_review=true ONLY if transcript is too truncated, off-topic, or 
 Set estimation_confidence based on transcript clarity (low if many tools were used but final outcome unclear).
 
 Sentiment guidance (analyze user messages tone):
-- frustration_score: 0-1, scale based on signs of impatience, capslock, swearing, repeated demands
-- appreciation_score: 0-1, scale based on signs of thanks, acknowledgment of progress, positive emoji
+- frustration_score: 0-1, scale based on signs of impatience, capslock, swearing, repeated demands. A short neutral reply ("норм", "ок", "ok", "угу") is NOT negative — it's neutral acceptance, not frustration.
+- appreciation_score: 0-1, based on positive feedback in the conversation language. Russian transcripts dominate this codebase — recognize the following as positive signals (stoic style is normal for technical users, not absence of feedback):
+    - direct thanks: «спасибо» / «благодарю» → 0.6-0.8 per occurrence
+    - short positive ack as standalone reply or affirmation: «отлично» / «круто» / «хорошо» / «норм» / «то что надо» / «зашло» / «классно» → 0.4-0.6 each
+    - continue-momentum after a delivery: «давай ещё» / «погнали» / «продолжай» / «дальше» / «next step» / «keep going» → 0.3-0.5
+    - emoji 🚀 👍 ❤️ ✨ 🙏 🔥 → 0.5+ per occurrence
+    - laughing / playful: «ахаха» / «))» / «)» → 0.3-0.5
+  For English transcripts: thanks / great / perfect / nice / cool / 👍 / 🚀 — same scale. Only profanity DIRECTED AT THE WORK or explicit «no / wrong / bad / неправильно» counts as negative; profanity AS exclamation («бл, круто!») is positive, not negative.
 - mood_arc: brief arc describing emotional trajectory (max 30 chars)
 - sentiment_intensity: how strongly the emotional signal is present overall
 
