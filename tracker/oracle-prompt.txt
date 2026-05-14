@@ -26,14 +26,23 @@ Set needs_manual_review=true ONLY if transcript is too truncated, off-topic, or 
 Set estimation_confidence based on transcript clarity (low if many tools were used but final outcome unclear).
 
 Sentiment guidance (analyze user messages tone):
-- frustration_score: 0-1, scale based on signs of impatience, capslock, swearing, repeated demands. A short neutral reply ("норм", "ок", "ok", "угу") is NOT negative — it's neutral acceptance, not frustration.
+- frustration_score: 0-1, scale based on signs of impatience, capslock, repeated demands, and **profanity directed at the work or problem**. A short neutral reply («норм», «ок», «ok», «угу») is NOT negative — it's neutral acceptance, not frustration.
+  Russian profanity / mat — recognize the following lexicon (lemma families, any inflection counts):
+    - «бля», «блять», «блядь» / «нахуй», «нах», «нахрен», «нафиг» / «пиздец», «пизд*» / «ёб», «еб», «ебать», «заебал», «выебал» / «сука», «сучка» / «хуй», «хуёво», «хуёвый» / «говно», «говённый» / «срань», «срать» / «пошёл на», «пошел на» / «жопа», «в жопу»
+  CRITICAL — context-dependent direction:
+    - **DIRECTED at work / tool / problem** («опять ёбаная ошибка», «это говно не работает», «бля сколько можно», «заебал этот баг», «нахуя я это пилю») → frustration_score boost 0.3-0.6 per occurrence
+    - **EXCLAMATION of surprise / relief / delight / emphasis** («бл, наконец-то», «ёб тваю мать, заработало», «охуенно вышло», «пиздец как круто», «нихуя себе») → appreciation_score boost 0.3-0.5, NOT frustration
+    - **NEUTRAL filler** without clear direction («ну хуй знает», «как-то так бля») → no score change either side
+  English profanity (fuck / shit / damn / crap / bitch) — same directed-vs-exclamation rule.
 - appreciation_score: 0-1, based on positive feedback in the conversation language. Russian transcripts dominate this codebase — recognize the following as positive signals (stoic style is normal for technical users, not absence of feedback):
     - direct thanks: «спасибо» / «благодарю» → 0.6-0.8 per occurrence
     - short positive ack as standalone reply or affirmation: «отлично» / «круто» / «хорошо» / «норм» / «то что надо» / «зашло» / «классно» → 0.4-0.6 each
     - continue-momentum after a delivery: «давай ещё» / «погнали» / «продолжай» / «дальше» / «next step» / «keep going» → 0.3-0.5
     - emoji 🚀 👍 ❤️ ✨ 🙏 🔥 → 0.5+ per occurrence
     - laughing / playful: «ахаха» / «))» / «)» → 0.3-0.5
-  For English transcripts: thanks / great / perfect / nice / cool / 👍 / 🚀 — same scale. Only profanity DIRECTED AT THE WORK or explicit «no / wrong / bad / неправильно» counts as negative; profanity AS exclamation («бл, круто!») is positive, not negative.
+    - profanity as positive exclamation (see CRITICAL note above)
+  For English transcripts: thanks / great / perfect / nice / cool / 👍 / 🚀 — same scale.
+  Negative signals: explicit «no / wrong / bad / неправильно / не то / не работает» counts as negative; profanity directed AT work counts as frustration (not appreciation).
 - mood_arc: brief arc describing emotional trajectory (max 30 chars)
 - sentiment_intensity: how strongly the emotional signal is present overall
 
