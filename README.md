@@ -25,6 +25,19 @@ This tool is what came out of that.
 *Local cyberpunk dashboard at 127.0.0.1:8089. Numbers are real
 (personal usage, two months of Claude Code + Codex CLI + OpenClaw + OpenCode).*
 
+<!-- START_STATS -->
+
+**Past 30 days from the author's local instance** (`2026-04-15` → `2026-05-14`)
+
+- **75,725 AI calls** across Claude Code + Codex CLI + OpenClaw + OpenCode
+- **$71,791 saved** vs equivalent API rate (API would cost $72,191, subscriptions cost a fraction)
+- **×7.17 productivity multiplier** — 1,236 human-hours of work compressed
+- **Most stressed day:** 2026-04-22 (10 frustrated mentions — yes, we count them)
+
+_Numbers refresh whenever the snapshot writer runs. Your mileage will vary; see the [dashboard](docs/screenshots/hero.png) for what it looks like locally._
+
+<!-- END_STATS -->
+
 ---
 
 ## v0.3 highlights
