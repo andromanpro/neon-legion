@@ -673,6 +673,7 @@ def summarize_sentiment(events: list[dict], start: date, end: date) -> dict | No
         return None
 
     profanity_total = 0
+    appreciation_total = 0
     frustration_values = []
     appreciation_values = []
     first_half_frustration = []
@@ -683,17 +684,22 @@ def summarize_sentiment(events: list[dict], start: date, end: date) -> dict | No
 
     for _session_id, entry, first_ts in covered:
         profanity = max(as_int(entry.get("profanity_count")), 0)
+        appreciation_count = max(as_int(entry.get("appreciation_count")), 0)
         frustration = clamp_score(entry.get("frustration_score"))
         appreciation = clamp_score(entry.get("appreciation_score"))
         session_day = datetime.fromtimestamp(first_ts).astimezone().date()
         day_key = session_day.isoformat()
 
         profanity_total += profanity
+        appreciation_total += appreciation_count
         frustration_values.append(frustration)
         appreciation_values.append(appreciation)
 
-        day_entry = day_stats.setdefault(day_key, {"profanity": 0, "sessions": 0})
+        day_entry = day_stats.setdefault(
+            day_key, {"profanity": 0, "appreciation": 0, "sessions": 0}
+        )
         day_entry["profanity"] += profanity
+        day_entry["appreciation"] += appreciation_count
         day_entry["sessions"] += 1
 
         if (session_day - start).days < days / 2:
@@ -707,13 +713,19 @@ def summarize_sentiment(events: list[dict], start: date, end: date) -> dict | No
             mood_counts[mood_arc] = mood_counts.get(mood_arc, 0) + 1
 
     top_day = max(day_stats.items(), key=lambda item: (item[1]["profanity"], item[1]["sessions"], item[0]))
+    top_appreciation_day = max(
+        day_stats.items(),
+        key=lambda item: (item[1].get("appreciation", 0), item[1]["sessions"], item[0]),
+    )
 
     return {
         "profanity_total": profanity_total,
+        "appreciation_total": appreciation_total,
         "frustration_avg": average(frustration_values),
         "appreciation_avg": average(appreciation_values),
         "stress_trend": stress_trend(first_half_frustration, second_half_frustration),
         "top_day": top_day,
+        "top_appreciation_day": top_appreciation_day,
         "mood_counts": mood_counts,
         "sessions_covered": len(covered),
         "sessions_total": len(session_ranges),

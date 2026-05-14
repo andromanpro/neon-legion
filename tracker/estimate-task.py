@@ -22,10 +22,14 @@ PROFANITY_RU_PATTERNS = [
     re.compile(r"\bбля[а-яё]*", re.IGNORECASE),
     re.compile(r"\bёб[а-яё]*", re.IGNORECASE),
     re.compile(r"\bеб[а-яё]+", re.IGNORECASE),
+    # Prefixed ёб-family — `\bеб[а-яё]+` doesn't catch «заебал/выебал»
+    # because there's no word boundary inside the compound word.
+    re.compile(r"\b(?:за|вы|на|по|подъ|пере)еб[а-яё]+", re.IGNORECASE),
     re.compile(r"\bхуй[а-яё]*|\bхрен[а-яё]*|\bхер[а-яё]*", re.IGNORECASE),
     re.compile(r"\bпизд[а-яё]*", re.IGNORECASE),
     re.compile(r"\bсук[а-яё]*", re.IGNORECASE),
     re.compile(r"\bговн[а-яё]*", re.IGNORECASE),
+    re.compile(r"\bсран[а-яё]*|\bсрать", re.IGNORECASE),
     re.compile(r"\bжоп[а-яё]*", re.IGNORECASE),
     re.compile(r"\bнах(уй|ер|рен)[а-яё]*", re.IGNORECASE),
     re.compile(r"\bпошёл\s+на\b|\bпошел\s+на\b", re.IGNORECASE),
@@ -40,6 +44,49 @@ PROFANITY_EN_PATTERNS = [
 ]
 
 ALL_PROFANITY = PROFANITY_RU_PATTERNS + PROFANITY_EN_PATTERNS
+
+# Appreciation markers — symmetric to PROFANITY_* but for positive feedback.
+# Matches oracle-prompt.txt's appreciation_score lexicon so the regex count
+# and the LLM score capture the same signals (raw count vs scored intensity).
+APPRECIATION_RU_PATTERNS = [
+    # direct thanks (highest weight in oracle)
+    re.compile(r"\bспасибо[а-яё]*", re.IGNORECASE),
+    re.compile(r"\bблагодар[а-яё]+", re.IGNORECASE),
+    # short positive ack as standalone or affirmation
+    re.compile(r"\bотлично[а-яё]*", re.IGNORECASE),
+    re.compile(r"\bкруто[а-яё]*", re.IGNORECASE),
+    re.compile(r"\bклассно[а-яё]*", re.IGNORECASE),
+    re.compile(r"\bхорошо[а-яё]*", re.IGNORECASE),
+    re.compile(r"\bхороший[а-яё]*|\bхорошая\b|\bхорошее\b|\bхорошие\b", re.IGNORECASE),
+    re.compile(r"\bнорм\b|\bнормально\b|\bнормально[а-яё]*", re.IGNORECASE),
+    re.compile(r"\bзашло[а-яё]*|\bзашёл[а-яё]*|\bзашел[а-яё]*", re.IGNORECASE),
+    re.compile(r"\bто\s+что\s+надо\b", re.IGNORECASE),
+    re.compile(r"\bохуенн[а-яё]+", re.IGNORECASE),  # profanity-as-positive carve-out
+    re.compile(r"\bнихуя\s+(себе|круто|вот)\b", re.IGNORECASE),
+    # continue-momentum
+    re.compile(r"\bдавай\s+(ещё|еще|дальше|погнали)\b", re.IGNORECASE),
+    re.compile(r"\bпогнали\b", re.IGNORECASE),
+    re.compile(r"\bпродолжай[а-яё]*", re.IGNORECASE),
+    re.compile(r"\bдальше\b", re.IGNORECASE),
+    # playful
+    re.compile(r"\bахах[а-яё]*", re.IGNORECASE),
+    re.compile(r"\bхих[а-яё]*", re.IGNORECASE),
+    re.compile(r"\)\)+|\)\s*$", re.MULTILINE),  # «)» / «))» at end of message
+]
+
+APPRECIATION_EN_PATTERNS = [
+    re.compile(r"\bthanks?\b|\bthank\s+you\b", re.IGNORECASE),
+    re.compile(r"\bgreat\b|\bperfect\b|\bnice\b|\bcool\b", re.IGNORECASE),
+    re.compile(r"\bawesome\b|\bexcellent\b|\bbrilliant\b", re.IGNORECASE),
+    re.compile(r"\blove\s+it\b|\blooks?\s+good\b", re.IGNORECASE),
+    re.compile(r"\bkeep\s+going\b|\bnext\s+step\b|\blet'?s\s+go\b", re.IGNORECASE),
+]
+
+APPRECIATION_EMOJI_PATTERN = re.compile(
+    r"[🚀👍❤️✨🙏🔥💯🎉👏✅]"
+)
+
+ALL_APPRECIATION = APPRECIATION_RU_PATTERNS + APPRECIATION_EN_PATTERNS
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
@@ -229,6 +276,22 @@ def count_profanity(user_messages: list[str]) -> int:
     for message in user_messages:
         for pattern in ALL_PROFANITY:
             total += len(pattern.findall(message))
+    return total
+
+
+def count_appreciation(user_messages: list[str]) -> int:
+    """Count appreciation markers in user messages — symmetric to count_profanity.
+
+    Matches the oracle's appreciation_score lexicon (direct thanks + short
+    acks + momentum + playful + emoji). Profanity-as-positive carve-outs
+    («охуенно», «нихуя себе») count here too — direction matters more than
+    the word (see oracle-prompt.txt CRITICAL note).
+    """
+    total = 0
+    for message in user_messages:
+        for pattern in ALL_APPRECIATION:
+            total += len(pattern.findall(message))
+        total += len(APPRECIATION_EMOJI_PATTERN.findall(message))
     return total
 
 
