@@ -102,17 +102,78 @@ def build_ledger(
             }
         )
 
+    direct_activity = _direct_activity(lookback_days=lookback_days, current=current, cutoff=cutoff)
+
     return {
         "schema_version": 1,
         "generated_at": current.isoformat(timespec="seconds"),
         "config": {"lookback_days": int(lookback_days), "min_runs": int(min_runs)},
         "ledger": ledger,
+        "direct_activity": direct_activity,
         "summary": {
             "total_runs_scanned": scanned,
             "ledger_entries": len(ledger),
             "sparse": scanned == 0 or scanned < int(min_runs),
+            "direct_providers": len(direct_activity),
         },
     }
+
+
+def _direct_activity(*, lookback_days: int, current: datetime, cutoff: datetime) -> list[dict]:
+    """Aggregate per-provider activity from tracker/*-events.jsonl.
+
+    Complements the orchestrate-only ledger by showing real agent traffic
+    (Codex headless, Claude Code hook events, OpenClaw / OpenCode runs).
+    Each provider gets one row with session_count / call_count / total_cost /
+    last_run_at. NOT a "leaderboard" — there's no success_rate signal in
+    raw event streams (every event is a successful API call). Use it to
+    answer "is this agent actually doing work?" not "who's better?".
+    """
+    import sys
+    sys.path.insert(0, str(PROJECT_ROOT / "tracker"))
+    try:
+        import summary as tracker_summary  # noqa: E402
+    except ImportError:
+        return []
+
+    cutoff_date = cutoff.date()
+    end_date = current.date()
+    try:
+        events = tracker_summary.read_events(cutoff_date, end_date)
+    except Exception:
+        return []
+
+    per_provider: dict[str, dict[str, Any]] = defaultdict(
+        lambda: {"sessions": set(), "calls": 0, "cost": 0.0, "last": None}
+    )
+    for event in events:
+        provider = tracker_summary.event_provider(event) or "unknown"
+        bucket = per_provider[provider]
+        bucket["calls"] += 1
+        sid = event.get("session_id")
+        if isinstance(sid, str) and sid:
+            bucket["sessions"].add(sid)
+        cost = tracker_summary.as_float(event.get("cost_estimate_usd"))
+        bucket["cost"] += float(cost) if cost else 0.0
+        ts = tracker_summary.parse_event_ts(event.get("ts"))
+        if ts is not None:
+            ts = _aware(ts)
+            if bucket["last"] is None or ts > bucket["last"]:
+                bucket["last"] = ts
+
+    rows = []
+    for provider, b in sorted(per_provider.items()):
+        sessions = len(b["sessions"])
+        rows.append({
+            "provider": provider,
+            "sessions": sessions,
+            "calls": b["calls"],
+            "total_cost_usd": round(b["cost"], 4),
+            "mean_cost_per_session_usd": round(b["cost"] / sessions, 4) if sessions > 0 else 0.0,
+            "last_event_at": b["last"].isoformat(timespec="seconds") if b["last"] else None,
+        })
+    rows.sort(key=lambda r: r["total_cost_usd"], reverse=True)
+    return rows
 
 
 def write_reputation(payload: dict, output_path: Path) -> None:
