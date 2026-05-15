@@ -43,6 +43,12 @@ def detect_regressions(
     threshold = float(threshold)
     min_output_tokens = int(min_output_tokens)
 
+    # Baseline window is [long_start, short_start) — exclusive of the recent
+    # short window. Including the spike in its own baseline was a self-dampening
+    # bug (DeepSeek MED on PR #99 fix #4 applied to model_slippage; cost_regression
+    # had the architecturally identical bug).
+    baseline_end = short_start - timedelta(days=1)
+
     buckets: dict[tuple[str, str], dict[date, dict[str, float]]] = defaultdict(
         lambda: defaultdict(lambda: {"cost": 0.0, "output": 0.0})
     )
@@ -60,28 +66,32 @@ def detect_regressions(
     pairs_with_min_output_tokens = 0
     for (provider, model), by_day in buckets.items():
         short_cost, short_output = _window_totals(by_day, short_start, today)
-        long_cost, long_output = _window_totals(by_day, long_start, today)
+        baseline_cost, baseline_output = _window_totals(by_day, long_start, baseline_end)
         if short_output < min_output_tokens:
             continue
         pairs_with_min_output_tokens += 1
-        if long_cost == 0 or long_output <= 0 or short_output <= 0:
+        if baseline_cost == 0 or baseline_output <= 0 or short_output <= 0:
             continue
 
         short_rate = short_cost / short_output
-        long_rate = long_cost / long_output
-        if long_rate <= 0:
+        baseline_rate = baseline_cost / baseline_output
+        if baseline_rate <= 0:
             continue
-        ratio = short_rate / long_rate
+        ratio = short_rate / baseline_rate
         if ratio <= threshold:
             continue
 
-        window_start, window_end = _narrow_window(by_day, short_start, today, long_rate, threshold)
+        window_start, window_end = _narrow_window(by_day, short_start, today, baseline_rate, threshold)
         regressions.append(
             {
                 "provider": provider,
                 "model": model,
                 "cost_per_otok_7d": short_rate,
-                "cost_per_otok_30d": long_rate,
+                "cost_per_otok_baseline": baseline_rate,
+                # Deprecated alias for cost_per_otok_baseline — kept while
+                # downstream WP widget 10 (page-neon-legion.php) reads this name.
+                # Remove once the widget switches to cost_per_otok_baseline.
+                "cost_per_otok_30d": baseline_rate,
                 "ratio": ratio,
                 "window_start": window_start.isoformat(),
                 "window_end": window_end.isoformat(),
@@ -138,6 +148,9 @@ def main() -> int:
         )
     short_days = cfg.get("cost_regression.short_days", 7, int)
     long_days = cfg.get("cost_regression.long_days", 30, int)
+    if short_days >= long_days:
+        _log(f"ERROR: short_days ({short_days}) must be < long_days ({long_days}) — baseline window would be empty")
+        return 1
     output = args.output or cfg.get("cost_regression.output_path", "tracker/regressions.json", str)
 
     now = datetime.now().astimezone()
@@ -151,7 +164,7 @@ def main() -> int:
         short_days=short_days,
         long_days=long_days,
     )
-    output_path = _output_path(output)
+    output_path = Path(output)
     write_regressions(payload, output_path)
     _log(f"wrote {output_path}")
     _log(f"regressions={payload['summary']['regressions_count']} pairs={payload['summary']['total_pairs_scanned']}")
@@ -170,13 +183,6 @@ def _parse_args() -> argparse.Namespace:
         help="Minimum 7d output tokens for a pair to be scanned.",
     )
     return parser.parse_args()
-
-
-def _output_path(value: str) -> Path:
-    path = Path(value)
-    if os.name == "nt" and path.root and not path.drive:
-        return Path(f"{Path.cwd().drive}{value}")
-    return path
 
 
 def _window_totals(by_day: dict[date, dict[str, float]], start: date, end: date) -> tuple[float, float]:
