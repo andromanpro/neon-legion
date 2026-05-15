@@ -17,7 +17,7 @@ The worker should NEVER block on a JSONL write failure. The Gitea state is the s
 
 ## Working directory
 
-`F:/WorkAI/multi-agent` (already your `--cd`).
+`<project-dir>` (already your `--cd`).
 
 ## Project context
 

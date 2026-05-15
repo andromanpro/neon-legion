@@ -26,7 +26,7 @@ Tests run on host. Use `subprocess.run` with `cwd=` and `text=True, check=True`.
 
 ## Working directory
 
-`F:/WorkAI/multi-agent` (already your `--cd`).
+`<project-dir>` (already your `--cd`).
 
 ## Project context
 
@@ -43,7 +43,7 @@ Read in order:
   "schema_version": 1,
   "generated_at": "2026-05-14T00:30:00+03:00",
   "config": {
-    "repo_path": "F:/WorkAI/multi-agent",
+    "repo_path": "<project-dir>",
     "lookback_days": 30,
     "top_decile_threshold": 0.9
   },
@@ -141,7 +141,7 @@ If subprocess `git` binary is not available on the test host, mark tests with `u
 - `py -3.14 -m unittest tests.test_git_diff_cost -v` — ≥6 tests pass (or `skipped` if git not available).
 - `py -3.14 -m py_compile tools/git_diff_cost.py tests/test_git_diff_cost.py` exits 0.
 - `py -3.14 tools/git_diff_cost.py --help` shows config flags.
-- Real-data smoke against `F:/WorkAI/multi-agent` repo + production tracker events — produces a valid JSON with at least some sessions (the architect will check).
+- Real-data smoke against `<project-dir>` repo + production tracker events — produces a valid JSON with at least some sessions (the architect will check).
 - Stdlib + git subprocess only. No GitPython or PyGit.
 - Full repo suite stays green.
 

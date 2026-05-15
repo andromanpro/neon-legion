@@ -17,7 +17,7 @@ Tests run on host via `py -3.14 -m unittest`. Benchmark runs on host too — Cod
 
 ## Working directory
 
-`F:/WorkAI/multi-agent` (already your `--cd`).
+`<project-dir>` (already your `--cd`).
 
 ## Project context
 

@@ -18,7 +18,7 @@ DeepSeek B2 from the Phase 1.5 audit (May 13). Severity MED.
 
 ## Working directory
 
-`F:/WorkAI/multi-agent` (already your `--cd`).
+`<project-dir>` (already your `--cd`).
 
 ## Project context
 

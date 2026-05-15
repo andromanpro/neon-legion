@@ -15,7 +15,7 @@ You are running with `workspace-write` sandbox in the neon-legion project. Phase
 
 ## Working directory
 
-`F:/WorkAI/multi-agent` (already your `--cd`).
+`<project-dir>` (already your `--cd`).
 
 ## Project context
 
@@ -138,4 +138,4 @@ Per `AGENTS.md` "Conventions for any agent":
 - No `import` of anything outside stdlib.
 - All envelope fields validated, schema_version ≠ 1 path tested.
 - sha256 is computed over canonical JSON (sorted keys, no spaces, ensure_ascii=False) — verify with the golden test #2.
-- The module is importable from `F:/WorkAI/multi-agent` root as `tools.bus_envelope`.
+- The module is importable from `<project-dir>` root as `tools.bus_envelope`.

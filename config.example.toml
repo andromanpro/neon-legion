@@ -65,20 +65,20 @@ threshold = 1.2                # 7d/30d cost-per-output-token ratio
 min_output_tokens = 10         # skip pairs with fewer output tokens in 7d window (was min_calls)
 short_days = 7
 long_days = 30
-output_path = "F:/WorkAI/multi-agent/tracker/regressions.json"
+output_path = "<project-dir>/tracker/regressions.json"
 
 [model_slippage]
 threshold = 1.3                # 7d/30d median cost-per-call ratio by provider/model/prompt-size bucket
 min_events = 5                 # skip fingerprints with fewer events in 7d window
 short_days = 7
 long_days = 30
-output_path = "F:/WorkAI/multi-agent/tracker/slippage.json"
+output_path = "<project-dir>/tracker/slippage.json"
 
 [reputation]
 lookback_days = 30
 min_runs = 1
-output_reputation_path = "F:/WorkAI/multi-agent/tracker/reputation.json"
-output_roles_suggested_path = "F:/WorkAI/multi-agent/orchestrate-runs/roles.suggested.toml"
+output_reputation_path = "<project-dir>/tracker/reputation.json"
+output_roles_suggested_path = "<project-dir>/orchestrate-runs/roles.suggested.toml"
 
 [slop_score]
 # Per-message score = weighted sum of three signals.
@@ -88,7 +88,7 @@ weights = { trigram = 0.4, generic = 0.3, hedge = 0.3 }
 # generic_phrases = ["in summary", "it is important to note"]
 # hedge_words = ["might", "could", "perhaps"]
 # imperative_words = ["run", "build", "verify"]
-output_path = "F:/WorkAI/multi-agent/tracker/slop.json"
+output_path = "<project-dir>/tracker/slop.json"
 
 [disagreement_router]
 # Per-step risk thresholds. Below high_risk_threshold success rate → HIGH
@@ -98,10 +98,10 @@ high_risk_threshold = 0.7
 min_runs_for_confidence = 5
 
 [git_diff_cost]
-repo_path = "F:/WorkAI/multi-agent"
+repo_path = "<project-dir>"
 lookback_days = 30
 top_decile_threshold = 0.9
-output_path = "F:/WorkAI/multi-agent/tracker/diff_cost.json"
+output_path = "<project-dir>/tracker/diff_cost.json"
 
 [hooks]
 # Where Claude Code stores per-project state. Default works for stock Claude

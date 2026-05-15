@@ -22,7 +22,7 @@ The read-model accelerates **only the read-events step**. The downstream summari
 
 ## Working directory
 
-`F:/WorkAI/multi-agent`.
+`<project-dir>`.
 
 ## Project context
 

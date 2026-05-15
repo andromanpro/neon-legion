@@ -25,7 +25,7 @@ Tests run on host. Mock `bus_gitea.*` to simulate two workers racing on the same
 
 ## Working directory
 
-`F:/WorkAI/multi-agent` (already your `--cd`).
+`<project-dir>` (already your `--cd`).
 
 ## Project context
 

@@ -17,7 +17,7 @@ You are running with `workspace-write` sandbox in the neon-legion project. Phase
 
 ## Working directory
 
-`F:/WorkAI/multi-agent` (already your `--cd`).
+`<project-dir>` (already your `--cd`).
 
 ## Project context
 
@@ -59,7 +59,7 @@ All calls read these at module load:
 
 | Env var | Default | Used for |
 |---|---|---|
-| `GITEA_TOKEN_PATH` | `~/.gitea-token` | Read API token from this file (single line) |
+| `GITEA_TOKEN_PATH` | `<token-file>` | Read API token from this file (single line) |
 | `GITEA_BASE_URL` | `http://localhost:3000` | API base URL |
 | `GITEA_REPO` | `androman/neon-legion` | `{owner}/{repo}` slug |
 

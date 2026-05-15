@@ -17,7 +17,7 @@ Tests run on host. Sample fixtures live under `tests/fixtures/orchestrate-runs/`
 
 ## Working directory
 
-`F:/WorkAI/multi-agent` (already your `--cd`).
+`<project-dir>` (already your `--cd`).
 
 ## Project context
 
@@ -161,8 +161,8 @@ Public API per above. Reads `state.json` + `roles.used.toml` from each run dir. 
 [reputation]
 lookback_days = 30
 min_runs = 1
-output_reputation_path = "F:/WorkAI/multi-agent/tracker/reputation.json"
-output_roles_suggested_path = "F:/WorkAI/multi-agent/orchestrate-runs/roles.suggested.toml"
+output_reputation_path = "<project-dir>/tracker/reputation.json"
+output_roles_suggested_path = "<project-dir>/orchestrate-runs/roles.suggested.toml"
 ```
 
 ### 4. `wp-dev/tools/deploy-snapshot.sh` (architect-wired)

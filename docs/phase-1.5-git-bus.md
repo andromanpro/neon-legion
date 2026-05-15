@@ -1,7 +1,7 @@
 # Phase 1.5 — Git bus
 
 > **Status**: design, pre-implementation. Milestone
-> [v0.5](http://192.168.1.130:3000/androman/neon-legion/milestones/) on Gitea.
+> [v0.5](http://localhost:3000/androman/neon-legion/milestones/) on Gitea.
 > Triple-reviewed (Claude + Codex + DeepSeek) — the residual issues from that
 > pass are captured under "decisions" below.
 

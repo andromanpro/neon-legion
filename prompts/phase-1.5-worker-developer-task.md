@@ -17,7 +17,7 @@ The architect made one design adjustment from the doc: **lease tracking via sent
 
 ## Working directory
 
-`F:/WorkAI/multi-agent` (already your `--cd`).
+`<project-dir>` (already your `--cd`).
 
 ## Project context
 

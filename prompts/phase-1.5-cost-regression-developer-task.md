@@ -17,7 +17,7 @@ Tests run on host. The script itself must be importable and CLI-runnable.
 
 ## Working directory
 
-`F:/WorkAI/multi-agent` (already your `--cd`).
+`<project-dir>` (already your `--cd`).
 
 ## Project context
 
@@ -114,7 +114,7 @@ threshold = 1.2          # 7d/30d cost-per-output-token ratio
 min_calls = 10           # skip pairs with fewer output tokens in 7d window
 short_days = 7
 long_days = 30
-output_path = "F:/WorkAI/multi-agent/tracker/regressions.json"
+output_path = "<project-dir>/tracker/regressions.json"
 ```
 
 Read via `cfg.get("cost_regression.threshold", 1.2, float)` etc.
@@ -128,7 +128,7 @@ log "regen cost-regression detector"
 $PY "$MULTI_AGENT_DIR/tools/cost_regression.py" --output "$LOCAL_REGRESSIONS" 2>&1 | tail -2 || log "WARN: cost-regression non-zero exit (continuing)"
 ```
 
-Where `LOCAL_REGRESSIONS="H:/wordpress-androman/wp-data/wp-content/uploads/multi-agent/regressions.json"`. Add a corresponding `scp` to push it alongside snapshot.json.
+Where `LOCAL_REGRESSIONS="<wp-mount>/wp-data/wp-content/uploads/multi-agent/regressions.json"`. Add a corresponding `scp` to push it alongside snapshot.json.
 
 ## Tests
 

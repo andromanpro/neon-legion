@@ -21,7 +21,7 @@ The cache lifetime is the worker process. A worker restart drops the cache and t
 
 ## Working directory
 
-`F:/WorkAI/multi-agent` (already your `--cd`).
+`<project-dir>` (already your `--cd`).
 
 ## Project context
 

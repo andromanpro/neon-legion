@@ -15,7 +15,7 @@ Tests run on host, not in sandbox. Use `unittest` + `unittest.mock.patch` on `bu
 
 ## Working directory
 
-`F:/WorkAI/multi-agent` (already your `--cd`).
+`<project-dir>` (already your `--cd`).
 
 ## Project context
 

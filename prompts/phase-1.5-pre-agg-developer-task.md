@@ -24,7 +24,7 @@ Tests run on host. Benchmark validates the AC.
 
 ## Working directory
 
-`F:/WorkAI/multi-agent` (already your `--cd`).
+`<project-dir>` (already your `--cd`).
 
 ## Project context
 
