@@ -77,7 +77,7 @@ class CostRegressionTests(unittest.TestCase):
         self.assertEqual("openai", regression["provider"])
         self.assertEqual("gpt-test", regression["model"])
         self.assertAlmostEqual(0.0015, regression["cost_per_otok_7d"])
-        self.assertAlmostEqual(0.001, regression["cost_per_otok_30d"])
+        self.assertAlmostEqual(0.001, regression["cost_per_otok_baseline"])
         self.assertAlmostEqual(1.5, regression["ratio"])
 
     def test_min_calls_filter_excludes_low_volume(self) -> None:
@@ -191,7 +191,7 @@ class BaselineWindowExcludesShortTests(unittest.TestCase):
     """
 
     def test_baseline_rate_excludes_short_window_in_payload(self) -> None:
-        # Recent 7d at 5x baseline; if baseline overlaps short, cost_per_otok_30d
+        # Recent 7d at 5x baseline; if baseline overlaps short, cost_per_otok_baseline
         # is contaminated upward and ratio dampens.
         events = make_series(short_rate=0.005, baseline_rate=0.001)
         payload = detect_regressions(events, now=NOW, threshold=1.2)
@@ -200,10 +200,10 @@ class BaselineWindowExcludesShortTests(unittest.TestCase):
         # baseline rate equals the constructed baseline_rate exactly — proof
         # that days 0-6 are not aggregated into cost_per_otok_baseline.
         self.assertAlmostEqual(0.001, regression["cost_per_otok_baseline"])
-        # Deprecated alias mirrors the same value for backward compat.
-        self.assertAlmostEqual(0.001, regression["cost_per_otok_30d"])
         self.assertAlmostEqual(0.005, regression["cost_per_otok_7d"])
         self.assertAlmostEqual(5.0, regression["ratio"])
+        # Old cost_per_otok_30d alias has been removed — verify it's gone.
+        self.assertNotIn("cost_per_otok_30d", regression)
 
     def test_overlap_signal_sharpens_in_14d_vs_30d_config(self) -> None:
         # 14 days elevated + 16 days normal in a 14d/30d config. With overlap-
@@ -221,7 +221,7 @@ class BaselineWindowExcludesShortTests(unittest.TestCase):
 
         regression = payload["regressions"][0]
         self.assertAlmostEqual(0.005, regression["cost_per_otok_7d"])
-        self.assertAlmostEqual(0.001, regression["cost_per_otok_30d"])
+        self.assertAlmostEqual(0.001, regression["cost_per_otok_baseline"])
         # Sharp 5.0; old overlap-included logic gave ~2.78 here.
         self.assertGreaterEqual(regression["ratio"], 4.0)
 

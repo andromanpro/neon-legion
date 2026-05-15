@@ -88,10 +88,6 @@ def detect_regressions(
                 "model": model,
                 "cost_per_otok_7d": short_rate,
                 "cost_per_otok_baseline": baseline_rate,
-                # Deprecated alias for cost_per_otok_baseline — kept while
-                # downstream WP widget 10 (page-neon-legion.php) reads this name.
-                # Remove once the widget switches to cost_per_otok_baseline.
-                "cost_per_otok_30d": baseline_rate,
                 "ratio": ratio,
                 "window_start": window_start.isoformat(),
                 "window_end": window_end.isoformat(),
