@@ -132,6 +132,160 @@ def build_diff_cost(
     return base
 
 
+def build_multi_repo_diff_cost(
+    events: list[dict],
+    repos: list[tuple[str, Path]],
+    *,
+    lookback_days: int = 30,
+    top_decile_threshold: float = 0.9,
+    now: datetime | None = None,
+) -> dict:
+    """Return diff_cost.json payload aggregated across multiple repositories.
+
+    Session cost is attributed once at the top level. Git diff lines are summed
+    across all configured repositories, and per_repo is only a line/commit lens.
+    """
+    current = _aware(now or datetime.now().astimezone())
+    normalized_repos = [(str(name), _path(path)) for name, path in repos]
+    primary_repo = normalized_repos[0][1] if normalized_repos else PROJECT_ROOT
+    lookback_days = max(1, int(lookback_days))
+    top_decile_threshold = float(top_decile_threshold)
+
+    base = {
+        "schema_version": 1,
+        "generated_at": current.isoformat(timespec="seconds"),
+        "config": {
+            "repo_path": str(primary_repo),
+            "repos": [name for name, _repo in normalized_repos],
+            "lookback_days": lookback_days,
+            "top_decile_threshold": top_decile_threshold,
+        },
+        "sessions": [],
+        "expensive_sessions": [],
+        "summary": {
+            "total_sessions_scanned": 0,
+            "sessions_with_commits": 0,
+            "no_diff_count": 0,
+            "expensive_lines_threshold_usd_per_line": None,
+            "expensive_sessions_count": 0,
+        },
+        "per_repo": {
+            name: {
+                "sessions_with_commits": 0,
+                "total_lines": 0,
+                "expensive_sessions_count": 0,
+            }
+            for name, _repo in normalized_repos
+        },
+    }
+
+    sessions = _session_buckets(events, current, lookback_days)
+    if not sessions:
+        return base
+
+    range_start = min(bucket["start"] for bucket in sessions.values())
+    range_end = max(bucket["end"] for bucket in sessions.values())
+    git_errors: list[str] = []
+    all_commits: list[dict[str, Any]] = []
+    repo_order = {name: index for index, (name, _repo) in enumerate(normalized_repos)}
+    for repo_name, repo_path in normalized_repos:
+        if not _is_git_repo(repo_path):
+            msg = f"not a git repository or git unavailable: {repo_path}"
+            _log(msg)
+            git_errors.append(msg)
+            continue
+        commits, errors = _commits_in_range(repo_path, range_start, range_end)
+        git_errors.extend(errors)
+        for commit in commits:
+            tagged = dict(commit)
+            tagged["repo"] = repo_name
+            tagged["_repo_order"] = repo_order[repo_name]
+            all_commits.append(tagged)
+
+    all_commits.sort(
+        key=lambda commit: (
+            commit["_committed_at"],
+            -int(commit.get("_repo_order", 0)),
+            commit.get("hash", ""),
+        ),
+        reverse=True,
+    )
+
+    payload_sessions = []
+    repo_session_lines: dict[str, dict[str, int]] = {
+        session_id: {name: 0 for name, _repo in normalized_repos}
+        for session_id in sessions
+    }
+    for session_id, bucket in sorted(sessions.items(), key=lambda item: (item[1]["start"], item[0])):
+        commits = [
+            _public_commit(commit)
+            for commit in all_commits
+            if bucket["start"] <= commit["_committed_at"] <= bucket["end"]
+        ]
+        if not commits:
+            payload_sessions.append(_no_diff_session(session_id, bucket))
+            continue
+
+        total_lines = 0
+        for commit in commits:
+            lines = int(commit["insertions"]) + int(commit["deletions"])
+            total_lines += lines
+            repo_session_lines[session_id][str(commit["repo"])] += lines
+
+        zero_line_diff = total_lines == 0
+        payload_sessions.append(
+            {
+                "session_id": session_id,
+                "session_short": session_id[:8],
+                "start_ts": bucket["start"].isoformat(timespec="seconds"),
+                "end_ts": bucket["end"].isoformat(timespec="seconds"),
+                "cost_usd": bucket["cost"],
+                "commits": commits,
+                "total_lines_changed": total_lines,
+                "cost_per_line_usd": None if zero_line_diff else bucket["cost"] / total_lines,
+                "no_diff": zero_line_diff,
+                "session_has_commits_but_zero_lines": zero_line_diff,
+            }
+        )
+
+    with_commits = [
+        item for item in payload_sessions
+        if not item["no_diff"] and item.get("cost_per_line_usd") is not None
+    ]
+    threshold = _percentile([float(item["cost_per_line_usd"]) for item in with_commits], top_decile_threshold)
+    expensive = []
+    if threshold is not None:
+        expensive = [item for item in with_commits if float(item["cost_per_line_usd"]) >= threshold]
+        expensive.sort(key=lambda item: float(item["cost_per_line_usd"]), reverse=True)
+        expensive = expensive[:5]
+
+    expensive_ids = {item["session_id"] for item in expensive}
+    for repo_name, _repo_path in normalized_repos:
+        repo_positive_sessions = {
+            session_id
+            for session_id, lines_by_repo in repo_session_lines.items()
+            if lines_by_repo[repo_name] > 0
+        }
+        base["per_repo"][repo_name] = {
+            "sessions_with_commits": len(repo_positive_sessions),
+            "total_lines": sum(lines_by_repo[repo_name] for lines_by_repo in repo_session_lines.values()),
+            "expensive_sessions_count": len(repo_positive_sessions & expensive_ids),
+        }
+
+    base["sessions"] = payload_sessions
+    base["expensive_sessions"] = expensive
+    base["git_errors"] = list(git_errors)
+    base["summary"] = {
+        "total_sessions_scanned": len(payload_sessions),
+        "sessions_with_commits": len(with_commits),
+        "no_diff_count": len(payload_sessions) - len(with_commits),
+        "expensive_lines_threshold_usd_per_line": threshold,
+        "expensive_sessions_count": len(expensive),
+        "git_errors_count": len(git_errors),
+    }
+    return base
+
+
 def write_diff_cost(payload: dict, output_path: Path) -> None:
     """Atomic write."""
     path = _path(output_path)
@@ -154,20 +308,29 @@ def main() -> int:
     args = _parse_args()
     lookback_days = args.lookback_days if args.lookback_days is not None else cfg.get("git_diff_cost.lookback_days", 30, int)
     top_decile = args.top_decile if args.top_decile is not None else cfg.get("git_diff_cost.top_decile_threshold", 0.9, float)
-    repo = _path(args.repo or cfg.get("git_diff_cost.repo_path", str(PROJECT_ROOT), str))
     output = _path(args.output or cfg.get("git_diff_cost.output_path", str(DEFAULT_OUTPUT), str))
+    try:
+        repos = _parse_repo_specs(args.repos if args.repos is not None else cfg.get("git_diff_cost.repos", []))
+    except ValueError as exc:
+        _log(str(exc))
+        return 2
 
     now = datetime.now().astimezone()
     start = now.date() - timedelta(days=max(1, int(lookback_days)) - 1)
     events = summary.read_events(start, now.date())
-    payload = build_diff_cost(events, repo, lookback_days=lookback_days, top_decile_threshold=top_decile, now=now)
+    if repos:
+        payload = build_multi_repo_diff_cost(events, repos, lookback_days=lookback_days, top_decile_threshold=top_decile, now=now)
+    else:
+        repo = _path(args.repo or cfg.get("git_diff_cost.repo_path", str(PROJECT_ROOT), str))
+        payload = build_diff_cost(events, repo, lookback_days=lookback_days, top_decile_threshold=top_decile, now=now)
     write_diff_cost(payload, output)
     _log(f"wrote {output}")
     _log(
-        "sessions={total} no_diff={no_diff} expensive={expensive}".format(
+        "sessions={total} no_diff={no_diff} expensive={expensive}{repos}".format(
             total=payload["summary"]["total_sessions_scanned"],
             no_diff=payload["summary"]["no_diff_count"],
             expensive=payload["summary"]["expensive_sessions_count"],
+            repos=f" repos={len(repos)}" if repos else "",
         )
     )
     return 0
@@ -177,9 +340,40 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Attribute session cost to git diff volume.")
     parser.add_argument("--repo", type=Path, help="Git repository path to scan.")
     parser.add_argument("--output", type=Path, help="Path to write diff_cost.json.")
+    parser.add_argument("--repos", help='Comma-separated multi-repo specs: "name:path,name:path".')
     parser.add_argument("--lookback-days", type=int, help="How many days of session events to scan.")
     parser.add_argument("--top-decile", type=float, help="Percentile threshold for expensive lines, default 0.9.")
     return parser.parse_args()
+
+
+def _parse_repo_specs(value: Any) -> list[tuple[str, Path]]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        entries = [entry.strip() for entry in value.split(",")]
+    elif isinstance(value, (list, tuple)):
+        entries = list(value)
+    else:
+        raise ValueError("git_diff_cost.repos must be a list of name:path strings")
+
+    repos: list[tuple[str, Path]] = []
+    seen_names: set[str] = set()
+    for entry in entries:
+        if not isinstance(entry, str):
+            raise ValueError("git_diff_cost.repos entries must be strings")
+        entry = entry.strip()
+        if not entry:
+            continue
+        name, sep, path = entry.partition(":")
+        name = name.strip()
+        path = path.strip()
+        if not sep or not name or not path:
+            raise ValueError(f"invalid git_diff_cost.repos entry {entry!r}; expected name:path")
+        if name in seen_names:
+            raise ValueError(f"duplicate git_diff_cost.repos name {name!r}")
+        seen_names.add(name)
+        repos.append((name, Path(path)))
+    return repos
 
 
 def _session_buckets(events: list[dict], now: datetime, lookback_days: int) -> dict[str, dict[str, Any]]:
