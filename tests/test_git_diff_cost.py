@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from tools.git_diff_cost import build_diff_cost, build_multi_repo_diff_cost
+from tools.git_diff_cost import build_diff_cost, build_multi_repo_diff_cost, _parse_repo_specs
 
 
 NOW = datetime(2026, 5, 13, 12, 0, tzinfo=timezone.utc)
@@ -363,6 +363,41 @@ class MultiRepoTests(unittest.TestCase):
         self.assertEqual(
             ["b-expensive-session", "both-repos-session"],
             [session["session_id"] for session in payload["expensive_sessions"]],
+        )
+
+    def test_duplicate_repo_path_under_two_names_rejected(self) -> None:
+        # DeepSeek LOW #1: two names → same path would query commits twice
+        # → that session's lines double-counted. Must be rejected at parse.
+        with self.assertRaises(ValueError):
+            _parse_repo_specs([f"A:{self.repo_a}", f"B:{self.repo_a}"])
+        # Different paths under different names is fine.
+        parsed = _parse_repo_specs([f"A:{self.repo_a}", f"B:{self.repo_b}"])
+        self.assertEqual(["A", "B"], [name for name, _ in parsed])
+
+    def test_cross_repo_session_with_zero_total_lines_is_no_diff(self) -> None:
+        # DeepSeek LOW #3: commits in BOTH repos but net 0 lines (empty /
+        # merge / revert). Must be no_diff with cost_per_line None — cost
+        # never divided by zero, never leaked into expensive pool.
+        when = NOW - timedelta(hours=3)
+        for repo, msg in ((self.repo_a, "empty A"), (self.repo_b, "empty B")):
+            env = self.env.copy()
+            env["GIT_AUTHOR_DATE"] = (when + timedelta(minutes=20)).isoformat()
+            env["GIT_COMMITTER_DATE"] = (when + timedelta(minutes=20)).isoformat()
+            self._run(["git", "commit", "--allow-empty", "-m", msg], cwd=repo, env=env)
+        events = [
+            event("zero-line-session", when, 4.0),
+            event("zero-line-session", when + timedelta(minutes=59), 4.0),
+        ]
+        payload = build_multi_repo_diff_cost(
+            events, [("A", self.repo_a), ("B", self.repo_b)], top_decile_threshold=0.5, now=NOW
+        )
+        sess = self.session(payload, "zero-line-session")
+        self.assertEqual(0, sess["total_lines_changed"])
+        self.assertTrue(sess["no_diff"])
+        self.assertIsNone(sess["cost_per_line_usd"])
+        self.assertNotIn(
+            "zero-line-session",
+            [s["session_id"] for s in payload["expensive_sessions"]],
         )
 
 

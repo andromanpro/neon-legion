@@ -358,6 +358,7 @@ def _parse_repo_specs(value: Any) -> list[tuple[str, Path]]:
 
     repos: list[tuple[str, Path]] = []
     seen_names: set[str] = set()
+    seen_paths: set[str] = set()
     for entry in entries:
         if not isinstance(entry, str):
             raise ValueError("git_diff_cost.repos entries must be strings")
@@ -371,7 +372,14 @@ def _parse_repo_specs(value: Any) -> list[tuple[str, Path]]:
             raise ValueError(f"invalid git_diff_cost.repos entry {entry!r}; expected name:path")
         if name in seen_names:
             raise ValueError(f"duplicate git_diff_cost.repos name {name!r}")
+        # DeepSeek LOW #1 (money-math guard): two names pointing at the same
+        # path would query the same commits twice → that session's lines
+        # double-counted. Dedupe on resolved path, not just name.
+        resolved = str(Path(path).resolve())
+        if resolved in seen_paths:
+            raise ValueError(f"duplicate git_diff_cost.repos path {path!r} (already configured under another name)")
         seen_names.add(name)
+        seen_paths.add(resolved)
         repos.append((name, Path(path)))
     return repos
 
