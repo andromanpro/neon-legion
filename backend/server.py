@@ -340,15 +340,21 @@ def calendar_span_hours(events):
 def productivity_payload(events, gap_minutes):
     productivity = summary.summarize_productivity(events, gap_minutes)
     if productivity is None:
-        active_hours = summary.active_time_hours(events, gap_minutes)
+        active_hours = summary.active_time_hours_merged(events, gap_minutes)
+        active_hours_per_session_sum = summary.active_time_hours(events, gap_minutes)
         calendar_hours = calendar_span_hours(events)
         hours_without_ai = 0.0
+        baseline_floor_clamped = 0
+        hours_floor_added = 0.0
         sessions_covered = 0
         sessions_total = len(session_ranges(events))
     else:
         active_hours = summary.as_float(productivity.get("active_hours_with_ai"))
+        active_hours_per_session_sum = summary.as_float(productivity.get("active_hours_per_session_sum"))
         calendar_hours = summary.as_float(productivity.get("calendar_hours_with_ai"))
         hours_without_ai = summary.as_float(productivity.get("hours_without_ai"))
+        baseline_floor_clamped = summary.as_int(productivity.get("baseline_floor_clamped"))
+        hours_floor_added = summary.as_float(productivity.get("hours_floor_added"))
         sessions_covered = summary.as_int(productivity.get("sessions_covered"))
         sessions_total = summary.as_int(productivity.get("sessions_total"))
 
@@ -357,10 +363,13 @@ def productivity_payload(events, gap_minutes):
 
     return {
         "active_hours": rounded(active_hours),
+        "active_hours_per_session_sum": rounded(active_hours_per_session_sum),
         "calendar_span_hours": rounded(calendar_hours),
         "hours_without_ai_estimate": rounded(hours_without_ai),
         "hours_saved": rounded(hours_saved),
         "multiplier": rounded(multiplier),
+        "baseline_floor_clamped": baseline_floor_clamped,
+        "hours_floor_added": rounded(hours_floor_added),
         "sessions_covered": sessions_covered,
         "sessions_total": sessions_total,
     }
@@ -925,6 +934,9 @@ def _productivity_block(productivity_data):
     so coverage doesn't need its own threshold — the math is consistent
     regardless of how many sessions have estimates."""
     active = productivity_data.get("active_hours") or 0
+    active_per_session_sum = productivity_data.get("active_hours_per_session_sum")
+    if active_per_session_sum is None:
+        active_per_session_sum = active
     calendar = productivity_data.get("calendar_span_hours") or 0
     multiplier_raw = productivity_data.get("multiplier") or 0
     saved_raw = productivity_data.get("hours_saved") or 0
@@ -939,10 +951,13 @@ def _productivity_block(productivity_data):
     return {
         "active_hours": rounded(active, 1),
         "estimate_active_hours": rounded(active, 1),
+        "active_hours_per_session_sum": rounded(active_per_session_sum, 1),
         "calendar_hours": rounded(calendar, 1),
         "multiplier": multiplier,
         "hours_saved": saved,
         "estimated_hours": rounded(active + saved, 1),
+        "baseline_floor_clamped": int(productivity_data.get("baseline_floor_clamped") or 0),
+        "hours_floor_added": rounded(productivity_data.get("hours_floor_added") or 0, 1),
         "sessions_total": int(productivity_data.get("sessions_total") or 0),
         "sessions_covered": int(productivity_data.get("sessions_covered") or 0),
     }
@@ -958,6 +973,9 @@ def _today_productivity_block(today_payload):
     """
     active_display = today_payload.get("active_hours") or 0
     estimate_active = today_payload.get("active_hours_for_estimate") or 0
+    active_per_session_sum = today_payload.get("active_hours_per_session_sum")
+    if active_per_session_sum is None:
+        active_per_session_sum = estimate_active
     estimated = today_payload.get("estimated_hours") or 0
     saved_raw = today_payload.get("hours_saved") or 0
 
@@ -984,10 +1002,13 @@ def _today_productivity_block(today_payload):
         "days": 1,
         "active_hours": rounded(active_display, 1),
         "estimate_active_hours": rounded(estimate_active, 1),
+        "active_hours_per_session_sum": rounded(active_per_session_sum, 1),
         "calendar_hours": 24.0,
         "multiplier": multiplier,
         "hours_saved": saved,
         "estimated_hours": estimated_hours,
+        "baseline_floor_clamped": int(today_payload.get("baseline_floor_clamped") or 0),
+        "hours_floor_added": rounded(today_payload.get("hours_floor_added") or 0, 1),
         "sessions_total": int(today_payload.get("sessions_total") or 0),
         "sessions_covered": int(today_payload.get("estimated_sessions_covered") or 0),
     }
@@ -1121,7 +1142,8 @@ def _today_payload(events_24h, sessions_recent, tasks, since_dt=None,
     cost = rounded(total_24h.get("cost_estimate_usd", 0.0), 2)
 
     # Active hours in last 24h (full window — for the headline number)
-    active_hours_24h_full = summary.active_time_hours(events_24h, gap_minutes=2) if events_24h else 0.0
+    active_hours_24h_full = summary.active_time_hours_merged(events_24h, gap_minutes=2) if events_24h else 0.0
+    active_hours_24h_per_session_sum = summary.active_time_hours(events_24h, gap_minutes=2) if events_24h else 0.0
 
     # Codex review A1: aggregations (profanity / baselines) iterate the
     # uncapped set of today session_ids derived from events_24h, not the
@@ -1156,9 +1178,17 @@ def _today_payload(events_24h, sessions_recent, tasks, since_dt=None,
         else:
             today_profanity += int((entry or {}).get("profanity_count") or 0) if entry else 0
 
+    events_by_session = {}
+    for ev in events_24h:
+        sid = ev.get("session_id")
+        if isinstance(sid, str) and sid:
+            events_by_session.setdefault(sid, []).append(ev)
+
     # Sum baselines across sessions today that have an estimate.
     estimated_hours_sum = 0.0
     estimated_session_ids = []
+    baseline_floor_clamped = 0
+    hours_floor_added = 0.0
     for sid in today_session_ids:
         entry = tasks.get(sid) if isinstance(sid, str) else None
         if not isinstance(entry, dict):
@@ -1166,7 +1196,13 @@ def _today_payload(events_24h, sessions_recent, tasks, since_dt=None,
         hours = summary.effective_task_hours(entry)
         if hours is None:
             continue
-        estimated_hours_sum += float(hours)
+        baseline_hours = float(hours)
+        session_active_hours = summary.active_time_hours(events_by_session.get(sid, []), gap_minutes=2)
+        effective_hours = max(baseline_hours, session_active_hours)
+        if baseline_hours < session_active_hours:
+            baseline_floor_clamped += 1
+            hours_floor_added += effective_hours - baseline_hours
+        estimated_hours_sum += effective_hours
         estimated_session_ids.append(sid)
 
     # Active hours over the same subset (like-with-like). Falls back to full
@@ -1178,10 +1214,12 @@ def _today_payload(events_24h, sessions_recent, tasks, since_dt=None,
             ev for ev in events_24h
             if isinstance(ev.get("session_id"), str) and ev.get("session_id") in covered_ids
         ]
-        active_hours_for_estimate = summary.active_time_hours(covered_events, gap_minutes=2)
+        active_hours_for_estimate = summary.active_time_hours_merged(covered_events, gap_minutes=2)
+        active_hours_per_session_sum = summary.active_time_hours(covered_events, gap_minutes=2)
     else:
         # No estimates yet — fall back to full-24h × 7.3 (average multiplier from mock).
         active_hours_for_estimate = active_hours_24h_full
+        active_hours_per_session_sum = active_hours_24h_per_session_sum
         estimated_hours_sum = active_hours_24h_full * 7.3
 
     hours_saved_today = rounded(max(0.0, estimated_hours_sum - active_hours_for_estimate), 1)
@@ -1195,8 +1233,11 @@ def _today_payload(events_24h, sessions_recent, tasks, since_dt=None,
         # to derive multiplier, it should pair them with active_hours_for_estimate
         # (exposed below) rather than active_hours.
         "active_hours_for_estimate": rounded(active_hours_for_estimate, 1),
+        "active_hours_per_session_sum": rounded(active_hours_per_session_sum, 1),
         "estimated_hours": rounded(estimated_hours_sum, 1),
         "hours_saved": hours_saved_today,
+        "baseline_floor_clamped": baseline_floor_clamped,
+        "hours_floor_added": rounded(hours_floor_added, 1),
         "sessions_total": len(today_session_ids),
         "estimated_sessions_covered": len(estimated_session_ids),
         "profanity": today_profanity,
