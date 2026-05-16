@@ -51,6 +51,14 @@ class BusGiteaTests(unittest.TestCase):
         self.token_patch = patch("tools.bus_gitea._read_token", return_value="test-token")
         self.token_patch.start()
         self.addCleanup(self.token_patch.stop)
+        # bus_gitea no longer ships a default BASE_URL (was a LAN-IP leak;
+        # secret-scan 2026-05-16). Tests must configure it explicitly.
+        self.base_patch = patch.object(bus_gitea, "BASE_URL", "http://gitea.test:3000")
+        self.base_patch.start()
+        self.addCleanup(self.base_patch.stop)
+        self.api_patch = patch.object(bus_gitea, "API_ROOT", "http://gitea.test:3000/api/v1")
+        self.api_patch.start()
+        self.addCleanup(self.api_patch.stop)
 
     def request_json(self, request):
         return json.loads(request.data.decode("utf-8"))

@@ -15,7 +15,9 @@ import urllib.request
 
 
 TOKEN_PATH = os.path.expanduser(os.environ.get("GITEA_TOKEN_PATH", "~/.gitea-token"))
-BASE_URL = os.environ.get("GITEA_BASE_URL", "http://192.168.1.130:3000").rstrip("/")
+# No hardcoded default — was a LAN-IP disclosure (secret-scan 2026-05-16).
+# Must be set explicitly via env; _request() guards against empty.
+BASE_URL = os.environ.get("GITEA_BASE_URL", "").rstrip("/")
 REPO = os.environ.get("GITEA_REPO", "androman/neon-legion").strip("/")
 API_ROOT = f"{BASE_URL}/api/v1"
 
@@ -90,6 +92,12 @@ def get_issue(number: int) -> dict:
 
 
 def _request(method: str, path: str, body=None, *, retry: bool = True):
+    if not BASE_URL:
+        raise RuntimeError(
+            "GITEA_BASE_URL is not set — export it (e.g. http://<host>:3000) "
+            "before using bus_gitea. No default is shipped to avoid leaking "
+            "internal host topology."
+        )
     data = None
     headers = {"Accept": "application/json", "Authorization": f"token {_read_token()}"}
     if body is not None:
@@ -160,6 +168,9 @@ if __name__ == "__main__":
         def read(self):
             return b'{"number": 1}'
 
-    with patch(__name__ + "._read_token", return_value="smoke"), patch("urllib.request.urlopen", return_value=_SmokeResponse()):
+    with patch(__name__ + "._read_token", return_value="smoke"), \
+         patch(__name__ + ".BASE_URL", "http://gitea.smoke:3000"), \
+         patch(__name__ + ".API_ROOT", "http://gitea.smoke:3000/api/v1"), \
+         patch("urllib.request.urlopen", return_value=_SmokeResponse()):
         assert get_issue(1) == {"number": 1}
     print("ok")

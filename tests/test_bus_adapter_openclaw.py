@@ -41,8 +41,11 @@ class BusAdapterOpenClawTests(unittest.TestCase):
     def setUp(self):
         self.original_handlers = dict(bus_worker.HANDLERS)
         self.addCleanup(self.restore_handlers)
-        self.workai_root = Path("F:/WorkAI")
-        self.bridge_root = Path("F:/tmp/codex-bridge")
+        # Nominal paths — register_all only captures them in handler closures;
+        # this test passes a stub bridge so the FS is never touched. Neutral
+        # placeholders (no local-FS disclosure per secret-scan 2026-05-16).
+        self.workai_root = Path("/work")
+        self.bridge_root = Path("/tmp/codex-bridge")
 
     def restore_handlers(self):
         bus_worker.HANDLERS.clear()
