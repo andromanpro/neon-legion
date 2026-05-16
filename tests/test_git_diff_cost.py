@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from tools.git_diff_cost import build_diff_cost
+from tools.git_diff_cost import build_diff_cost, build_multi_repo_diff_cost, _parse_repo_specs
 
 
 NOW = datetime(2026, 5, 13, 12, 0, tzinfo=timezone.utc)
@@ -188,6 +188,217 @@ class GitDiffCostTests(unittest.TestCase):
         # And the percentile pool excludes it.
         self.assertEqual(0, payload["summary"]["sessions_with_commits"])
         self.assertEqual(0, len(payload["expensive_sessions"]))
+
+    def test_single_repo_payload_top_level_keys_stay_compatible(self) -> None:
+        when = NOW - timedelta(minutes=10)
+        self.commit_file("compat.txt", "one\ntwo\n", "compat", when)
+        payload = build_diff_cost(
+            [
+                event("compat-session", when - timedelta(minutes=1), 0.5),
+                event("compat-session", when + timedelta(minutes=1), 0.5),
+            ],
+            self.repo,
+            now=NOW,
+        )
+
+        self.assertEqual(
+            {
+                "schema_version",
+                "generated_at",
+                "config",
+                "sessions",
+                "expensive_sessions",
+                "summary",
+                "git_errors",
+            },
+            set(payload.keys()),
+        )
+        self.assertEqual({"repo_path", "lookback_days", "top_decile_threshold"}, set(payload["config"].keys()))
+        self.assertEqual(1, payload["schema_version"])
+        self.assertNotIn("per_repo", payload)
+        self.assertNotIn("repos", payload["config"])
+
+
+@unittest.skipUnless(GIT_AVAILABLE, "git binary not available")
+class MultiRepoTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.root = ROOT / f"git-diff-cost-multi-{uuid.uuid4().hex[:12]}"
+        self.repo_a = self.root / "repo-a"
+        self.repo_b = self.root / "repo-b"
+        self.env = os.environ.copy()
+        self.env.update(
+            {
+                "GIT_AUTHOR_NAME": "Test User",
+                "GIT_AUTHOR_EMAIL": "test@example.invalid",
+                "GIT_COMMITTER_NAME": "Test User",
+                "GIT_COMMITTER_EMAIL": "test@example.invalid",
+            }
+        )
+        self.root.mkdir()
+        for repo in (self.repo_a, self.repo_b):
+            self._run(["git", "init", str(repo)], cwd=self.root)
+            self.git(repo, "config", "user.name", "Test User")
+            self.git(repo, "config", "user.email", "test@example.invalid")
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.root, ignore_errors=True)
+
+    def git(self, repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
+        return self._run(["git", *args], cwd=repo)
+
+    def _run(
+        self,
+        args: list[str],
+        cwd: Path,
+        env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        try:
+            return subprocess.run(
+                args,
+                cwd=cwd,
+                env=env or self.env,
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+        except subprocess.CalledProcessError as exc:
+            self.skipTest(f"git fixture setup failed: {exc.stderr.strip() or exc.stdout.strip()}")
+
+    def commit_lines(self, repo: Path, name: str, line_count: int, message: str, when: datetime) -> str:
+        path = repo / name
+        path.write_text("".join(f"{name}-{idx}\n" for idx in range(line_count)), encoding="utf-8")
+        self.git(repo, "add", name)
+        env = self.env.copy()
+        env["GIT_AUTHOR_DATE"] = when.isoformat()
+        env["GIT_COMMITTER_DATE"] = when.isoformat()
+        self._run(["git", "commit", "-m", message], cwd=repo, env=env)
+        return self.git(repo, "rev-parse", "--short", "HEAD").stdout.strip()
+
+    def sparse_payload(self) -> dict:
+        both_start = NOW - timedelta(hours=4)
+        a_only_start = NOW - timedelta(hours=3)
+        no_repo_start = NOW - timedelta(hours=2)
+        b_expensive_start = NOW - timedelta(hours=1)
+
+        self.commit_lines(self.repo_a, "both-a.txt", 2, "both A", both_start + timedelta(minutes=20))
+        self.commit_lines(self.repo_b, "both-b.txt", 4, "both B", both_start + timedelta(minutes=30))
+        self.commit_lines(self.repo_a, "a-only.txt", 3, "A only", a_only_start + timedelta(minutes=30))
+        self.commit_lines(self.repo_b, "b-expensive.txt", 3, "B expensive", b_expensive_start + timedelta(minutes=30))
+
+        events = [
+            event("both-repos-session", both_start, 6.0),
+            event("both-repos-session", both_start + timedelta(minutes=59), 6.0),
+            event("a-only-session", a_only_start, 1.5),
+            event("a-only-session", a_only_start + timedelta(minutes=59), 1.5),
+            event("no-repo-session", no_repo_start, 2.5),
+            event("no-repo-session", no_repo_start + timedelta(minutes=59), 2.5),
+            event("b-expensive-session", b_expensive_start, 7.5),
+            event("b-expensive-session", b_expensive_start + timedelta(minutes=59), 7.5),
+        ]
+        return build_multi_repo_diff_cost(
+            events,
+            [("A", self.repo_a), ("B", self.repo_b)],
+            top_decile_threshold=0.5,
+            now=NOW,
+        )
+
+    def session(self, payload: dict, session_id: str) -> dict:
+        matches = [session for session in payload["sessions"] if session["session_id"] == session_id]
+        self.assertEqual(1, len(matches))
+        return matches[0]
+
+    def test_session_touching_both_repos_counts_cost_once(self) -> None:
+        payload = self.sparse_payload()
+
+        session = self.session(payload, "both-repos-session")
+        self.assertFalse(session["no_diff"])
+        self.assertEqual(6, session["total_lines_changed"])
+        self.assertAlmostEqual(2.0, session["cost_per_line_usd"])
+        self.assertNotAlmostEqual(6.0, session["cost_per_line_usd"])
+        self.assertNotAlmostEqual(3.0, session["cost_per_line_usd"])
+        self.assertEqual({"A", "B"}, {commit["repo"] for commit in session["commits"]})
+        lines_by_repo = {
+            repo: sum(commit["insertions"] + commit["deletions"] for commit in session["commits"] if commit["repo"] == repo)
+            for repo in ("A", "B")
+        }
+        self.assertEqual({"A": 2, "B": 4}, lines_by_repo)
+
+    def test_session_touching_only_one_repo_uses_that_repo_lines(self) -> None:
+        payload = self.sparse_payload()
+
+        session = self.session(payload, "a-only-session")
+        self.assertFalse(session["no_diff"])
+        self.assertEqual(3, session["total_lines_changed"])
+        self.assertAlmostEqual(1.0, session["cost_per_line_usd"])
+        self.assertEqual({"A"}, {commit["repo"] for commit in session["commits"]})
+
+    def test_session_touching_no_repo_stays_no_diff(self) -> None:
+        payload = self.sparse_payload()
+
+        session = self.session(payload, "no-repo-session")
+        self.assertTrue(session["no_diff"])
+        self.assertNotIn("commits", session)
+        self.assertNotIn("cost_per_line_usd", session)
+
+    def test_per_repo_breakdown_tracks_lines_not_cost(self) -> None:
+        payload = self.sparse_payload()
+
+        self.assertEqual(["A", "B"], payload["config"]["repos"])
+        self.assertEqual(str(self.repo_a), payload["config"]["repo_path"])
+        self.assertEqual({"A", "B"}, set(payload["per_repo"].keys()))
+        self.assertEqual(5, payload["per_repo"]["A"]["total_lines"])
+        self.assertEqual(7, payload["per_repo"]["B"]["total_lines"])
+        self.assertEqual(2, payload["per_repo"]["A"]["sessions_with_commits"])
+        self.assertEqual(2, payload["per_repo"]["B"]["sessions_with_commits"])
+        self.assertEqual(1, payload["per_repo"]["A"]["expensive_sessions_count"])
+        self.assertEqual(2, payload["per_repo"]["B"]["expensive_sessions_count"])
+        self.assertNotIn("cost_usd", payload["per_repo"]["A"])
+
+    def test_expensive_sessions_use_cross_repo_cost_per_line_and_sort_desc(self) -> None:
+        payload = self.sparse_payload()
+
+        self.assertEqual(3, payload["summary"]["sessions_with_commits"])
+        self.assertEqual(1, payload["summary"]["no_diff_count"])
+        self.assertEqual(2.0, payload["summary"]["expensive_lines_threshold_usd_per_line"])
+        self.assertEqual(
+            ["b-expensive-session", "both-repos-session"],
+            [session["session_id"] for session in payload["expensive_sessions"]],
+        )
+
+    def test_duplicate_repo_path_under_two_names_rejected(self) -> None:
+        # DeepSeek LOW #1: two names → same path would query commits twice
+        # → that session's lines double-counted. Must be rejected at parse.
+        with self.assertRaises(ValueError):
+            _parse_repo_specs([f"A:{self.repo_a}", f"B:{self.repo_a}"])
+        # Different paths under different names is fine.
+        parsed = _parse_repo_specs([f"A:{self.repo_a}", f"B:{self.repo_b}"])
+        self.assertEqual(["A", "B"], [name for name, _ in parsed])
+
+    def test_cross_repo_session_with_zero_total_lines_is_no_diff(self) -> None:
+        # DeepSeek LOW #3: commits in BOTH repos but net 0 lines (empty /
+        # merge / revert). Must be no_diff with cost_per_line None — cost
+        # never divided by zero, never leaked into expensive pool.
+        when = NOW - timedelta(hours=3)
+        for repo, msg in ((self.repo_a, "empty A"), (self.repo_b, "empty B")):
+            env = self.env.copy()
+            env["GIT_AUTHOR_DATE"] = (when + timedelta(minutes=20)).isoformat()
+            env["GIT_COMMITTER_DATE"] = (when + timedelta(minutes=20)).isoformat()
+            self._run(["git", "commit", "--allow-empty", "-m", msg], cwd=repo, env=env)
+        events = [
+            event("zero-line-session", when, 4.0),
+            event("zero-line-session", when + timedelta(minutes=59), 4.0),
+        ]
+        payload = build_multi_repo_diff_cost(
+            events, [("A", self.repo_a), ("B", self.repo_b)], top_decile_threshold=0.5, now=NOW
+        )
+        sess = self.session(payload, "zero-line-session")
+        self.assertEqual(0, sess["total_lines_changed"])
+        self.assertTrue(sess["no_diff"])
+        self.assertIsNone(sess["cost_per_line_usd"])
+        self.assertNotIn(
+            "zero-line-session",
+            [s["session_id"] for s in payload["expensive_sessions"]],
+        )
 
 
 if __name__ == "__main__":
