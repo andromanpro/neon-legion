@@ -346,6 +346,9 @@ def productivity_payload(events, gap_minutes):
         hours_without_ai = 0.0
         baseline_floor_clamped = 0
         hours_floor_added = 0.0
+        baseline_ceiling_clamped = 0
+        hours_ceiling_removed = 0.0
+        baseline_per_event_p95 = 0.0
         sessions_covered = 0
         sessions_total = len(session_ranges(events))
     else:
@@ -355,6 +358,9 @@ def productivity_payload(events, gap_minutes):
         hours_without_ai = summary.as_float(productivity.get("hours_without_ai"))
         baseline_floor_clamped = summary.as_int(productivity.get("baseline_floor_clamped"))
         hours_floor_added = summary.as_float(productivity.get("hours_floor_added"))
+        baseline_ceiling_clamped = summary.as_int(productivity.get("baseline_ceiling_clamped"))
+        hours_ceiling_removed = summary.as_float(productivity.get("hours_ceiling_removed"))
+        baseline_per_event_p95 = summary.as_float(productivity.get("baseline_per_event_p95"))
         sessions_covered = summary.as_int(productivity.get("sessions_covered"))
         sessions_total = summary.as_int(productivity.get("sessions_total"))
 
@@ -370,6 +376,9 @@ def productivity_payload(events, gap_minutes):
         "multiplier": rounded(multiplier),
         "baseline_floor_clamped": baseline_floor_clamped,
         "hours_floor_added": rounded(hours_floor_added),
+        "baseline_ceiling_clamped": baseline_ceiling_clamped,
+        "hours_ceiling_removed": rounded(hours_ceiling_removed),
+        "baseline_per_event_p95": rounded(baseline_per_event_p95),
         "sessions_covered": sessions_covered,
         "sessions_total": sessions_total,
     }
@@ -958,6 +967,9 @@ def _productivity_block(productivity_data):
         "estimated_hours": rounded(active + saved, 1),
         "baseline_floor_clamped": int(productivity_data.get("baseline_floor_clamped") or 0),
         "hours_floor_added": rounded(productivity_data.get("hours_floor_added") or 0, 1),
+        "baseline_ceiling_clamped": int(productivity_data.get("baseline_ceiling_clamped") or 0),
+        "hours_ceiling_removed": rounded(productivity_data.get("hours_ceiling_removed") or 0, 1),
+        "baseline_per_event_p95": rounded(productivity_data.get("baseline_per_event_p95") or 0, 1),
         "sessions_total": int(productivity_data.get("sessions_total") or 0),
         "sessions_covered": int(productivity_data.get("sessions_covered") or 0),
     }
@@ -1009,6 +1021,9 @@ def _today_productivity_block(today_payload):
         "estimated_hours": estimated_hours,
         "baseline_floor_clamped": int(today_payload.get("baseline_floor_clamped") or 0),
         "hours_floor_added": rounded(today_payload.get("hours_floor_added") or 0, 1),
+        "baseline_ceiling_clamped": int(today_payload.get("baseline_ceiling_clamped") or 0),
+        "hours_ceiling_removed": rounded(today_payload.get("hours_ceiling_removed") or 0, 1),
+        "baseline_per_event_p95": rounded(today_payload.get("baseline_per_event_p95") or 0, 1),
         "sessions_total": int(today_payload.get("sessions_total") or 0),
         "sessions_covered": int(today_payload.get("estimated_sessions_covered") or 0),
     }
@@ -1189,6 +1204,9 @@ def _today_payload(events_24h, sessions_recent, tasks, since_dt=None,
     estimated_session_ids = []
     baseline_floor_clamped = 0
     hours_floor_added = 0.0
+    baseline_ceiling_clamped = 0
+    hours_ceiling_removed = 0.0
+    baseline_per_event_values = []
     for sid in today_session_ids:
         entry = tasks.get(sid) if isinstance(sid, str) else None
         if not isinstance(entry, dict):
@@ -1197,11 +1215,22 @@ def _today_payload(events_24h, sessions_recent, tasks, since_dt=None,
         if hours is None:
             continue
         baseline_hours = float(hours)
-        session_active_hours = summary.active_time_hours(events_by_session.get(sid, []), gap_minutes=2)
-        effective_hours = max(baseline_hours, session_active_hours)
-        if baseline_hours < session_active_hours:
+        session_events = events_by_session.get(sid, [])
+        session_active_hours = summary.active_time_hours(session_events, gap_minutes=2)
+        event_count = len(session_events)
+        effective_hours, kind = summary.effective_session_hours(
+            baseline_hours,
+            session_active_hours,
+            event_count,
+        )
+        if kind == "floor":
             baseline_floor_clamped += 1
             hours_floor_added += effective_hours - baseline_hours
+        elif kind.startswith("ceiling"):
+            baseline_ceiling_clamped += 1
+            hours_ceiling_removed += baseline_hours - effective_hours
+        if event_count > 0:
+            baseline_per_event_values.append(baseline_hours / event_count)
         estimated_hours_sum += effective_hours
         estimated_session_ids.append(sid)
 
@@ -1238,6 +1267,9 @@ def _today_payload(events_24h, sessions_recent, tasks, since_dt=None,
         "hours_saved": hours_saved_today,
         "baseline_floor_clamped": baseline_floor_clamped,
         "hours_floor_added": rounded(hours_floor_added, 1),
+        "baseline_ceiling_clamped": baseline_ceiling_clamped,
+        "hours_ceiling_removed": rounded(hours_ceiling_removed, 1),
+        "baseline_per_event_p95": rounded(summary.percentile(baseline_per_event_values, 95), 1),
         "sessions_total": len(today_session_ids),
         "estimated_sessions_covered": len(estimated_session_ids),
         "profanity": today_profanity,
