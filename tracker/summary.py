@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 import argparse
 import json
+import math
 import sys
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -43,6 +44,17 @@ SENTIMENT_KEYS = {
     "mood_arc",
     "sentiment_intensity",
 }
+# Calibration: smallest legit session = 655 events; garbage cluster <=3 events.
+TRIVIAL_EVENT_MAX = 5
+# Calibration: observed garbage active time <=65 seconds.
+TRIVIAL_ACTIVE_MAX_HOURS = 0.05
+# Calibration: keep <=1h stub estimates as estimator noise, not numerator damage.
+TRIVIAL_MIN_BASELINE_HOURS = 1.0
+# Defense-in-depth headroom: 1.0 sits between legit max 0.15 h/event
+# and garbage min 9 h/event (deliberately loose; trivial guard is primary).
+PER_EVENT_CEILING_HOURS = 1.0
+# Calibration: band floor keeps real small dense sessions out of the ceiling.
+BAND_MIN_HOURS = 6.0
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
@@ -485,6 +497,51 @@ def effective_task_hours(entry: dict) -> float | None:
         return None
 
 
+def effective_session_hours(
+    baseline_hours: float,
+    session_active_hours: float,
+    event_count: int,
+) -> tuple[float, str]:
+    """Returns (effective_hours, kind) where kind is one of:
+    "normal", "floor", "ceiling_trivial", "ceiling_band".
+    Floor (#108) and ceiling (#106-A) are mutually exclusive per session.
+    """
+    baseline = float(baseline_hours)
+    active = float(session_active_hours)
+    events = int(event_count or 0)
+
+    eff = max(baseline, active)
+    kind = "floor" if baseline < active else "normal"
+
+    if (
+        events <= TRIVIAL_EVENT_MAX
+        and active <= TRIVIAL_ACTIVE_MAX_HOURS
+        and baseline > TRIVIAL_MIN_BASELINE_HOURS
+    ):
+        return active, "ceiling_trivial"
+
+    ceiling = max(BAND_MIN_HOURS, PER_EVENT_CEILING_HOURS * events)
+    if eff > ceiling:
+        return ceiling, "ceiling_band"
+
+    return eff, kind
+
+
+def percentile(values: list[float], percentile_rank: float) -> float:
+    if not values:
+        return 0.0
+
+    ordered = sorted(values)
+    if percentile_rank <= 0:
+        return ordered[0]
+    if percentile_rank >= 100:
+        return ordered[-1]
+
+    index = math.ceil(len(ordered) * percentile_rank / 100) - 1
+    index = max(0, min(index, len(ordered) - 1))
+    return ordered[index]
+
+
 def merged_interval_hours(intervals: list[tuple[float, float]]) -> float:
     if not intervals:
         return 0.0
@@ -605,6 +662,9 @@ def summarize_productivity(events: list[dict], gap_minutes: int = 2) -> dict | N
     hours_without_ai = 0.0
     baseline_floor_clamped = 0
     hours_floor_added = 0.0
+    baseline_ceiling_clamped = 0
+    hours_ceiling_removed = 0.0
+    baseline_per_event_values: list[float] = []
     for session_id in session_ranges:
         entry = tasks.get(session_id)
         if not isinstance(entry, dict):
@@ -616,10 +676,16 @@ def summarize_productivity(events: list[dict], gap_minutes: int = 2) -> dict | N
             session_timestamps.get(session_id, []),
             gap_minutes,
         )
-        effective_hours = max(hours, session_active_hours)
-        if hours < session_active_hours:
+        event_count = len(session_timestamps.get(session_id, []))
+        effective_hours, kind = effective_session_hours(hours, session_active_hours, event_count)
+        if kind == "floor":
             baseline_floor_clamped += 1
             hours_floor_added += effective_hours - hours
+        elif kind.startswith("ceiling"):
+            baseline_ceiling_clamped += 1
+            hours_ceiling_removed += hours - effective_hours
+        if event_count > 0:
+            baseline_per_event_values.append(hours / event_count)
         covered_session_ids.append(session_id)
         hours_without_ai += effective_hours
 
@@ -643,6 +709,9 @@ def summarize_productivity(events: list[dict], gap_minutes: int = 2) -> dict | N
         "hours_without_ai": hours_without_ai,
         "baseline_floor_clamped": baseline_floor_clamped,
         "hours_floor_added": hours_floor_added,
+        "baseline_ceiling_clamped": baseline_ceiling_clamped,
+        "hours_ceiling_removed": hours_ceiling_removed,
+        "baseline_per_event_p95": percentile(baseline_per_event_values, 95),
         "sessions_covered": len(covered_session_ids),
         "sessions_total": len(session_ranges),
     }
