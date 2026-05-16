@@ -2,6 +2,7 @@
 import argparse
 import json
 import math
+import os
 import sys
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -17,6 +18,9 @@ OPENCLAW_EVENTS_FILE = PROJECT_ROOT / "tracker" / "openclaw-events.jsonl"
 OPENCODE_EVENTS_FILE = PROJECT_ROOT / "tracker" / "opencode-events.jsonl"
 EVENTS_FILE = CLAUDE_EVENTS_FILE
 TASKS_FILE = PROJECT_ROOT / "tracker" / "tasks.json"
+PRODUCTIVITY_UNIT = os.environ.get("PRODUCTIVITY_UNIT", "session")
+if PRODUCTIVITY_UNIT not in {"session", "chunk"}:
+    PRODUCTIVITY_UNIT = "session"
 
 
 def env_float(name: str, default: float) -> float:
@@ -104,6 +108,14 @@ def parse_event_ts(value: object) -> datetime | None:
         return datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError:
         return None
+
+
+def chunk_date(ts: datetime) -> str:
+    return ts.date().isoformat()
+
+
+def productivity_unit() -> str:
+    return PRODUCTIVITY_UNIT if PRODUCTIVITY_UNIT in {"session", "chunk"} else "session"
 
 
 def as_int(value: object) -> int:
@@ -627,6 +639,7 @@ def active_time_hours_merged(events: list[dict], gap_minutes: int = 2) -> float:
 
 
 def summarize_productivity(events: list[dict], gap_minutes: int = 2) -> dict | None:
+    unit = productivity_unit()
     events = events_for_task_metrics(events)
     tasks = read_tasks()
     if not tasks:
@@ -654,56 +667,219 @@ def summarize_productivity(events: list[dict], gap_minutes: int = 2) -> dict | N
     if not session_ranges:
         return None
 
-    # "Covered" = sessions for which we have a real baseline estimate (not None).
-    # If we counted sessions whose entry exists in tasks.json but has no baseline
-    # (failed estimation), the hours_with_ai vs hours_without_ai comparison would
-    # be apples-to-oranges (active hours over all sessions vs baselines over a subset).
-    covered_session_ids = []
+    if unit == "session":
+        # "Covered" = sessions for which we have a real baseline estimate (not None).
+        # If we counted sessions whose entry exists in tasks.json but has no baseline
+        # (failed estimation), the hours_with_ai vs hours_without_ai comparison would
+        # be apples-to-oranges (active hours over all sessions vs baselines over a subset).
+        covered_session_ids = []
+        hours_without_ai = 0.0
+        baseline_floor_clamped = 0
+        hours_floor_added = 0.0
+        baseline_ceiling_clamped = 0
+        hours_ceiling_removed = 0.0
+        baseline_per_event_values: list[float] = []
+        for session_id in session_ranges:
+            entry = tasks.get(session_id)
+            if not isinstance(entry, dict):
+                continue
+            hours = effective_task_hours(entry)
+            if hours is None:
+                continue
+            session_active_hours = _active_time_hours_for_timestamps(
+                session_timestamps.get(session_id, []),
+                gap_minutes,
+            )
+            event_count = len(session_timestamps.get(session_id, []))
+            effective_hours, kind = effective_session_hours(hours, session_active_hours, event_count)
+            if kind == "floor":
+                baseline_floor_clamped += 1
+                hours_floor_added += effective_hours - hours
+            elif kind.startswith("ceiling"):
+                baseline_ceiling_clamped += 1
+                hours_ceiling_removed += hours - effective_hours
+            if event_count > 0:
+                baseline_per_event_values.append(hours / event_count)
+            covered_session_ids.append(session_id)
+            hours_without_ai += effective_hours
+
+        if not covered_session_ids:
+            return None
+
+        # Only count active/calendar hours over the *same* covered subset, so
+        # the multiplier and saved hours are like-with-like.
+        covered_id_set = set(covered_session_ids)
+        covered_events = [
+            ev for ev in events
+            if isinstance(ev.get("session_id"), str) and ev.get("session_id") in covered_id_set
+        ]
+        covered_ranges = [session_ranges[sid] for sid in covered_session_ids]
+
+        return {
+            "active_hours_with_ai": active_time_hours_merged(covered_events, gap_minutes),
+            "active_hours_per_session_sum": active_time_hours(covered_events, gap_minutes),
+            "calendar_hours_with_ai": merged_interval_hours(covered_ranges),
+            "gap_minutes": gap_minutes,
+            "hours_without_ai": hours_without_ai,
+            "baseline_floor_clamped": baseline_floor_clamped,
+            "hours_floor_added": hours_floor_added,
+            "baseline_ceiling_clamped": baseline_ceiling_clamped,
+            "hours_ceiling_removed": hours_ceiling_removed,
+            "baseline_per_event_p95": percentile(baseline_per_event_values, 95),
+            "sessions_covered": len(covered_session_ids),
+            "sessions_total": len(session_ranges),
+            "unit": unit,
+        }
+
+    chunk_timestamps: dict[tuple[str, str], list[datetime]] = {}
+    chunk_ranges: dict[tuple[str, str], tuple[float, float]] = {}
+    for event in events:
+        session_id = event.get("session_id")
+        if not isinstance(session_id, str) or not session_id:
+            continue
+
+        ts = parse_event_ts(event.get("ts"))
+        if ts is None:
+            continue
+
+        date_key = chunk_date(ts)
+        chunk_key = (session_id, date_key)
+        event_time = ts.timestamp()
+        chunk_timestamps.setdefault(chunk_key, []).append(ts)
+        current = chunk_ranges.get(chunk_key)
+        if current is None:
+            chunk_ranges[chunk_key] = (event_time, event_time)
+        else:
+            chunk_ranges[chunk_key] = (min(current[0], event_time), max(current[1], event_time))
+
+    covered_fallback_session_ids = []
+    covered_chunk_keys: list[tuple[str, str]] = []
+    covered_ranges: list[tuple[float, float]] = []
     hours_without_ai = 0.0
+    active_hours_per_unit_sum = 0.0
     baseline_floor_clamped = 0
     hours_floor_added = 0.0
     baseline_ceiling_clamped = 0
     hours_ceiling_removed = 0.0
     baseline_per_event_values: list[float] = []
-    for session_id in session_ranges:
-        entry = tasks.get(session_id)
-        if not isinstance(entry, dict):
-            continue
-        hours = effective_task_hours(entry)
-        if hours is None:
-            continue
-        session_active_hours = _active_time_hours_for_timestamps(
-            session_timestamps.get(session_id, []),
-            gap_minutes,
+    total_units = 0
+
+    def record_unit(
+        baseline_hours: float,
+        timestamps: list[datetime],
+        event_range: tuple[float, float],
+        covered_chunk_key: tuple[str, str] | None = None,
+        covered_session_id: str | None = None,
+    ) -> None:
+        nonlocal hours_without_ai
+        nonlocal active_hours_per_unit_sum
+        nonlocal baseline_floor_clamped
+        nonlocal hours_floor_added
+        nonlocal baseline_ceiling_clamped
+        nonlocal hours_ceiling_removed
+
+        unit_active_hours = _active_time_hours_for_timestamps(timestamps, gap_minutes)
+        event_count = len(timestamps)
+        effective_hours, kind = effective_session_hours(
+            baseline_hours,
+            unit_active_hours,
+            event_count,
         )
-        event_count = len(session_timestamps.get(session_id, []))
-        effective_hours, kind = effective_session_hours(hours, session_active_hours, event_count)
         if kind == "floor":
             baseline_floor_clamped += 1
-            hours_floor_added += effective_hours - hours
+            hours_floor_added += effective_hours - baseline_hours
         elif kind.startswith("ceiling"):
             baseline_ceiling_clamped += 1
-            hours_ceiling_removed += hours - effective_hours
+            hours_ceiling_removed += baseline_hours - effective_hours
         if event_count > 0:
-            baseline_per_event_values.append(hours / event_count)
-        covered_session_ids.append(session_id)
+            baseline_per_event_values.append(baseline_hours / event_count)
+        if covered_chunk_key is not None:
+            covered_chunk_keys.append(covered_chunk_key)
+        if covered_session_id is not None:
+            covered_fallback_session_ids.append(covered_session_id)
+        covered_ranges.append(event_range)
+        active_hours_per_unit_sum += unit_active_hours
         hours_without_ai += effective_hours
 
-    if not covered_session_ids:
+    for session_id in session_ranges:
+        dates = sorted(
+            date_key
+            for sid, date_key in chunk_timestamps
+            if sid == session_id
+        )
+        if not dates:
+            continue
+
+        chunk_task_keys = [f"{session_id}:{date_key}" for date_key in dates]
+        present_chunk_keys = [key for key in chunk_task_keys if key in tasks]
+        session_entry = tasks.get(session_id)
+        session_hours = (
+            effective_task_hours(session_entry)
+            if isinstance(session_entry, dict)
+            else None
+        )
+
+        if not present_chunk_keys:
+            total_units += 1
+            if session_hours is None:
+                continue
+            record_unit(
+                session_hours,
+                session_timestamps.get(session_id, []),
+                session_ranges[session_id],
+                covered_session_id=session_id,
+            )
+            continue
+
+        if len(present_chunk_keys) < len(chunk_task_keys) and session_hours is not None:
+            total_units += 1
+            record_unit(
+                session_hours,
+                session_timestamps.get(session_id, []),
+                session_ranges[session_id],
+                covered_session_id=session_id,
+            )
+            continue
+
+        total_units += len(dates)
+        for date_key in dates:
+            task_key = f"{session_id}:{date_key}"
+            entry = tasks.get(task_key)
+            if not isinstance(entry, dict):
+                continue
+            hours = effective_task_hours(entry)
+            if hours is None:
+                continue
+            key = (session_id, date_key)
+            record_unit(
+                hours,
+                chunk_timestamps.get(key, []),
+                chunk_ranges[key],
+                covered_chunk_key=key,
+            )
+
+    if not covered_fallback_session_ids and not covered_chunk_keys:
         return None
 
-    # Only count active/calendar hours over the *same* covered subset, so
-    # the multiplier and saved hours are like-with-like.
-    covered_id_set = set(covered_session_ids)
-    covered_events = [
-        ev for ev in events
-        if isinstance(ev.get("session_id"), str) and ev.get("session_id") in covered_id_set
-    ]
-    covered_ranges = [session_ranges[sid] for sid in covered_session_ids]
+    covered_fallback_id_set = set(covered_fallback_session_ids)
+    covered_chunk_key_set = set(covered_chunk_keys)
+    covered_events = []
+    for ev in events:
+        session_id = ev.get("session_id")
+        if not isinstance(session_id, str) or not session_id:
+            continue
+        if session_id in covered_fallback_id_set:
+            covered_events.append(ev)
+            continue
+        ts = parse_event_ts(ev.get("ts"))
+        if ts is None:
+            continue
+        if (session_id, chunk_date(ts)) in covered_chunk_key_set:
+            covered_events.append(ev)
 
     return {
         "active_hours_with_ai": active_time_hours_merged(covered_events, gap_minutes),
-        "active_hours_per_session_sum": active_time_hours(covered_events, gap_minutes),
+        "active_hours_per_session_sum": active_hours_per_unit_sum,
         "calendar_hours_with_ai": merged_interval_hours(covered_ranges),
         "gap_minutes": gap_minutes,
         "hours_without_ai": hours_without_ai,
@@ -712,8 +888,9 @@ def summarize_productivity(events: list[dict], gap_minutes: int = 2) -> dict | N
         "baseline_ceiling_clamped": baseline_ceiling_clamped,
         "hours_ceiling_removed": hours_ceiling_removed,
         "baseline_per_event_p95": percentile(baseline_per_event_values, 95),
-        "sessions_covered": len(covered_session_ids),
-        "sessions_total": len(session_ranges),
+        "sessions_covered": len(covered_fallback_session_ids) + len(covered_chunk_keys),
+        "sessions_total": total_units,
+        "unit": unit,
     }
 
 

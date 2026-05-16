@@ -338,6 +338,7 @@ def calendar_span_hours(events):
 
 
 def productivity_payload(events, gap_minutes):
+    unit = summary.productivity_unit()
     productivity = summary.summarize_productivity(events, gap_minutes)
     if productivity is None:
         active_hours = summary.active_time_hours_merged(events, gap_minutes)
@@ -363,6 +364,7 @@ def productivity_payload(events, gap_minutes):
         baseline_per_event_p95 = summary.as_float(productivity.get("baseline_per_event_p95"))
         sessions_covered = summary.as_int(productivity.get("sessions_covered"))
         sessions_total = summary.as_int(productivity.get("sessions_total"))
+        unit = productivity.get("unit") or unit
 
     hours_saved = hours_without_ai - active_hours
     multiplier = hours_without_ai / active_hours if active_hours > 0 else 0.0
@@ -381,6 +383,7 @@ def productivity_payload(events, gap_minutes):
         "baseline_per_event_p95": rounded(baseline_per_event_p95),
         "sessions_covered": sessions_covered,
         "sessions_total": sessions_total,
+        "unit": unit,
     }
 
 
@@ -972,6 +975,7 @@ def _productivity_block(productivity_data):
         "baseline_per_event_p95": rounded(productivity_data.get("baseline_per_event_p95") or 0, 1),
         "sessions_total": int(productivity_data.get("sessions_total") or 0),
         "sessions_covered": int(productivity_data.get("sessions_covered") or 0),
+        "unit": productivity_data.get("unit") or summary.productivity_unit(),
     }
 
 
@@ -1026,6 +1030,7 @@ def _today_productivity_block(today_payload):
         "baseline_per_event_p95": rounded(today_payload.get("baseline_per_event_p95") or 0, 1),
         "sessions_total": int(today_payload.get("sessions_total") or 0),
         "sessions_covered": int(today_payload.get("estimated_sessions_covered") or 0),
+        "unit": today_payload.get("unit") or summary.productivity_unit(),
     }
 
 
@@ -1152,21 +1157,30 @@ def _today_payload(events_24h, sessions_recent, tasks, since_dt=None,
     in those numbers cover only the same subset. Calls/cost/profanity remain
     over the full 24h window.
     """
+    return _today_payload_unit_aware(
+        events_24h,
+        sessions_recent,
+        tasks,
+        since_dt=since_dt,
+        today_session_ids=today_session_ids,
+        public_mode=public_mode,
+        customer_pattern=customer_pattern,
+    )
+
+
+def _today_payload_unit_aware(events_24h, sessions_recent, tasks, since_dt=None,
+                              today_session_ids=None, public_mode=False, customer_pattern=None):
     by_model_24h, total_24h = summary.summarize_by_model(events_24h)
     calls = summary.as_int(total_24h.get("calls"))
     cost = rounded(total_24h.get("cost_estimate_usd", 0.0), 2)
+    unit = summary.productivity_unit()
 
-    # Active hours in last 24h (full window — for the headline number)
     active_hours_24h_full = summary.active_time_hours_merged(events_24h, gap_minutes=2) if events_24h else 0.0
     active_hours_24h_per_session_sum = summary.active_time_hours(events_24h, gap_minutes=2) if events_24h else 0.0
 
-    # Codex review A1: aggregations (profanity / baselines) iterate the
-    # uncapped set of today session_ids derived from events_24h, not the
-    # capped UI list `sessions_recent` (limit 8).
     if today_session_ids is None:
         today_session_ids = _today_session_ids_from_events(events_24h)
 
-    # Top session (most recent in capped UI list — used only for description display)
     top_session = ""
     if sessions_recent:
         top = sessions_recent[0]
@@ -1175,10 +1189,6 @@ def _today_payload(events_24h, sessions_recent, tasks, since_dt=None,
         if public_mode:
             top_session = _scrub_for_public(top_session, customer_pattern) or _TASK_DESCRIPTION_FALLBACK
 
-    # Per-session `profanity_count` is total-session, but for today we want only
-    # swears in user messages with timestamp >= since_dt. Re-scan the transcript
-    # per session; fallback to None if transcript unreadable (B2: explicit None
-    # signals "unknown" rather than zero, so caller can decide).
     today_profanity = 0
     for sid in today_session_ids:
         entry = tasks.get(sid) if isinstance(sid, str) else None
@@ -1186,7 +1196,6 @@ def _today_payload(events_24h, sessions_recent, tasks, since_dt=None,
         if since_dt is not None and transcript:
             counted = _profanity_since(transcript, since_dt)
             if counted is None:
-                # Fallback to per-session total if transcript unreadable
                 today_profanity += int((entry or {}).get("profanity_count") or 0)
             else:
                 today_profanity += counted
@@ -1199,54 +1208,150 @@ def _today_payload(events_24h, sessions_recent, tasks, since_dt=None,
         if isinstance(sid, str) and sid:
             events_by_session.setdefault(sid, []).append(ev)
 
-    # Sum baselines across sessions today that have an estimate.
     estimated_hours_sum = 0.0
     estimated_session_ids = []
+    estimated_chunk_keys = []
     baseline_floor_clamped = 0
     hours_floor_added = 0.0
     baseline_ceiling_clamped = 0
     hours_ceiling_removed = 0.0
     baseline_per_event_values = []
-    for sid in today_session_ids:
-        entry = tasks.get(sid) if isinstance(sid, str) else None
-        if not isinstance(entry, dict):
-            continue
-        hours = summary.effective_task_hours(entry)
-        if hours is None:
-            continue
-        baseline_hours = float(hours)
-        session_events = events_by_session.get(sid, [])
-        session_active_hours = summary.active_time_hours(session_events, gap_minutes=2)
-        event_count = len(session_events)
+    active_hours_per_unit_sum = 0.0
+    total_units = len(today_session_ids)
+
+    def record_estimated_unit(baseline_hours, unit_events, covered_sid=None, covered_chunk_key=None):
+        nonlocal estimated_hours_sum
+        nonlocal active_hours_per_unit_sum
+        nonlocal baseline_floor_clamped
+        nonlocal hours_floor_added
+        nonlocal baseline_ceiling_clamped
+        nonlocal hours_ceiling_removed
+
+        timestamps = []
+        for event in unit_events:
+            ts = summary.parse_event_ts(event.get("ts"))
+            if ts is not None:
+                timestamps.append(ts)
+        unit_active_hours = summary._active_time_hours_for_timestamps(timestamps, gap_minutes=2)
+        event_count = len(unit_events)
         effective_hours, kind = summary.effective_session_hours(
-            baseline_hours,
-            session_active_hours,
+            float(baseline_hours),
+            unit_active_hours,
             event_count,
         )
         if kind == "floor":
             baseline_floor_clamped += 1
-            hours_floor_added += effective_hours - baseline_hours
+            hours_floor_added += effective_hours - float(baseline_hours)
         elif kind.startswith("ceiling"):
             baseline_ceiling_clamped += 1
-            hours_ceiling_removed += baseline_hours - effective_hours
+            hours_ceiling_removed += float(baseline_hours) - effective_hours
         if event_count > 0:
-            baseline_per_event_values.append(baseline_hours / event_count)
+            baseline_per_event_values.append(float(baseline_hours) / event_count)
         estimated_hours_sum += effective_hours
-        estimated_session_ids.append(sid)
+        active_hours_per_unit_sum += unit_active_hours
+        if covered_sid is not None:
+            estimated_session_ids.append(covered_sid)
+        if covered_chunk_key is not None:
+            estimated_chunk_keys.append(covered_chunk_key)
 
-    # Active hours over the same subset (like-with-like). Falls back to full
-    # 24h window if no sessions are estimated yet, so the headline still shows
-    # something useful.
-    if estimated_session_ids:
-        covered_ids = set(estimated_session_ids)
-        covered_events = [
-            ev for ev in events_24h
-            if isinstance(ev.get("session_id"), str) and ev.get("session_id") in covered_ids
-        ]
-        active_hours_for_estimate = summary.active_time_hours_merged(covered_events, gap_minutes=2)
-        active_hours_per_session_sum = summary.active_time_hours(covered_events, gap_minutes=2)
+    if unit == "session":
+        for sid in today_session_ids:
+            entry = tasks.get(sid) if isinstance(sid, str) else None
+            if not isinstance(entry, dict):
+                continue
+            hours = summary.effective_task_hours(entry)
+            if hours is None:
+                continue
+            record_estimated_unit(hours, events_by_session.get(sid, []), covered_sid=sid)
     else:
-        # No estimates yet — fall back to full-24h × 7.3 (average multiplier from mock).
+        events_by_chunk = {}
+        for sid, session_events in events_by_session.items():
+            for ev in session_events:
+                ts = summary.parse_event_ts(ev.get("ts"))
+                if ts is None:
+                    continue
+                date_key = summary.chunk_date(ts)
+                events_by_chunk.setdefault((sid, date_key), []).append(ev)
+
+        total_units = 0
+        for sid in today_session_ids:
+            if not isinstance(sid, str):
+                continue
+            dates = sorted(
+                date_key
+                for chunk_sid, date_key in events_by_chunk
+                if chunk_sid == sid
+            )
+            if not dates:
+                continue
+
+            chunk_task_keys = [f"{sid}:{date_key}" for date_key in dates]
+            present_chunk_keys = [key for key in chunk_task_keys if key in tasks]
+            session_entry = tasks.get(sid)
+            session_hours = (
+                summary.effective_task_hours(session_entry)
+                if isinstance(session_entry, dict)
+                else None
+            )
+
+            if not present_chunk_keys:
+                total_units += 1
+                if session_hours is None:
+                    continue
+                record_estimated_unit(
+                    session_hours,
+                    events_by_session.get(sid, []),
+                    covered_sid=sid,
+                )
+                continue
+
+            if len(present_chunk_keys) < len(chunk_task_keys) and session_hours is not None:
+                total_units += 1
+                record_estimated_unit(
+                    session_hours,
+                    events_by_session.get(sid, []),
+                    covered_sid=sid,
+                )
+                continue
+
+            total_units += len(dates)
+            for date_key in dates:
+                task_key = f"{sid}:{date_key}"
+                entry = tasks.get(task_key)
+                if not isinstance(entry, dict):
+                    continue
+                hours = summary.effective_task_hours(entry)
+                if hours is None:
+                    continue
+                chunk_key = (sid, date_key)
+                record_estimated_unit(
+                    hours,
+                    events_by_chunk.get(chunk_key, []),
+                    covered_chunk_key=chunk_key,
+                )
+
+    if estimated_session_ids or estimated_chunk_keys:
+        covered_ids = set(estimated_session_ids)
+        covered_chunks = set(estimated_chunk_keys)
+        covered_events = []
+        for ev in events_24h:
+            sid = ev.get("session_id")
+            if not isinstance(sid, str) or not sid:
+                continue
+            if sid in covered_ids:
+                covered_events.append(ev)
+                continue
+            ts = summary.parse_event_ts(ev.get("ts"))
+            if ts is None:
+                continue
+            if (sid, summary.chunk_date(ts)) in covered_chunks:
+                covered_events.append(ev)
+        active_hours_for_estimate = summary.active_time_hours_merged(covered_events, gap_minutes=2)
+        if unit == "session":
+            active_hours_per_session_sum = summary.active_time_hours(covered_events, gap_minutes=2)
+        else:
+            active_hours_per_session_sum = active_hours_per_unit_sum
+    else:
         active_hours_for_estimate = active_hours_24h_full
         active_hours_per_session_sum = active_hours_24h_per_session_sum
         estimated_hours_sum = active_hours_24h_full * 7.3
@@ -1256,11 +1361,7 @@ def _today_payload(events_24h, sessions_recent, tasks, since_dt=None,
     return {
         "calls": calls,
         "cost_usd": cost,
-        # Headline active_hours — full 24h (matches today-panel "АКТИВНО" tile expectation).
         "active_hours": rounded(active_hours_24h_full, 1),
-        # estimated_hours and hours_saved are like-with-like; if WP page wants
-        # to derive multiplier, it should pair them with active_hours_for_estimate
-        # (exposed below) rather than active_hours.
         "active_hours_for_estimate": rounded(active_hours_for_estimate, 1),
         "active_hours_per_session_sum": rounded(active_hours_per_session_sum, 1),
         "estimated_hours": rounded(estimated_hours_sum, 1),
@@ -1270,8 +1371,9 @@ def _today_payload(events_24h, sessions_recent, tasks, since_dt=None,
         "baseline_ceiling_clamped": baseline_ceiling_clamped,
         "hours_ceiling_removed": rounded(hours_ceiling_removed, 1),
         "baseline_per_event_p95": rounded(summary.percentile(baseline_per_event_values, 95), 1),
-        "sessions_total": len(today_session_ids),
-        "estimated_sessions_covered": len(estimated_session_ids),
+        "sessions_total": total_units,
+        "estimated_sessions_covered": len(estimated_session_ids) + len(estimated_chunk_keys),
+        "unit": unit,
         "profanity": today_profanity,
         "top_session": top_session or _TASK_DESCRIPTION_FALLBACK,
         "providers": providers_payload(events_24h),
