@@ -6,7 +6,7 @@ import re
 import subprocess
 import sys
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 
@@ -17,6 +17,7 @@ TASKS_LOCK_FILE = TRACKER_DIR / ".tasks.lock"
 LOG_DIR = TRACKER_DIR / ".estimation-logs"
 ORACLE_PROMPT_FILE = TRACKER_DIR / "oracle-prompt.txt"
 MAX_CONTEXT_CHARS = 15_000
+SESSION_SIZE_GAP_MINUTES = 2
 
 PROFANITY_RU_PATTERNS = [
     re.compile(r"\bбля[а-яё]*", re.IGNORECASE),
@@ -239,6 +240,121 @@ def transcript_text(event: dict) -> str:
     return extract_text(event.get("content"))
 
 
+def parse_transcript_ts(value: object) -> datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def active_hours_for_timestamps(timestamps: list[datetime], gap_minutes: int = SESSION_SIZE_GAP_MINUTES) -> float:
+    if len(timestamps) < 2:
+        return 0.0
+
+    max_gap = timedelta(minutes=gap_minutes)
+    timestamps = sorted(timestamps)
+    total_seconds = 0.0
+    previous = timestamps[0]
+    for current in timestamps[1:]:
+        gap = current - previous
+        if gap <= max_gap:
+            total_seconds += gap.total_seconds()
+        previous = current
+
+    return total_seconds / 3600
+
+
+def _event_content_blocks(event: dict) -> list:
+    message = event.get("message")
+    if isinstance(message, dict):
+        content = message.get("content")
+    else:
+        content = event.get("content")
+    return content if isinstance(content, list) else []
+
+
+def _tool_call_count_for_event(event: dict, role: str | None) -> int:
+    tool_blocks = 0
+    if role == "assistant":
+        for block in _event_content_blocks(event):
+            if isinstance(block, dict) and block.get("type") == "tool_use":
+                tool_blocks += 1
+    if tool_blocks:
+        return tool_blocks
+    if event.get("toolUseID") is not None:
+        return 1
+    return 0
+
+
+def compute_session_metrics(transcript_path) -> dict:
+    metrics = {
+        "event_count": 0,
+        "user_message_count": 0,
+        "assistant_message_count": 0,
+        "tool_call_count": 0,
+        "span_hours": 0.0,
+        "active_hours": 0.0,
+    }
+    timestamps: list[datetime] = []
+    first_ts = None
+    last_ts = None
+
+    try:
+        source = Path(transcript_path).open("r", encoding="utf-8")
+    except Exception:
+        return metrics
+
+    try:
+        with source:
+            for line in source:
+                if not line.strip():
+                    continue
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+
+                metrics["event_count"] += 1
+                if not isinstance(event, dict):
+                    continue
+
+                try:
+                    role = transcript_role(event)
+                    if role == "user":
+                        metrics["user_message_count"] += 1
+                    elif role == "assistant":
+                        metrics["assistant_message_count"] += 1
+
+                    metrics["tool_call_count"] += _tool_call_count_for_event(event, role)
+
+                    ts = parse_transcript_ts(event.get("timestamp") or event.get("ts"))
+                    if ts is not None:
+                        if first_ts is None:
+                            first_ts = ts
+                        last_ts = ts
+                        timestamps.append(ts)
+                except Exception:
+                    continue
+    except (OSError, UnicodeDecodeError):
+        pass
+
+    if first_ts is not None and last_ts is not None:
+        span_seconds = max((last_ts - first_ts).total_seconds(), 0.0)
+        metrics["span_hours"] = span_seconds / 3600
+
+    try:
+        metrics["active_hours"] = active_hours_for_timestamps(timestamps, SESSION_SIZE_GAP_MINUTES)
+    except Exception:
+        metrics["active_hours"] = 0.0
+
+    return metrics
+
+
 def read_transcript(path: Path) -> tuple[list[str], list[str]]:
     user_messages = []
     assistant_messages = []
@@ -338,6 +454,30 @@ def build_truncated_context_from_messages(user_messages: list[str], assistant_me
 def build_truncated_context(transcript_path: str) -> str:
     user_messages, assistant_messages = read_transcript(Path(transcript_path))
     return build_truncated_context_from_messages(user_messages, assistant_messages)
+
+
+def format_session_size_block(metrics: dict) -> str:
+    return (
+        "=== SESSION SIZE (ground truth — the transcript below is TRUNCATED to a few messages; "
+        "trust THESE numbers for scale, not the transcript length) ===\n"
+        f"events={int(metrics.get('event_count') or 0)}  "
+        f"user_msgs={int(metrics.get('user_message_count') or 0)}  "
+        f"assistant_msgs={int(metrics.get('assistant_message_count') or 0)}  "
+        f"tool_calls={int(metrics.get('tool_call_count') or 0)}  "
+        f"span_hours={float(metrics.get('span_hours') or 0.0):.3f}  "
+        f"active_hours={float(metrics.get('active_hours') or 0.0):.3f}"
+    )
+
+
+def build_estimation_prompt(context: str, metrics: dict) -> str:
+    oracle_prompt = ORACLE_PROMPT_FILE.read_text(encoding="utf-8")
+    return (
+        oracle_prompt
+        + "\n\n"
+        + format_session_size_block(metrics)
+        + "\n\n=== TRANSCRIPT (truncated) ===\n"
+        + context
+    )
 
 
 def parse_json_text(text: str) -> object:
@@ -518,9 +658,9 @@ def estimate_session(session_id: str, transcript_path: str) -> None:
         "profanity_count": profanity,
     })
 
+    metrics = compute_session_metrics(transcript_path)
     context = build_truncated_context_from_messages(user_messages, assistant_messages)
-    oracle_prompt = ORACLE_PROMPT_FILE.read_text(encoding="utf-8")
-    prompt = oracle_prompt + "\n\n=== TRANSCRIPT (truncated) ===\n" + context
+    prompt = build_estimation_prompt(context, metrics)
     entry = run_oracle(prompt)
     entry["transcript_path"] = transcript_path
     entry["profanity_count"] = profanity

@@ -1,6 +1,6 @@
 You are estimating the human-time equivalent of a software development session done with AI assistance.
 
-Read the truncated Claude Code transcript that follows the marker. Output strict JSON only, no prose, no preamble, no code fences.
+Read the SESSION SIZE block and the truncated Claude Code transcript that follow. The SESSION SIZE block is ground truth for scale; the transcript is a tiny truncated sample. Trust the numbers for scale, not the visible transcript length. Output strict JSON only, no prose, no preamble, no code fences.
 
 Output schema:
 {
@@ -14,12 +14,19 @@ Output schema:
   "sentiment_intensity": "<low|medium|high>"
 }
 
-Hours guidance (without AI assistance):
-- Trivial (typo, single-line fix): 0.25–1
-- Simple (one file feature, small refactor): 1–3
-- Medium (multi-file design, integration): 3–12
-- Complex (architecture, debugging long bugs, multi-system): 12–40
-- Research / investigation: count investigation hours, not code lines
+Hours estimation guidance (without AI assistance):
+- SESSION SIZE is ground truth. Do NOT infer scale from the transcript length; it only shows a few sampled messages.
+- The estimate must increase monotonically with size signals: primarily events and active_hours. Use span_hours to distinguish a focused burst from a multi-day marathon with idle gaps.
+- Stub rule: events <= ~3 and active_hours near zero means an aborted/empty session. Set ai_baseline_hours in 0-0.25 and estimation_confidence low. A 2-event session cannot be worth hours.
+- Per-task buckets:
+  - Trivial (typo, single-line fix): 0.25–1
+  - Simple (one file feature, small refactor): 1–3
+  - Medium (multi-file design, integration): 3–12
+  - Complex (architecture, debugging long bugs, multi-system): 12–40
+  - Research / investigation: count investigation hours, not code lines
+- For multi-task sessions, estimate each distinct task using the per-task buckets, then set total = sum of tasks.
+- Marathon rule: thousands of events spanning many hours or days contain MANY distinct tasks. Estimate the SUM of human-equivalent time across all of them. Do NOT cap at 40h; marathons can legitimately reach 100h+ equivalent. The old per-session ceiling was a saturation bug.
+- Plausibility band: sanity-check ai_baseline_hours mainly against active_hours and span_hours (these are precise wall-clock signals). events is a coarse activity-volume signal (raw transcript lines, not a precise task count) — use it for relative scale, not exact ratios. The failure to avoid: a tiny session (few events, near-zero active_hours) scored at many hours — that is always wrong. A long dense multi-day session scored at only a few hours is also wrong (the old saturation bug).
 
 Set needs_manual_review=true ONLY if transcript is too truncated, off-topic, or unintelligible. Otherwise set false.
 
