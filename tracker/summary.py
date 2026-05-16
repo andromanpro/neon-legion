@@ -533,6 +533,42 @@ def active_time_hours(events: list[dict], gap_minutes: int = 2) -> float:
     return total_seconds / 3600
 
 
+def _active_time_hours_for_timestamps(timestamps: list[datetime], gap_minutes: int) -> float:
+    if len(timestamps) < 2:
+        return 0.0
+
+    max_gap = timedelta(minutes=gap_minutes)
+    timestamps = sorted(timestamps)
+    total_seconds = 0.0
+    previous = timestamps[0]
+    for current in timestamps[1:]:
+        gap = current - previous
+        if gap <= max_gap:
+            total_seconds += gap.total_seconds()
+        previous = current
+
+    return total_seconds / 3600
+
+
+def active_time_hours_merged(events: list[dict], gap_minutes: int = 2) -> float:
+    if gap_minutes <= 0:
+        raise ValueError("gap_minutes must be greater than 0")
+
+    timestamps: list[datetime] = []
+    for event in events:
+        session_id = event.get("session_id")
+        if not isinstance(session_id, str) or not session_id:
+            continue
+
+        ts = parse_event_ts(event.get("ts"))
+        if ts is None:
+            continue
+
+        timestamps.append(ts)
+
+    return _active_time_hours_for_timestamps(timestamps, gap_minutes)
+
+
 def summarize_productivity(events: list[dict], gap_minutes: int = 2) -> dict | None:
     events = events_for_task_metrics(events)
     tasks = read_tasks()
@@ -540,6 +576,7 @@ def summarize_productivity(events: list[dict], gap_minutes: int = 2) -> dict | N
         return None
 
     session_ranges: dict[str, tuple[float, float]] = {}
+    session_timestamps: dict[str, list[datetime]] = {}
     for event in events:
         session_id = event.get("session_id")
         if not isinstance(session_id, str) or not session_id:
@@ -549,6 +586,7 @@ def summarize_productivity(events: list[dict], gap_minutes: int = 2) -> dict | N
         if ts is None:
             continue
         event_time = ts.timestamp()
+        session_timestamps.setdefault(session_id, []).append(ts)
 
         current = session_ranges.get(session_id)
         if current is None:
@@ -565,6 +603,8 @@ def summarize_productivity(events: list[dict], gap_minutes: int = 2) -> dict | N
     # be apples-to-oranges (active hours over all sessions vs baselines over a subset).
     covered_session_ids = []
     hours_without_ai = 0.0
+    baseline_floor_clamped = 0
+    hours_floor_added = 0.0
     for session_id in session_ranges:
         entry = tasks.get(session_id)
         if not isinstance(entry, dict):
@@ -572,8 +612,16 @@ def summarize_productivity(events: list[dict], gap_minutes: int = 2) -> dict | N
         hours = effective_task_hours(entry)
         if hours is None:
             continue
+        session_active_hours = _active_time_hours_for_timestamps(
+            session_timestamps.get(session_id, []),
+            gap_minutes,
+        )
+        effective_hours = max(hours, session_active_hours)
+        if hours < session_active_hours:
+            baseline_floor_clamped += 1
+            hours_floor_added += effective_hours - hours
         covered_session_ids.append(session_id)
-        hours_without_ai += hours
+        hours_without_ai += effective_hours
 
     if not covered_session_ids:
         return None
@@ -588,10 +636,13 @@ def summarize_productivity(events: list[dict], gap_minutes: int = 2) -> dict | N
     covered_ranges = [session_ranges[sid] for sid in covered_session_ids]
 
     return {
-        "active_hours_with_ai": active_time_hours(covered_events, gap_minutes),
+        "active_hours_with_ai": active_time_hours_merged(covered_events, gap_minutes),
+        "active_hours_per_session_sum": active_time_hours(covered_events, gap_minutes),
         "calendar_hours_with_ai": merged_interval_hours(covered_ranges),
         "gap_minutes": gap_minutes,
         "hours_without_ai": hours_without_ai,
+        "baseline_floor_clamped": baseline_floor_clamped,
+        "hours_floor_added": hours_floor_added,
         "sessions_covered": len(covered_session_ids),
         "sessions_total": len(session_ranges),
     }
