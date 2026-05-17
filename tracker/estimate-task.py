@@ -19,6 +19,14 @@ ORACLE_PROMPT_FILE = TRACKER_DIR / "oracle-prompt.txt"
 MAX_CONTEXT_CHARS = 15_000
 SESSION_SIZE_GAP_MINUTES = 2
 
+def chunk_date(ts: datetime) -> str:
+    """Calendar-day key for per-day chunk task ids. MUST stay byte-identical
+    to tracker/summary.chunk_date — producer (this hook) and the consumer
+    (summarize_productivity) key on the same string. Replicated as a local
+    one-liner instead of importing summary (which transitively pulls
+    tools.config) to keep this frequently-spawned hook subprocess light."""
+    return ts.date().isoformat()
+
 PROFANITY_RU_PATTERNS = [
     re.compile(r"\bбля[а-яё]*", re.IGNORECASE),
     re.compile(r"\bёб[а-яё]*", re.IGNORECASE),
@@ -665,6 +673,119 @@ def estimate_session(session_id: str, transcript_path: str) -> None:
     entry["transcript_path"] = transcript_path
     entry["profanity_count"] = profanity
     update_task_entry(session_id, entry)
+
+    chunks: dict[str, list[tuple[dict, datetime]]] = {}
+    try:
+        with Path(transcript_path).open("r", encoding="utf-8") as source:
+            for line in source:
+                if not line.strip():
+                    continue
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(event, dict):
+                    continue
+
+                ts = parse_transcript_ts(event.get("timestamp") or event.get("ts"))
+                if ts is None:
+                    continue
+                chunks.setdefault(chunk_date(ts), []).append((event, ts))
+    except (OSError, UnicodeDecodeError) as exc:
+        print(f"chunk-estimate-failed\t{session_id}\t<read>\t{exc}", file=sys.stderr)
+        return
+
+    if not chunks:
+        return
+
+    latest_date = max(chunks)
+    tasks = read_tasks()
+
+    def has_numeric_baseline(task_key: str) -> bool:
+        previous = tasks.get(task_key)
+        if not isinstance(previous, dict):
+            return False
+        baseline = previous.get("ai_baseline_hours")
+        if baseline is None or isinstance(baseline, bool):
+            return False
+        try:
+            float(baseline)
+        except (TypeError, ValueError):
+            return False
+        return True
+
+    for date_key in sorted(chunks):
+        task_key = f"{session_id}:{date_key}"
+        if date_key < latest_date and has_numeric_baseline(task_key):
+            continue
+
+        try:
+            event_pairs = chunks[date_key]
+            events = [item[0] for item in event_pairs]
+            timestamps = [item[1] for item in event_pairs]
+            chunk_user_messages: list[str] = []
+            chunk_assistant_messages: list[str] = []
+            chunk_metrics = {
+                "event_count": len(events),
+                "user_message_count": 0,
+                "assistant_message_count": 0,
+                "tool_call_count": 0,
+                "span_hours": 0.0,
+                "active_hours": 0.0,
+            }
+
+            for event in events:
+                role = transcript_role(event)
+                if role == "user":
+                    chunk_metrics["user_message_count"] += 1
+                elif role == "assistant":
+                    chunk_metrics["assistant_message_count"] += 1
+                chunk_metrics["tool_call_count"] += _tool_call_count_for_event(event, role)
+
+                if role is None:
+                    continue
+                text = transcript_text(event).strip()
+                if not text:
+                    continue
+                if role == "user":
+                    chunk_user_messages.append(text)
+                elif role == "assistant":
+                    chunk_assistant_messages.append(text)
+
+            if timestamps:
+                ordered = sorted(timestamps)
+                chunk_metrics["span_hours"] = max(
+                    (ordered[-1] - ordered[0]).total_seconds(),
+                    0.0,
+                ) / 3600
+                chunk_metrics["active_hours"] = active_hours_for_timestamps(
+                    timestamps,
+                    SESSION_SIZE_GAP_MINUTES,
+                )
+
+            chunk_context = build_truncated_context_from_messages(
+                chunk_user_messages,
+                chunk_assistant_messages,
+            )
+            chunk_prompt = build_estimation_prompt(chunk_context, chunk_metrics)
+            chunk_entry = run_oracle(chunk_prompt)
+            for sentiment_key in (
+                "frustration_score",
+                "appreciation_score",
+                "mood_arc",
+                "sentiment_intensity",
+            ):
+                chunk_entry.pop(sentiment_key, None)
+            chunk_entry["transcript_path"] = transcript_path
+            chunk_entry["source_session_id"] = session_id
+            chunk_entry["chunk_date"] = date_key
+            chunk_entry["chunk_event_count"] = len(events)
+            chunk_entry["estimation_mode"] = "calendar-day-chunk-live"
+            update_task_entry(task_key, chunk_entry)
+            tasks[task_key] = chunk_entry
+        except Exception as exc:
+            print(f"chunk-estimate-failed\t{session_id}\t{date_key}\t{exc}", file=sys.stderr)
+            continue
 
 
 def _safe_count_profanity(transcript_path: str) -> int | None:
