@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import os
 import shutil
+import stat
 import subprocess
 import sys
+import tempfile
 import unittest
-import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -21,6 +22,33 @@ NOW = datetime(2026, 5, 13, 12, 0, tzinfo=timezone.utc)
 GIT_AVAILABLE = shutil.which("git") is not None
 
 
+def _scratch_dir(prefix: str) -> Path:
+    """Throwaway dir in the OS temp area — never the repo working tree.
+
+    Historically these fixtures were created under the repo root; a
+    swallowed rmtree failure (read-only .git/objects on some platforms)
+    then left hundreds of locked dirs behind in the working tree.
+    """
+    return Path(tempfile.mkdtemp(prefix=prefix))
+
+
+def _force_rmtree(path: Path) -> None:
+    """Recursive delete that survives read-only .git/objects files.
+
+    On some platforms git marks objects read-only, so a plain
+    ``shutil.rmtree`` raises ``PermissionError``; chmod +w then retry.
+    """
+
+    def _on_error(func, target, _exc):
+        try:
+            os.chmod(target, stat.S_IWRITE)
+            func(target)
+        except OSError:
+            pass
+
+    shutil.rmtree(path, onexc=_on_error)
+
+
 def event(session_id: str, ts: datetime, cost: float = 1.0) -> dict:
     return {
         "session_id": session_id,
@@ -32,7 +60,7 @@ def event(session_id: str, ts: datetime, cost: float = 1.0) -> dict:
 @unittest.skipUnless(GIT_AVAILABLE, "git binary not available")
 class GitDiffCostTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.repo = ROOT / f"git-diff-cost-{uuid.uuid4().hex[:12]}"
+        self.repo = _scratch_dir("git-diff-cost-")
         self.env = os.environ.copy()
         self.env.update(
             {
@@ -47,7 +75,7 @@ class GitDiffCostTests(unittest.TestCase):
         self.git("config", "user.email", "test@example.invalid")
 
     def tearDown(self) -> None:
-        shutil.rmtree(self.repo, ignore_errors=True)
+        _force_rmtree(self.repo)
 
     def git(self, *args: str) -> subprocess.CompletedProcess[str]:
         return self._run(["git", *args], cwd=self.repo)
@@ -137,12 +165,11 @@ class GitDiffCostTests(unittest.TestCase):
         self.assertEqual("session-9", payload["expensive_sessions"][0]["session_id"])
 
     def test_non_git_repo_path_returns_empty_with_warning(self) -> None:
-        non_git = ROOT / f"not-git-{uuid.uuid4().hex[:12]}"
-        non_git.mkdir()
+        non_git = _scratch_dir("not-git-")
         try:
             payload = build_diff_cost([event("sid", NOW, 1.0)], non_git, now=NOW)
         finally:
-            shutil.rmtree(non_git, ignore_errors=True)
+            _force_rmtree(non_git)
 
         self.assertEqual([], payload["sessions"])
         self.assertEqual(0, payload["summary"]["total_sessions_scanned"])
@@ -222,7 +249,7 @@ class GitDiffCostTests(unittest.TestCase):
 @unittest.skipUnless(GIT_AVAILABLE, "git binary not available")
 class MultiRepoTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.root = ROOT / f"git-diff-cost-multi-{uuid.uuid4().hex[:12]}"
+        self.root = _scratch_dir("git-diff-cost-multi-")
         self.repo_a = self.root / "repo-a"
         self.repo_b = self.root / "repo-b"
         self.env = os.environ.copy()
@@ -234,14 +261,13 @@ class MultiRepoTests(unittest.TestCase):
                 "GIT_COMMITTER_EMAIL": "test@example.invalid",
             }
         )
-        self.root.mkdir()
         for repo in (self.repo_a, self.repo_b):
             self._run(["git", "init", str(repo)], cwd=self.root)
             self.git(repo, "config", "user.name", "Test User")
             self.git(repo, "config", "user.email", "test@example.invalid")
 
     def tearDown(self) -> None:
-        shutil.rmtree(self.root, ignore_errors=True)
+        _force_rmtree(self.root)
 
     def git(self, repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
         return self._run(["git", *args], cwd=repo)
