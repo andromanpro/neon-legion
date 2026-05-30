@@ -122,6 +122,28 @@ class HumanAttentionHoursTests(unittest.TestCase):
     def test_empty_input(self):
         self.assertEqual(summary.human_attention_hours([], {}, {}), (0.0, 0))
 
+    def test_chunk_unit_restricts_to_day(self):
+        # A 2-day session; chunk unit for day-1 must ignore day-2 prompts (Q4).
+        d1 = datetime(2026, 5, 20, 10, 0, tzinfo=timezone.utc)
+        d2 = datetime(2026, 5, 21, 10, 0, tzinfo=timezone.utc)
+        with tempfile.TemporaryDirectory() as d:
+            lines = [
+                {**_user_prompt("a"), "timestamp": d1.isoformat()},
+                {**_user_prompt("b"), "timestamp": (d1 + timedelta(minutes=3)).isoformat()},
+                {**_user_prompt("c"), "timestamp": d2.isoformat()},
+                {**_user_prompt("d"), "timestamp": (d2 + timedelta(minutes=3)).isoformat()},
+            ]
+            p = Path(d) / "s.jsonl"
+            p.write_text("\n".join(json.dumps(x) for x in lines), encoding="utf-8")
+            tasks = {"s": {"transcript_path": str(p)}}
+            # whole session: two 3-min spans bridged at 5-min gap = 6 min total
+            whole, _ = summary._human_attention_hours_for_units([("s", None)], tasks, {})
+            # day-1 only: a single 3-min span
+            day1, _ = summary._human_attention_hours_for_units([("s", "2026-05-20")], tasks, {})
+        self.assertAlmostEqual(whole, 6 / 60, places=4)
+        self.assertAlmostEqual(day1, 3 / 60, places=4)
+        self.assertLess(day1, whole)  # day restriction excludes day-2 prompts
+
 
 if __name__ == "__main__":
     unittest.main()

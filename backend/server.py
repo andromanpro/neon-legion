@@ -372,7 +372,14 @@ def productivity_payload(events, gap_minutes):
     # spent, not time the AI was busy). Falls back to AI-active wall-clock only if
     # human attention is unavailable (e.g. all transcripts rotated). AI-active is
     # kept as a secondary diagnostic field.
-    denom_hours = human_attention_hours if human_attention_hours > 0 else active_hours
+    # Floor against divide-by-near-zero (DeepSeek Q3): each covered session implies
+    # at least HUMAN_ATTENTION_FLOOR_MIN_PER_SESSION of human cost, so a lone tiny
+    # prompt can't explode the multiplier.
+    if human_attention_hours > 0:
+        floor_hours = sessions_covered * (summary.HUMAN_ATTENTION_FLOOR_MIN_PER_SESSION / 60.0)
+        denom_hours = max(human_attention_hours, floor_hours)
+    else:
+        denom_hours = active_hours
     hours_saved = hours_without_ai - denom_hours
     multiplier = hours_without_ai / denom_hours if denom_hours > 0 else 0.0
 

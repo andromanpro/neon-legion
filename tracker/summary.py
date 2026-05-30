@@ -651,6 +651,13 @@ def active_time_hours_merged(events: list[dict], gap_minutes: int = 2) -> float:
 # stretches between prompts cost ~0 → parallelism is credited honestly.
 HUMAN_ATTENTION_GAP_MINUTES = 5
 
+# Floor against divide-by-near-zero: a single 10-second prompt into a session
+# that then ran autonomously would otherwise give human_attention ≈ 0.003h and
+# an absurd multiplier. Each covered unit implies at least this much human cost
+# (you fire it and glance at the result). Bounds the multiplier without erasing
+# the parallelism credit. Applied in backend/server.py against sessions_covered.
+HUMAN_ATTENTION_FLOOR_MIN_PER_SESSION = 5
+
 
 def is_human_prompt(event: dict) -> bool:
     """True only for a genuine human-typed prompt in a Claude transcript line.
@@ -664,14 +671,13 @@ def is_human_prompt(event: dict) -> bool:
     """
     if not isinstance(event, dict):
         return False
-    if event.get("type") != "user":
-        message = event.get("message")
-        role = message.get("role") if isinstance(message, dict) else None
-        if role != "user":
-            return False
+    message = event.get("message")
+    role = message.get("role") if isinstance(message, dict) else None
+    # Accept either the top-level type or the message.role (mirrors transcript_role).
+    if event.get("type") != "user" and role != "user":
+        return False
     if event.get("isSidechain") is True:
         return False
-    message = event.get("message")
     content = message.get("content") if isinstance(message, dict) else event.get("content")
     if isinstance(content, str):
         return bool(content.strip())
@@ -724,31 +730,56 @@ def resolve_transcript_path(value: object):
         return None
 
 
+def _human_attention_hours_for_units(
+    units,
+    tasks: dict,
+    ai_session_timestamps: dict,
+    gap_minutes: int = HUMAN_ATTENTION_GAP_MINUTES,
+) -> tuple[float, int]:
+    """Core: pool human-prompt timestamps across coverage units → merged hours.
+
+    Each unit is (session_id, date_key | None). When date_key is given (chunk
+    mode), the session's human prompts are restricted to that calendar day so the
+    denominator matches the per-day baselines in the numerator. None = whole
+    session (session mode / fallback un-chunked sessions). Missing transcript →
+    fall back to the session's AI-event timestamps (restricted to the day too).
+    Returns (hours, fallback_unit_count). Transcripts are read once per session.
+    """
+    transcript_cache: dict[str, list] = {}
+
+    def human_ts_for(sid):
+        if sid not in transcript_cache:
+            entry = tasks.get(sid)
+            tpath = resolve_transcript_path(entry.get("transcript_path")) if isinstance(entry, dict) else None
+            transcript_cache[sid] = read_human_message_timestamps(tpath) if tpath is not None else []
+        return transcript_cache[sid]
+
+    pooled: list[datetime] = []
+    fallbacks = 0
+    for sid, date_key in units:
+        human_ts = human_ts_for(sid)
+        if date_key is not None:
+            human_ts = [ts for ts in human_ts if chunk_date(ts) == date_key]
+        if human_ts:
+            pooled.extend(human_ts)
+        else:
+            fallbacks += 1
+            ai_ts = ai_session_timestamps.get(sid, [])
+            if date_key is not None:
+                ai_ts = [ts for ts in ai_ts if chunk_date(ts) == date_key]
+            pooled.extend(ai_ts)
+    return _active_time_hours_for_timestamps(pooled, gap_minutes), fallbacks
+
+
 def human_attention_hours(
     covered_session_ids,
     tasks: dict,
     ai_session_timestamps: dict,
     gap_minutes: int = HUMAN_ATTENTION_GAP_MINUTES,
 ) -> tuple[float, int]:
-    """Merged human-attention hours across covered sessions (headline denominator).
-
-    For each covered session: pool genuine human-prompt timestamps from its
-    transcript. If the transcript rotated away, fall back to that session's
-    AI-event timestamps (conservative — keeps the old, higher cost so the
-    session is not silently dropped). Returns (hours, fallback_session_count).
-    """
-    pooled: list[datetime] = []
-    fallbacks = 0
-    for sid in covered_session_ids:
-        entry = tasks.get(sid)
-        tpath = resolve_transcript_path(entry.get("transcript_path")) if isinstance(entry, dict) else None
-        human_ts = read_human_message_timestamps(tpath) if tpath is not None else []
-        if human_ts:
-            pooled.extend(human_ts)
-        else:
-            fallbacks += 1
-            pooled.extend(ai_session_timestamps.get(sid, []))
-    return _active_time_hours_for_timestamps(pooled, gap_minutes), fallbacks
+    """Whole-session human-attention hours (session mode). See _..._for_units."""
+    units = [(sid, None) for sid in covered_session_ids]
+    return _human_attention_hours_for_units(units, tasks, ai_session_timestamps, gap_minutes)
 
 
 def summarize_productivity(events: list[dict], gap_minutes: int = 2) -> dict | None:
@@ -996,15 +1027,15 @@ def summarize_productivity(events: list[dict], gap_minutes: int = 2) -> dict | N
         if (session_id, chunk_date(ts)) in covered_chunk_key_set:
             covered_events.append(ev)
 
-    # Human attention pools per covered session (genuine prompts), same as the
-    # session branch. Covered sessions = fallback sessions + sessions behind
-    # covered day-chunks. Not day-restricted (conservative: includes all of a
-    # session's prompts even if only some days were chunk-covered).
-    covered_human_session_ids = list(
-        covered_fallback_id_set | {key[0] for key in covered_chunk_key_set}
-    )
-    human_hours, human_fallbacks = human_attention_hours(
-        covered_human_session_ids, tasks, session_timestamps
+    # Human attention, matched to the numerator's coverage units:
+    #  - covered day-chunks → (session, date) so prompts are restricted to that
+    #    day (numerator has per-day baselines → denominator must too, else a
+    #    multi-day session pools all its prompts against one day's baseline);
+    #  - un-chunked fallback sessions → (session, None) = whole session.
+    human_units = [(key[0], key[1]) for key in covered_chunk_key_set]
+    human_units += [(sid, None) for sid in covered_fallback_id_set]
+    human_hours, human_fallbacks = _human_attention_hours_for_units(
+        human_units, tasks, session_timestamps
     )
 
     return {
