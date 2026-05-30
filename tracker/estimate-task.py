@@ -55,44 +55,35 @@ PROFANITY_EN_PATTERNS = [
 ALL_PROFANITY = PROFANITY_RU_PATTERNS + PROFANITY_EN_PATTERNS
 
 # Appreciation markers — symmetric to PROFANITY_* but for positive feedback.
-# Matches oracle-prompt.txt's appreciation_score lexicon so the regex count
-# and the LLM score capture the same signals (raw count vs scored intensity).
+# GENUINE gratitude only — direct verbal thanks + strong unambiguous praise of
+# the work. Deliberately TIGHT (2026-05-30 recalibration): the old lexicon
+# counted the user's «)» / «))» smiley habit (85% of all hits!), filler/approval
+# markers («хорошо», «норм», «отлично» — per profile these mean "proceed", not
+# "thanks"), continue-commands («дальше», «продолжай», «keep going»), laughter
+# and celebratory emoji. That inflated the count ~250× over real thanks
+# (10164 → ~26-40). «Благодарностей» must mean gratitude, not good mood —
+# the smiley/momentum/emoji signals belong to a separate "vibe" metric if wanted.
 APPRECIATION_RU_PATTERNS = [
-    # direct thanks (highest weight in oracle)
+    # direct thanks
     re.compile(r"\bспасибо[а-яё]*", re.IGNORECASE),
     re.compile(r"\bблагодар[а-яё]+", re.IGNORECASE),
-    # short positive ack as standalone or affirmation
-    re.compile(r"\bотлично[а-яё]*", re.IGNORECASE),
-    re.compile(r"\bкруто[а-яё]*", re.IGNORECASE),
-    re.compile(r"\bклассно[а-яё]*", re.IGNORECASE),
-    re.compile(r"\bхорошо[а-яё]*", re.IGNORECASE),
-    re.compile(r"\bхороший[а-яё]*|\bхорошая\b|\bхорошее\b|\bхорошие\b", re.IGNORECASE),
-    re.compile(r"\bнорм\b|\bнормально\b|\bнормально[а-яё]*", re.IGNORECASE),
-    re.compile(r"\bзашло[а-яё]*|\bзашёл[а-яё]*|\bзашел[а-яё]*", re.IGNORECASE),
-    re.compile(r"\bто\s+что\s+надо\b", re.IGNORECASE),
-    re.compile(r"\bохуенн[а-яё]+", re.IGNORECASE),  # profanity-as-positive carve-out
-    re.compile(r"\bнихуя\s+(себе|круто|вот)\b", re.IGNORECASE),
-    # continue-momentum
-    re.compile(r"\bдавай\s+(ещё|еще|дальше|погнали)\b", re.IGNORECASE),
-    re.compile(r"\bпогнали\b", re.IGNORECASE),
-    re.compile(r"\bпродолжай[а-яё]*", re.IGNORECASE),
-    re.compile(r"\bдальше\b", re.IGNORECASE),
-    # playful
-    re.compile(r"\bахах[а-яё]*", re.IGNORECASE),
-    re.compile(r"\bхих[а-яё]*", re.IGNORECASE),
-    re.compile(r"\)\)+|\)\s*$", re.MULTILINE),  # «)» / «))» at end of message
+    # strong, unambiguous praise of the result (not "ok/proceed" markers)
+    re.compile(r"\bкрасав[а-яё]*", re.IGNORECASE),
+    re.compile(r"\bты\s+(лучший|молодец|гений)\b", re.IGNORECASE),
+    re.compile(r"\bобожаю\b", re.IGNORECASE),
 ]
 
 APPRECIATION_EN_PATTERNS = [
     re.compile(r"\bthanks?\b|\bthank\s+you\b", re.IGNORECASE),
-    re.compile(r"\bgreat\b|\bperfect\b|\bnice\b|\bcool\b", re.IGNORECASE),
     re.compile(r"\bawesome\b|\bexcellent\b|\bbrilliant\b", re.IGNORECASE),
-    re.compile(r"\blove\s+it\b|\blooks?\s+good\b", re.IGNORECASE),
-    re.compile(r"\bkeep\s+going\b|\bnext\s+step\b|\blet'?s\s+go\b", re.IGNORECASE),
+    re.compile(r"\blove\s+it\b", re.IGNORECASE),
 ]
 
+# Emoji intentionally excluded — celebratory/momentum emoji (🚀🔥💯🎉) read as
+# energy, not gratitude. Kept as a no-match sentinel so the call site stays
+# unchanged. 🙏 (prayer hands = thanks) could be re-added if desired.
 APPRECIATION_EMOJI_PATTERN = re.compile(
-    r"[🚀👍❤️✨🙏🔥💯🎉👏✅]"
+    r"(?!x)x"  # never matches
 )
 
 ALL_APPRECIATION = APPRECIATION_RU_PATTERNS + APPRECIATION_EN_PATTERNS
