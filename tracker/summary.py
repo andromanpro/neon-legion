@@ -759,7 +759,16 @@ def _human_attention_hours_for_units(
     for sid, date_key in units:
         human_ts = human_ts_for(sid)
         if date_key is not None:
+            # chunk unit → restrict to that calendar day
             human_ts = [ts for ts in human_ts if chunk_date(ts) == date_key]
+        else:
+            # whole-session unit → restrict to the days the session was active
+            # WITHIN THE WINDOW (ai_session_timestamps is already period-filtered).
+            # Without this, a multi-day session leaks prior-day prompts into a
+            # narrow window (e.g. "today" double-counts yesterday's prompts).
+            allowed = {chunk_date(t) for t in ai_session_timestamps.get(sid, [])}
+            if allowed:
+                human_ts = [ts for ts in human_ts if chunk_date(ts) in allowed]
         if human_ts:
             pooled.extend(human_ts)
         else:
