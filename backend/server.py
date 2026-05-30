@@ -355,6 +355,8 @@ def productivity_payload(events, gap_minutes):
     else:
         active_hours = summary.as_float(productivity.get("active_hours_with_ai"))
         active_hours_per_session_sum = summary.as_float(productivity.get("active_hours_per_session_sum"))
+        human_attention_hours = summary.as_float(productivity.get("human_attention_hours_with_ai"))
+        human_attention_fallbacks = summary.as_int(productivity.get("human_attention_fallbacks"))
         calendar_hours = summary.as_float(productivity.get("calendar_hours_with_ai"))
         hours_without_ai = summary.as_float(productivity.get("hours_without_ai"))
         baseline_floor_clamped = summary.as_int(productivity.get("baseline_floor_clamped"))
@@ -366,11 +368,19 @@ def productivity_payload(events, gap_minutes):
         sessions_total = summary.as_int(productivity.get("sessions_total"))
         unit = productivity.get("unit") or unit
 
-    hours_saved = hours_without_ai - active_hours
-    multiplier = hours_without_ai / active_hours if active_hours > 0 else 0.0
+    # Headline multiplier uses HUMAN-ATTENTION time (denominator = time the human
+    # spent, not time the AI was busy). Falls back to AI-active wall-clock only if
+    # human attention is unavailable (e.g. all transcripts rotated). AI-active is
+    # kept as a secondary diagnostic field.
+    denom_hours = human_attention_hours if human_attention_hours > 0 else active_hours
+    hours_saved = hours_without_ai - denom_hours
+    multiplier = hours_without_ai / denom_hours if denom_hours > 0 else 0.0
 
     return {
-        "active_hours": rounded(active_hours),
+        "active_hours": rounded(denom_hours),
+        "human_attention_hours": rounded(human_attention_hours),
+        "human_attention_fallbacks": human_attention_fallbacks,
+        "ai_active_wall_clock_hours": rounded(active_hours),
         "active_hours_per_session_sum": rounded(active_hours_per_session_sum),
         "calendar_span_hours": rounded(calendar_hours),
         "hours_without_ai_estimate": rounded(hours_without_ai),

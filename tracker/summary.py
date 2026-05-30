@@ -638,6 +638,119 @@ def active_time_hours_merged(events: list[dict], gap_minutes: int = 2) -> float:
     return _active_time_hours_for_timestamps(timestamps, gap_minutes)
 
 
+# ── Human-attention denominator ────────────────────────────────────────────
+# The productivity multiplier's denominator used to be `active_time_hours_merged`
+# — wall-clock during which ANY AI session emitted events (≤2-min bridged). That
+# measures *AI busy time*, not *human attention*. When the user fires 3-5 agents
+# in parallel and works on something else by hand, autonomous agent runtime
+# inflates that denominator → the multiplier reads low on parallel weeks.
+#
+# This denominator instead counts the *human's* engaged time: timestamps of
+# genuine human prompts (NOT tool-result "user" lines, NOT sub-agent sidechain
+# turns), pooled across covered sessions, merged with a 5-min gap. Autonomous
+# stretches between prompts cost ~0 → parallelism is credited honestly.
+HUMAN_ATTENTION_GAP_MINUTES = 5
+
+
+def is_human_prompt(event: dict) -> bool:
+    """True only for a genuine human-typed prompt in a Claude transcript line.
+
+    Excludes:
+      - sub-agent turns (`isSidechain: true`) — Task-tool children, not the user;
+      - tool-result "user" lines — Claude logs tool output as role=user; counting
+        them would re-measure AI-busy time (a single session has ~1000 of them vs
+        ~80 real prompts).
+    A genuine prompt has string content or a non-empty text block.
+    """
+    if not isinstance(event, dict):
+        return False
+    if event.get("type") != "user":
+        message = event.get("message")
+        role = message.get("role") if isinstance(message, dict) else None
+        if role != "user":
+            return False
+    if event.get("isSidechain") is True:
+        return False
+    message = event.get("message")
+    content = message.get("content") if isinstance(message, dict) else event.get("content")
+    if isinstance(content, str):
+        return bool(content.strip())
+    if isinstance(content, list):
+        has_text = any(
+            isinstance(b, dict) and b.get("type") == "text" and str(b.get("text", "")).strip()
+            for b in content
+        )
+        has_tool_result = any(
+            isinstance(b, dict) and b.get("type") == "tool_result" for b in content
+        )
+        return has_text and not has_tool_result
+    return False
+
+
+def read_human_message_timestamps(transcript_path) -> list[datetime]:
+    """Sorted timestamps of genuine human prompts in a Claude transcript .jsonl.
+
+    Returns [] if the file is missing/unreadable (caller falls back to AI events).
+    """
+    timestamps: list[datetime] = []
+    try:
+        with Path(transcript_path).open("r", encoding="utf-8") as source:
+            for line in source:
+                if not line.strip():
+                    continue
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not is_human_prompt(event):
+                    continue
+                ts = parse_event_ts(event.get("timestamp") or event.get("ts"))
+                if ts is not None:
+                    timestamps.append(ts)
+    except (OSError, UnicodeDecodeError, ValueError):
+        return []
+    timestamps.sort()
+    return timestamps
+
+
+def resolve_transcript_path(value: object):
+    """Return an existing Path for a stored transcript_path, else None."""
+    if not isinstance(value, str) or not value:
+        return None
+    candidate = Path(value)
+    try:
+        return candidate if candidate.exists() else None
+    except OSError:
+        return None
+
+
+def human_attention_hours(
+    covered_session_ids,
+    tasks: dict,
+    ai_session_timestamps: dict,
+    gap_minutes: int = HUMAN_ATTENTION_GAP_MINUTES,
+) -> tuple[float, int]:
+    """Merged human-attention hours across covered sessions (headline denominator).
+
+    For each covered session: pool genuine human-prompt timestamps from its
+    transcript. If the transcript rotated away, fall back to that session's
+    AI-event timestamps (conservative — keeps the old, higher cost so the
+    session is not silently dropped). Returns (hours, fallback_session_count).
+    """
+    pooled: list[datetime] = []
+    fallbacks = 0
+    for sid in covered_session_ids:
+        entry = tasks.get(sid)
+        tpath = resolve_transcript_path(entry.get("transcript_path")) if isinstance(entry, dict) else None
+        human_ts = read_human_message_timestamps(tpath) if tpath is not None else []
+        if human_ts:
+            pooled.extend(human_ts)
+        else:
+            fallbacks += 1
+            pooled.extend(ai_session_timestamps.get(sid, []))
+    return _active_time_hours_for_timestamps(pooled, gap_minutes), fallbacks
+
+
 def summarize_productivity(events: list[dict], gap_minutes: int = 2) -> dict | None:
     unit = productivity_unit()
     events = events_for_task_metrics(events)
@@ -715,9 +828,15 @@ def summarize_productivity(events: list[dict], gap_minutes: int = 2) -> dict | N
         ]
         covered_ranges = [session_ranges[sid] for sid in covered_session_ids]
 
+        human_hours, human_fallbacks = human_attention_hours(
+            covered_session_ids, tasks, session_timestamps
+        )
+
         return {
             "active_hours_with_ai": active_time_hours_merged(covered_events, gap_minutes),
             "active_hours_per_session_sum": active_time_hours(covered_events, gap_minutes),
+            "human_attention_hours_with_ai": human_hours,
+            "human_attention_fallbacks": human_fallbacks,
             "calendar_hours_with_ai": merged_interval_hours(covered_ranges),
             "gap_minutes": gap_minutes,
             "hours_without_ai": hours_without_ai,
@@ -877,9 +996,22 @@ def summarize_productivity(events: list[dict], gap_minutes: int = 2) -> dict | N
         if (session_id, chunk_date(ts)) in covered_chunk_key_set:
             covered_events.append(ev)
 
+    # Human attention pools per covered session (genuine prompts), same as the
+    # session branch. Covered sessions = fallback sessions + sessions behind
+    # covered day-chunks. Not day-restricted (conservative: includes all of a
+    # session's prompts even if only some days were chunk-covered).
+    covered_human_session_ids = list(
+        covered_fallback_id_set | {key[0] for key in covered_chunk_key_set}
+    )
+    human_hours, human_fallbacks = human_attention_hours(
+        covered_human_session_ids, tasks, session_timestamps
+    )
+
     return {
         "active_hours_with_ai": active_time_hours_merged(covered_events, gap_minutes),
         "active_hours_per_session_sum": active_hours_per_unit_sum,
+        "human_attention_hours_with_ai": human_hours,
+        "human_attention_fallbacks": human_fallbacks,
         "calendar_hours_with_ai": merged_interval_hours(covered_ranges),
         "gap_minutes": gap_minutes,
         "hours_without_ai": hours_without_ai,

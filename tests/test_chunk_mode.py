@@ -73,6 +73,12 @@ class ChunkModeTests(unittest.TestCase):
         self.assertEqual(result, {
             "active_hours_with_ai": 2.0,
             "active_hours_per_session_sum": 2.0,
+            # No real transcripts in this synthetic fixture → human attention
+            # falls back to pooled AI timestamps; the 60-min event gaps exceed
+            # the 5-min HUMAN_ATTENTION_GAP_MINUTES, so merged human time is 0
+            # and both sessions are counted as fallbacks.
+            "human_attention_hours_with_ai": 0.0,
+            "human_attention_fallbacks": 2,
             "calendar_hours_with_ai": 2.0,
             "gap_minutes": 60,
             "hours_without_ai": 3.5,
