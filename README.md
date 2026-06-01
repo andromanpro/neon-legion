@@ -373,3 +373,7 @@ local-first, без SaaS.
 
 MIT — [LICENSE](LICENSE). Форкай, переделывай, продавай надстройки.
 Только не публикуй чужие AI-сессии без их согласия.
+
+---
+
+🌐 [androman.pro](https://androman.pro) · ✈ [Telegram](https://t.me/andromanpro1c)
