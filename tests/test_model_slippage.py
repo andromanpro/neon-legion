@@ -170,5 +170,46 @@ class BaselineWindowExcludesShortTests(unittest.TestCase):
         self.assertEqual([], payload["slippages"])
 
 
+class BaselineLandscapeTests(unittest.TestCase):
+    """The `baselines` array is the cost/prompt-size landscape shown when no
+    drift is flagged — one row per qualifying (model, bucket) fingerprint."""
+
+    def test_baselines_emitted_even_with_zero_slippage(self) -> None:
+        events = [event(day, cost=0.01) for day in range(30)]  # stable → no drift
+        payload = detect_slippages(events, now=NOW, threshold=1.3)
+
+        self.assertEqual([], payload["slippages"])
+        self.assertEqual(1, len(payload["baselines"]))
+        self.assertEqual(1, payload["summary"]["baselines_count"])
+        row = payload["baselines"][0]
+        self.assertEqual("openai", row["provider"])
+        self.assertEqual("gpt-test", row["model"])
+        self.assertEqual("s", row["prompt_size_bucket"])
+        self.assertAlmostEqual(0.01, row["median_cost"])
+        self.assertIn("p95_cost", row)
+        self.assertIn("events", row)
+
+    def test_baselines_one_row_per_bucket_sorted_by_cost_desc(self) -> None:
+        events = []
+        # xs bucket (cheap), l bucket (pricier) for the same model
+        events += [event(day, model="m", input_tokens=100, cost=0.002) for day in range(30)]
+        events += [event(day, model="m", input_tokens=90_000, cost=0.05) for day in range(30)]
+        payload = detect_slippages(events, now=NOW, threshold=1.3)
+
+        buckets = [b["prompt_size_bucket"] for b in payload["baselines"]]
+        # two distinct prompt-size buckets for the same model
+        self.assertEqual(2, len(buckets))
+        self.assertEqual(2, len(set(buckets)))
+        # sorted by median_cost desc → the pricier bucket comes first
+        costs = [b["median_cost"] for b in payload["baselines"]]
+        self.assertEqual(costs, sorted(costs, reverse=True))
+        self.assertGreater(costs[0], costs[1])
+
+    def test_low_volume_fingerprint_excluded_from_baselines(self) -> None:
+        events = [event(day, cost=0.01) for day in range(3)]  # < min_events
+        payload = detect_slippages(events, now=NOW, threshold=1.3, min_events=5)
+        self.assertEqual([], payload["baselines"])
+
+
 if __name__ == "__main__":
     unittest.main()

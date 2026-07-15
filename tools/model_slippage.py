@@ -48,12 +48,31 @@ def detect_slippages(
         buckets[_fingerprint(event)].append((day, summary.as_float(event.get("cost_estimate_usd"))))
 
     slippages = []
+    baselines = []
     fingerprints_with_min_events = 0
     for (provider, model, prompt_size_bucket), entries in buckets.items():
         short_costs = [cost for day, cost in entries if short_start <= day <= today]
         if len(short_costs) < min_events:
             continue
         fingerprints_with_min_events += 1
+
+        # Landscape row for EVERY qualifying fingerprint (not just drifting
+        # ones): "what does this model cost per prompt-size bucket". Lets the
+        # dashboard render the cost/prompt-size distribution even when zero
+        # drift is detected (the common, healthy case) instead of a blank panel.
+        window_costs = [cost for day, cost in entries if long_start <= day <= today]
+        baselines.append(
+            {
+                "provider": provider,
+                "model": model,
+                "prompt_size_bucket": prompt_size_bucket,
+                "events": len(window_costs),
+                "events_7d": len(short_costs),
+                "median_cost": _median(window_costs),
+                "median_cost_7d": _median(short_costs),
+                "p95_cost": _p95(window_costs),
+            }
+        )
 
         # Baseline must EXCLUDE the recent short window — otherwise a real
         # spike in the last 7d pulls up the 30d median and hides itself.
@@ -94,6 +113,7 @@ def detect_slippages(
         )
 
     slippages.sort(key=lambda item: item["ratio"], reverse=True)
+    baselines.sort(key=lambda item: item["median_cost"], reverse=True)
     return {
         "schema_version": 1,
         "generated_at": current.isoformat(timespec="seconds"),
@@ -104,10 +124,12 @@ def detect_slippages(
             "long_days": long_days,
         },
         "slippages": slippages,
+        "baselines": baselines,
         "summary": {
             "total_fingerprints_scanned": len(buckets),
             "fingerprints_with_min_events": fingerprints_with_min_events,
             "slippages_count": len(slippages),
+            "baselines_count": len(baselines),
             "retry_tracking": "deferred - no session-retry column in tracker events",
         },
     }
