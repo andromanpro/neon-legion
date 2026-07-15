@@ -16,6 +16,7 @@ CLAUDE_EVENTS_FILE = PROJECT_ROOT / "tracker" / "claude-events.jsonl"
 CODEX_EVENTS_FILE = PROJECT_ROOT / "tracker" / "codex-events.jsonl"
 OPENCLAW_EVENTS_FILE = PROJECT_ROOT / "tracker" / "openclaw-events.jsonl"
 OPENCODE_EVENTS_FILE = PROJECT_ROOT / "tracker" / "opencode-events.jsonl"
+DSCALL_EVENTS_FILE = PROJECT_ROOT / "tracker" / "dscall-events.jsonl"
 EVENTS_FILE = CLAUDE_EVENTS_FILE
 TASKS_FILE = PROJECT_ROOT / "tracker" / "tasks.json"
 PRODUCTIVITY_UNIT = os.environ.get("PRODUCTIVITY_UNIT", "session")
@@ -246,6 +247,11 @@ def read_opencode_events(start: date, end: date) -> list[dict]:
     return read_event_file(OPENCODE_EVENTS_FILE, start, end, "opencode")
 
 
+def read_dscall_events(start: date, end: date) -> list[dict]:
+    # Direct ds-call.py DeepSeek calls — openrouter provider, merges with openclaw.
+    return read_event_file(DSCALL_EVENTS_FILE, start, end, "openrouter")
+
+
 def event_sort_ts(event: dict) -> float:
     ts = parse_event_ts(event.get("ts"))
     return ts.timestamp() if ts is not None else 0.0
@@ -257,6 +263,7 @@ def read_events(start: date, end: date) -> list[dict]:
         + read_codex_events(start, end)
         + read_openclaw_events(start, end)
         + read_opencode_events(start, end)
+        + read_dscall_events(start, end)
     )
     events = dedupe_events(events)
     events.sort(key=event_sort_ts)

@@ -21,6 +21,9 @@ PROVIDER_FILES = {
     "codex": ("codex-events.jsonl", "openai"),
     "openclaw": ("openclaw-events.jsonl", "openrouter"),
     "opencode": ("opencode-events.jsonl", "opencode"),
+    # Direct ds-call.py DeepSeek calls — same openrouter provider as openclaw,
+    # so they aggregate under the shared openrouter/deepseek/deepseek-v4-pro key.
+    "dscall": ("dscall-events.jsonl", "openrouter"),
 }
 PROVIDER_ALIASES = {
     "anthropic": "claude",
