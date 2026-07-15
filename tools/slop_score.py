@@ -25,12 +25,13 @@ Stdlib only.
 from __future__ import annotations
 
 import argparse
+import glob
 import json
 import os
 import re
 import sys
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -150,6 +151,133 @@ def score_run(run_dir: Path, *, config: dict | None = None) -> list[dict]:
     return out
 
 
+def _model_short(name: object) -> str:
+    """Compact per-agent label, mirrors backend/server.py _model_short so the
+    slop widget's agents match the models widget ("opus 4.8", "gpt-5.6-sol")."""
+    if not isinstance(name, str):
+        return "unknown"
+    bare = name.lower()
+    for prefix in ("anthropic/", "openai/", "claude-", "claude/"):
+        if bare.startswith(prefix):
+            bare = bare[len(prefix):]
+            break
+    parts = bare.split("-")
+    if len(parts) >= 2 and parts[1].isdigit():
+        if len(parts) >= 3 and parts[2].isdigit():
+            return f"{parts[0]} {parts[1]}.{parts[2]}"
+        return f"{parts[0]} {parts[1]}"
+    return bare
+
+
+def _assistant_text(content: object) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(
+            str(block.get("text", ""))
+            for block in content
+            if isinstance(block, dict) and block.get("type") == "text"
+        )
+    return ""
+
+
+def _parse_ts(value: object) -> datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+# Cap concatenated per-(session,model) text so a marathon session's megabytes
+# don't make the regex pass pathological. 200k chars is ~30k words — plenty for
+# a stable slop estimate.
+_MAX_SCORE_CHARS = 200_000
+
+
+def score_transcripts(
+    scan_dir: Path,
+    *,
+    lookback_days: int = 30,
+    now: datetime | None = None,
+    config: dict | None = None,
+) -> list[dict]:
+    """Score the AI's own responses from Claude transcripts, one scored item per
+    (session, model). agent = pretty model name, role = "assistant". Only
+    aggregate scores leave this function — raw response text never does.
+
+    Reads ~/.claude/projects/*/*.jsonl (assistant events with a text body),
+    dedupes by message uuid, and restricts to the lookback window by local day.
+    """
+    current = (now or datetime.now().astimezone())
+    cutoff = current - timedelta(days=max(1, int(lookback_days)))
+    pattern = str(Path(scan_dir).expanduser() / "*" / "*.jsonl")
+
+    buckets: dict[tuple[str, str], dict] = {}
+    seen_uuids: set[str] = set()
+    for path_str in glob.glob(pattern):
+        try:
+            with open(path_str, encoding="utf-8") as source:
+                for line in source:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        event = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if event.get("type") != "assistant":
+                        continue
+                    message = event.get("message")
+                    if not isinstance(message, dict):
+                        continue
+                    model = message.get("model")
+                    if not isinstance(model, str) or not model or model == "<synthetic>":
+                        continue
+                    uuid = event.get("uuid")
+                    if isinstance(uuid, str) and uuid:
+                        if uuid in seen_uuids:
+                            continue
+                        seen_uuids.add(uuid)
+                    ts = _parse_ts(event.get("timestamp") or event.get("ts"))
+                    if ts is None:
+                        continue
+                    ts = ts.astimezone()
+                    if ts < cutoff or ts > current:
+                        continue
+                    text = _assistant_text(message.get("content"))
+                    if not text.strip():
+                        continue
+                    session_id = event.get("session_id")
+                    if not isinstance(session_id, str) or not session_id:
+                        session_id = Path(path_str).stem
+                    key = (session_id, model)
+                    bucket = buckets.get(key)
+                    if bucket is None:
+                        bucket = buckets[key] = {"chunks": [], "chars": 0, "created": ts}
+                    if bucket["chars"] < _MAX_SCORE_CHARS:
+                        bucket["chunks"].append(text)
+                        bucket["chars"] += len(text)
+                    if ts < bucket["created"]:
+                        bucket["created"] = ts
+        except (OSError, UnicodeDecodeError):
+            continue
+
+    scored: list[dict] = []
+    for (session_id, model), bucket in buckets.items():
+        joined = "\n".join(bucket["chunks"])[:_MAX_SCORE_CHARS]
+        result = score_text(joined, config=config)
+        result.update({
+            "run_id": session_id,
+            "created_at": bucket["created"].isoformat(timespec="seconds"),
+            "role": "assistant",
+            "agent": _model_short(model),
+        })
+        scored.append(result)
+    return scored
+
+
 def aggregate(scored: list[dict]) -> dict:
     """Aggregate scored runs into per-agent / per-role / per-session blocks."""
     by_session = defaultdict(list)
@@ -211,28 +339,58 @@ def main(argv: list[str] | None = None) -> int:
         help="Directory containing orchestrate-runs/*/state.json subdirs.",
     )
     parser.add_argument(
+        "--source",
+        choices=("runs", "transcripts", "both"),
+        default="runs",
+        help="What to score: orchestrate 'runs', Claude 'transcripts' (per model), or 'both'.",
+    )
+    parser.add_argument(
+        "--scan-dir",
+        default=str(Path.home() / ".claude" / "projects"),
+        help="Claude projects dir for --source transcripts/both.",
+    )
+    parser.add_argument(
+        "--lookback-days",
+        type=int,
+        default=30,
+        help="Transcript lookback window in days (transcripts/both).",
+    )
+    parser.add_argument(
         "--output",
         default=str(PROJECT_ROOT / "tracker" / "slop.json"),
         help="Path to write slop.json aggregate.",
     )
     args = parser.parse_args(argv)
 
-    runs_dir = Path(args.runs_dir)
-    if not runs_dir.is_dir():
-        print(f"[slop-score] runs dir not found: {runs_dir}", file=sys.stderr)
-        return 2
-
     scored: list[dict] = []
-    for entry in sorted(runs_dir.iterdir()):
-        if not entry.is_dir():
-            continue
-        scored.extend(score_run(entry))
+    runs_scanned = 0
+
+    if args.source in ("runs", "both"):
+        runs_dir = Path(args.runs_dir)
+        if runs_dir.is_dir():
+            for entry in sorted(runs_dir.iterdir()):
+                if not entry.is_dir():
+                    continue
+                runs_scanned += 1
+                scored.extend(score_run(entry))
+        elif args.source == "runs":
+            print(f"[slop-score] runs dir not found: {runs_dir}", file=sys.stderr)
+            return 2
+        else:
+            print(f"[slop-score] runs dir not found (continuing, transcripts only): {runs_dir}", file=sys.stderr)
+
+    transcript_items = 0
+    if args.source in ("transcripts", "both"):
+        transcript_scored = score_transcripts(Path(args.scan_dir), lookback_days=args.lookback_days)
+        transcript_items = len(transcript_scored)
+        scored.extend(transcript_scored)
 
     summary = aggregate(scored)
     payload = {
         "schema_version": 1,
         "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
         "config": _resolve_config({}),
+        "source": args.source,
         "scored": scored,
         "summary": summary,
     }
@@ -240,7 +398,8 @@ def main(argv: list[str] | None = None) -> int:
     atomic_write(output, json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
     print(f"[slop-score] wrote {output}")
     print(
-        f"[slop-score] runs_scanned={sum(1 for _ in runs_dir.iterdir() if _.is_dir())} "
+        f"[slop-score] source={args.source} runs_scanned={runs_scanned} "
+        f"transcript_items={transcript_items} "
         f"messages_scored={summary['messages_scored']} "
         f"agents={len(summary['by_agent'])}"
     )

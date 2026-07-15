@@ -12,10 +12,12 @@ if str(ROOT) not in sys.path:
 
 from tools.slop_score import (
     DEFAULT_WEIGHTS,
+    _model_short,
     aggregate,
     main,
     score_run,
     score_text,
+    score_transcripts,
 )
 
 
@@ -263,6 +265,76 @@ class WeightsTests(unittest.TestCase):
     def test_default_weights_sum_to_one(self) -> None:
         total = sum(DEFAULT_WEIGHTS.values())
         self.assertAlmostEqual(1.0, total, places=4)
+
+
+class ModelShortTests(unittest.TestCase):
+    def test_labels_match_dashboard_style(self) -> None:
+        self.assertEqual(_model_short("claude-opus-4-8"), "opus 4.8")
+        self.assertEqual(_model_short("claude-fable-5"), "fable 5")
+        self.assertEqual(_model_short("claude-sonnet-5"), "sonnet 5")
+        self.assertEqual(_model_short("gpt-5.6-sol"), "gpt-5.6-sol")
+        self.assertEqual(_model_short(None), "unknown")
+
+
+class ScoreTranscriptsTests(unittest.TestCase):
+    def _write_transcript(self, root: Path, project: str, name: str, lines: list[dict]) -> None:
+        d = root / project
+        d.mkdir(parents=True, exist_ok=True)
+        with (d / name).open("w", encoding="utf-8") as fh:
+            for obj in lines:
+                fh.write(json.dumps(obj, ensure_ascii=False) + "\n")
+
+    def _assistant(self, session: str, model: str, text: str, ts: str, uuid: str) -> dict:
+        return {
+            "type": "assistant",
+            "session_id": session,
+            "uuid": uuid,
+            "timestamp": ts,
+            "message": {"role": "assistant", "model": model, "content": [{"type": "text", "text": text}]},
+        }
+
+    def test_scores_one_item_per_session_model_and_tags_agent(self) -> None:
+        from datetime import datetime, timezone
+
+        now = datetime(2026, 7, 15, 12, 0, tzinfo=timezone.utc)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._write_transcript(root, "projA", "s1.jsonl", [
+                self._assistant("s1", "claude-opus-4-8", "Here is a concrete fix. Applied it.", "2026-07-15T10:00:00Z", "u1"),
+                self._assistant("s1", "claude-opus-4-8", "Ran the tests, all green.", "2026-07-15T10:05:00Z", "u2"),
+                self._assistant("s1", "claude-fable-5", "Quick answer.", "2026-07-15T10:06:00Z", "u3"),
+                # user line + synthetic must be ignored
+                {"type": "user", "session_id": "s1", "message": {"role": "user", "content": "do it"}},
+                self._assistant("s1", "<synthetic>", "ignore", "2026-07-15T10:07:00Z", "u4"),
+            ])
+            scored = score_transcripts(root, lookback_days=30, now=now)
+
+        agents = {s["agent"] for s in scored}
+        self.assertEqual(agents, {"opus 4.8", "fable 5"})
+        # opus 4.8 has two messages pooled into ONE (session, model) item
+        opus = [s for s in scored if s["agent"] == "opus 4.8"]
+        self.assertEqual(len(opus), 1)
+        self.assertTrue(all(s["role"] == "assistant" for s in scored))
+        self.assertTrue(all(0 <= s["score"] <= 100 for s in scored))
+
+    def test_dedupes_by_uuid_and_respects_window(self) -> None:
+        from datetime import datetime, timezone
+
+        now = datetime(2026, 7, 15, 12, 0, tzinfo=timezone.utc)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            # same uuid twice (overlapping transcripts) + one out-of-window
+            self._write_transcript(root, "projA", "a.jsonl", [
+                self._assistant("s1", "claude-opus-4-8", "one two three four", "2026-07-15T10:00:00Z", "dup"),
+            ])
+            self._write_transcript(root, "projB", "b.jsonl", [
+                self._assistant("s1", "claude-opus-4-8", "one two three four", "2026-07-15T10:00:00Z", "dup"),
+                self._assistant("s2", "claude-opus-4-8", "old work", "2026-01-01T10:00:00Z", "old"),
+            ])
+            scored = score_transcripts(root, lookback_days=30, now=now)
+
+        # dup collapsed, s2 out of window → only session s1 survives
+        self.assertEqual({s["run_id"] for s in scored}, {"s1"})
 
 
 if __name__ == "__main__":
