@@ -39,20 +39,32 @@ class ChunkModeTests(unittest.TestCase):
             "model": "claude-opus-4-7",
         }
 
-    def test_chunk_date_preserves_parsed_calendar_day(self):
-        first = datetime(2026, 5, 15, 23, 59, tzinfo=timezone.utc)
-        second = datetime(2026, 5, 16, 0, 1, tzinfo=timezone.utc)
-        events = [
-            self._event_at("s1", first),
-            self._event_at("s1", second),
-        ]
+    def test_chunk_date_buckets_same_instant_regardless_of_source_offset(self):
+        # The real invariant (Codex-audit MED fix): a UTC transcript timestamp and
+        # a local-offset AI timestamp for the SAME instant must land in the SAME
+        # day-chunk, else late-night prompts get filtered out of their day. Assert
+        # offset-independence rather than pinning a UTC calendar day (which is
+        # machine-tz-coupled and encoded the old buggy behaviour).
+        utc_z = summary.parse_event_ts("2026-05-15T23:59:00+00:00")
+        # Same instant expressed with a +05:00 wall-clock offset.
+        offset_five = summary.parse_event_ts("2026-05-16T04:59:00+05:00")
+        self.assertEqual(utc_z, offset_five)  # sanity: same moment
+        self.assertEqual(
+            summary.chunk_date(utc_z),
+            summary.chunk_date(offset_five),
+        )
 
-        dates = {
-            summary.chunk_date(summary.parse_event_ts(event["ts"]))
-            for event in events
-        }
-
-        self.assertEqual(dates, {"2026-05-15", "2026-05-16"})
+    def test_chunk_date_is_local_day_boundary(self):
+        # A tz-independent check that bucketing uses the system-local day: a naive
+        # datetime is treated as local, and an aware datetime for the same local
+        # wall-clock instant buckets identically.
+        naive = datetime(2026, 5, 16, 10, 0)
+        aware_local = naive.astimezone()
+        self.assertEqual(
+            summary.chunk_date(naive),
+            summary.chunk_date(aware_local),
+        )
+        self.assertEqual(summary.chunk_date(naive), "2026-05-16")
 
     def test_default_session_mode_matches_pinned_pre_change_shape(self):
         self._set_unit("session")
@@ -88,6 +100,7 @@ class ChunkModeTests(unittest.TestCase):
             "hours_ceiling_removed": 0.0,
             "baseline_per_event_p95": 1.0,
             "sessions_covered": 2,
+            "distinct_sessions_covered": 2,
             "sessions_total": 2,
             "unit": "session",
         })

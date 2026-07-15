@@ -25,9 +25,16 @@ LAST_UUIDS_FILE = TRACKER_DIR / ".last-uuids.json"
 LOCK_FILE = TRACKER_DIR / ".claude-events.lock"
 
 # Pricing as of 2026-05-09. Values are USD per 1M tokens.
-OPUS_PRICING = {"in": 15.00, "out": 75.00, "cache_read": 1.50, "cache_write": 18.75}
+# Per-1M-token USD list rates (standard API, July 2026). cache_read = 10% of
+# input (90% caching discount); cache_write = 1.25x input (5-min TTL).
+# Opus 4.7/4.8 are both $5/$25 standard — the previous $15/$75 was legacy
+# Claude-3-Opus and inflated the "$ saved" headline ~3x.
+OPUS_PRICING = {"in": 5.00, "out": 25.00, "cache_read": 0.50, "cache_write": 6.25}
 SONNET_PRICING = {"in": 3.00, "out": 15.00, "cache_read": 0.30, "cache_write": 3.75}
 HAIKU_PRICING = {"in": 1.00, "out": 5.00, "cache_read": 0.10, "cache_write": 1.25}
+# Fable 5 ($10/$50) — 2x standard Opus 4.8. Previously unrecognized → priced at
+# $0 with an unknown-pricing flag, so Fable work showed as "didn't contribute".
+FABLE_PRICING = {"in": 10.00, "out": 50.00, "cache_read": 1.00, "cache_write": 12.50}
 
 
 def pricing_for_model(model: str) -> dict | None:
@@ -35,10 +42,13 @@ def pricing_for_model(model: str) -> dict | None:
         return None
     if model.startswith("claude-opus-4"):
         return OPUS_PRICING
-    if model.startswith("claude-sonnet-4"):
+    # Sonnet 4.x and 5 share the $3/$15 standard rate.
+    if model.startswith("claude-sonnet-4") or model.startswith("claude-sonnet-5"):
         return SONNET_PRICING
     if model.startswith("claude-haiku-4"):
         return HAIKU_PRICING
+    if model.startswith("claude-fable-5"):
+        return FABLE_PRICING
     return None
 
 

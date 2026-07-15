@@ -397,10 +397,12 @@ def count_profanity(user_messages: list[str]) -> int:
 def count_appreciation(user_messages: list[str]) -> int:
     """Count appreciation markers in user messages — symmetric to count_profanity.
 
-    Matches the oracle's appreciation_score lexicon (direct thanks + short
-    acks + momentum + playful + emoji). Profanity-as-positive carve-outs
-    («охуенно», «нихуя себе») count here too — direction matters more than
-    the word (see oracle-prompt.txt CRITICAL note).
+    Tightened lexicon (fixes the 10164→30 over-count): ONLY genuine gratitude
+    and unambiguous praise count — «спасибо/благодарю/красав/обожаю/ты лучший»,
+    thanks/awesome/excellent/brilliant/love it. Bare acks («отлично», «круто»),
+    momentum markers, laughter/«))» smileys, emoji, and the old
+    profanity-as-positive carve-out are deliberately NOT counted — they signal
+    "proceed"/energy, not thanks, and used to swamp the real signal.
     """
     total = 0
     for message in user_messages:

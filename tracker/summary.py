@@ -111,6 +111,15 @@ def parse_event_ts(value: object) -> datetime | None:
 
 
 def chunk_date(ts: datetime) -> str:
+    # Codex-audit MED: bucket by system-LOCAL calendar day, not each timestamp's
+    # native offset. AI events carry the machine's local offset while transcript
+    # prompts are UTC ("Z"); taking .date() on each raw offset put the same instant
+    # in different day-chunks around midnight, silently dropping late-night prompts
+    # from their day's allowed set. .astimezone() (no arg) converts both to system
+    # local first, so human and AI timestamps agree on the day boundary the user
+    # actually experiences. tz-aware in → local; naive in → already local.
+    if ts.tzinfo is not None:
+        ts = ts.astimezone()
     return ts.date().isoformat()
 
 
@@ -682,14 +691,16 @@ def is_human_prompt(event: dict) -> bool:
     if isinstance(content, str):
         return bool(content.strip())
     if isinstance(content, list):
+        # A pure tool-result "user" line carries only tool_result blocks and no
+        # text, so requiring a genuine text block already excludes it. Codex-audit
+        # MED: do NOT additionally veto on the presence of a tool_result — when the
+        # user types while a tool result is pending, Claude Code bundles both into
+        # one line, and that IS a real prompt we must not drop.
         has_text = any(
             isinstance(b, dict) and b.get("type") == "text" and str(b.get("text", "")).strip()
             for b in content
         )
-        has_tool_result = any(
-            isinstance(b, dict) and b.get("type") == "tool_result" for b in content
-        )
-        return has_text and not has_tool_result
+        return has_text
     return False
 
 
@@ -886,6 +897,10 @@ def summarize_productivity(events: list[dict], gap_minutes: int = 2) -> dict | N
             "hours_ceiling_removed": hours_ceiling_removed,
             "baseline_per_event_p95": percentile(baseline_per_event_values, 95),
             "sessions_covered": len(covered_session_ids),
+            # Distinct sessions (== sessions_covered in session mode). The
+            # per-session human-attention floor must divide by DISTINCT sessions,
+            # not coverage-units, so chunk mode below can't over-floor.
+            "distinct_sessions_covered": len(covered_session_ids),
             "sessions_total": len(session_ranges),
             "unit": unit,
         }
@@ -1061,6 +1076,12 @@ def summarize_productivity(events: list[dict], gap_minutes: int = 2) -> dict | N
         "hours_ceiling_removed": hours_ceiling_removed,
         "baseline_per_event_p95": percentile(baseline_per_event_values, 95),
         "sessions_covered": len(covered_fallback_session_ids) + len(covered_chunk_keys),
+        # Distinct real sessions across all covered chunks + fallbacks. A
+        # multi-day session spans several (session, day) chunk keys but is ONE
+        # session for floor purposes — otherwise the floor is multiplied per day.
+        "distinct_sessions_covered": len(
+            covered_fallback_id_set | {key[0] for key in covered_chunk_key_set}
+        ),
         "sessions_total": total_units,
         "unit": unit,
     }

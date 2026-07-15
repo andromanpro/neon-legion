@@ -20,18 +20,28 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 from tools import config as cfg  # noqa: E402
+import importlib.util  # noqa: E402
 
 TRACKER_DIR = PROJECT_ROOT / "tracker"
 EVENTS_FILE = TRACKER_DIR / "codex-events.jsonl"
 LOCK_FILE = TRACKER_DIR / ".codex-events.lock"
 DEFAULT_SESSIONS_ROOT = Path.home() / ".codex" / "sessions"
 
-PRICING = {
-    "input": 10.0 / 1_000_000,
-    "cached_input": 2.5 / 1_000_000,
-    "output": 30.0 / 1_000_000,
-    "reasoning": 30.0 / 1_000_000,
-}
+
+def _load_codex_track():
+    """Single source of truth for OpenAI/Codex pricing (per-model). Hyphenated
+    filename → importlib. Mirrors backfill.py importing the Claude hook."""
+    path = PROJECT_ROOT / "tracker" / "codex-track.py"
+    spec = importlib.util.spec_from_file_location("codex_track", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Unable to import codex pricing from {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+_CODEX = _load_codex_track()
+estimate_cost = _CODEX.estimate_cost  # estimate_cost(model, in, cached, out, reasoning)
 
 
 if hasattr(sys.stdout, "reconfigure"):
@@ -54,21 +64,6 @@ def as_int(value: object) -> int:
         return int(value or 0)
     except (TypeError, ValueError):
         return 0
-
-
-def estimate_cost(
-    input_tokens: int,
-    cached_input_tokens: int,
-    output_tokens: int,
-    reasoning_tokens: int,
-) -> float:
-    cost = (
-        input_tokens * PRICING["input"]
-        + cached_input_tokens * PRICING["cached_input"]
-        + output_tokens * PRICING["output"]
-        + reasoning_tokens * PRICING["reasoning"]
-    )
-    return round(cost, 6)
 
 
 def parse_ts(value: object) -> datetime | None:
@@ -258,6 +253,7 @@ def read_session_events(path: Path, since: datetime | None) -> list[dict]:
                 "total_tokens": total_tokens,
                 "duration_ms": 0,
                 "cost_estimate_usd": estimate_cost(
+                    current_model,
                     input_tokens,
                     cached_input_tokens,
                     output_tokens,

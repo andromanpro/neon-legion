@@ -30,22 +30,59 @@ TRACKER_DIR = PROJECT_ROOT / "tracker"
 EVENTS_FILE = TRACKER_DIR / "codex-events.jsonl"
 LOCK_FILE = TRACKER_DIR / ".codex-events.lock"
 
-# Pricing per million tokens — used to compute "what API would have cost" if
-# the user paid OpenAI per token instead of via a ChatGPT subscription. These
-# defaults track GPT-5.5 (gpt-5.5) rates as of 2026-Q2:
-#   input          $10 / 1M
-#   cached_input   $2.50 / 1M  (90% cache discount)
-#   output         $30 / 1M
-#   reasoning      $30 / 1M    (charged at output rate)
-# Source: OpenAI pricing page, capture from 2026-05. Override per environment
-# by setting OPENAI_TOKEN_PRICE_{INPUT,CACHED_INPUT,OUTPUT,REASONING} (USD per
-# million tokens) before launching the wrapper. See `_load_pricing()` below.
-PRICING = {
-    "input": cfg.get_legacy_env("OPENAI_TOKEN_PRICE_INPUT", 10.0, float) / 1_000_000,
-    "cached_input": cfg.get_legacy_env("OPENAI_TOKEN_PRICE_CACHED_INPUT", 2.5, float) / 1_000_000,
-    "output": cfg.get_legacy_env("OPENAI_TOKEN_PRICE_OUTPUT", 30.0, float) / 1_000_000,
-    "reasoning": cfg.get_legacy_env("OPENAI_TOKEN_PRICE_REASONING", 30.0, float) / 1_000_000,
+# Pricing per MILLION tokens — "what the API would have cost" if the user paid
+# OpenAI per token instead of via a ChatGPT subscription. Rates are per-model
+# (OpenAI split GPT-5.6 into Sol/Terra/Luna tiers, July 2026):
+#   gpt-5.6-sol   $5 in / $30 out   (flagship)
+#   gpt-5.6-terra $2.50 / $15       (balanced)
+#   gpt-5.6-luna  $1 / $6           (fastest/cheapest)
+#   gpt-5.5       $5 / $30          (prev default was $10 in — 2x too high)
+#   gpt-5.4       $2.50 / $15
+# cached_input = 10% of input (90% cache-read discount); reasoning tokens are
+# billed at the output rate. Source: OpenAI pricing (aipricing.guru / finout,
+# July 2026). The global OPENAI_TOKEN_PRICE_* env vars still override the
+# DEFAULT tier (used for unrecognized model strings) for back-compat.
+def _rate(inp: float, cached: float, out: float, reasoning: float) -> dict:
+    return {
+        "input": inp / 1_000_000,
+        "cached_input": cached / 1_000_000,
+        "output": out / 1_000_000,
+        "reasoning": reasoning / 1_000_000,
+    }
+
+
+MODEL_PRICING = {
+    "gpt-5.6-sol": _rate(5.0, 0.5, 30.0, 30.0),
+    "gpt-5.6-terra": _rate(2.5, 0.25, 15.0, 15.0),
+    "gpt-5.6-luna": _rate(1.0, 0.1, 6.0, 6.0),
+    "gpt-5.5": _rate(5.0, 0.5, 30.0, 30.0),
+    "gpt-5.4": _rate(2.5, 0.25, 15.0, 15.0),
 }
+
+# Fallback for unrecognized models (e.g. "codex-auto-review", future variants):
+# flagship Sol/5.5 rates, env-overridable for back-compat.
+DEFAULT_PRICING = _rate(
+    cfg.get_legacy_env("OPENAI_TOKEN_PRICE_INPUT", 5.0, float),
+    cfg.get_legacy_env("OPENAI_TOKEN_PRICE_CACHED_INPUT", 0.5, float),
+    cfg.get_legacy_env("OPENAI_TOKEN_PRICE_OUTPUT", 30.0, float),
+    cfg.get_legacy_env("OPENAI_TOKEN_PRICE_REASONING", 30.0, float),
+)
+
+
+def pricing_for_model(model: object) -> dict:
+    """Per-token price dict for an OpenAI/Codex model string.
+
+    Sub-variant tolerant: "gpt-5.6-sol-ultra" or "gpt-5.6-sol (2026-07)" resolve
+    to the sol tier via prefix match. Unknown → DEFAULT_PRICING (never None, so
+    Codex cost is always populated — OpenAI is pay-per-token, no free tier).
+    """
+    name = str(model or "").lower().strip()
+    if name in MODEL_PRICING:
+        return MODEL_PRICING[name]
+    for key, rate in MODEL_PRICING.items():
+        if name.startswith(key):
+            return rate
+    return DEFAULT_PRICING
 
 LOCK_TIMEOUT_SECONDS = 10.0
 STALE_LOCK_SECONDS = 120.0
@@ -65,16 +102,18 @@ def as_int(value: object) -> int:
 
 
 def estimate_cost(
+    model: object,
     input_tokens: int,
     cached_input_tokens: int,
     output_tokens: int,
     reasoning_tokens: int,
 ) -> float:
+    pricing = pricing_for_model(model)
     cost = (
-        input_tokens * PRICING["input"]
-        + cached_input_tokens * PRICING["cached_input"]
-        + output_tokens * PRICING["output"]
-        + reasoning_tokens * PRICING["reasoning"]
+        input_tokens * pricing["input"]
+        + cached_input_tokens * pricing["cached_input"]
+        + output_tokens * pricing["output"]
+        + reasoning_tokens * pricing["reasoning"]
     )
     return round(cost, 6)
 
@@ -251,6 +290,7 @@ def build_event_from_codex_events(
         total_tokens = input_tokens + cached_input_tokens + output_tokens + reasoning_tokens
 
     partial = interrupted or exit_code != 0 or not usage_captured
+    model = resolve_model(args, events)
 
     return {
         "schema_version": 1,
@@ -259,7 +299,7 @@ def build_event_from_codex_events(
         "sequence_no": 1,
         "ts": datetime.now().astimezone().isoformat(timespec="milliseconds"),
         "session_id": session_id,
-        "model": resolve_model(args, events),
+        "model": model,
         "input_tokens": input_tokens,
         "cached_input_tokens": cached_input_tokens,
         "output_tokens": output_tokens,
@@ -267,6 +307,7 @@ def build_event_from_codex_events(
         "total_tokens": total_tokens,
         "duration_ms": duration_ms,
         "cost_estimate_usd": estimate_cost(
+            model,
             input_tokens,
             cached_input_tokens,
             output_tokens,

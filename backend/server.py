@@ -351,6 +351,11 @@ def productivity_payload(events, gap_minutes):
         hours_ceiling_removed = 0.0
         baseline_per_event_p95 = 0.0
         sessions_covered = 0
+        # Codex-audit HIGH: these must exist in BOTH branches or the multiplier
+        # block below raises UnboundLocalError on empty/uncovered periods.
+        human_attention_hours = 0.0
+        human_attention_fallbacks = 0
+        distinct_sessions_covered = 0
         sessions_total = len(session_ranges(events))
     else:
         active_hours = summary.as_float(productivity.get("active_hours_with_ai"))
@@ -365,6 +370,12 @@ def productivity_payload(events, gap_minutes):
         hours_ceiling_removed = summary.as_float(productivity.get("hours_ceiling_removed"))
         baseline_per_event_p95 = summary.as_float(productivity.get("baseline_per_event_p95"))
         sessions_covered = summary.as_int(productivity.get("sessions_covered"))
+        # Floor divides by DISTINCT sessions, not chunks (chunk mode inflates
+        # sessions_covered to per-day chunk count). Falls back to sessions_covered
+        # for any producer that doesn't emit the distinct count.
+        distinct_sessions_covered = summary.as_int(
+            productivity.get("distinct_sessions_covered", sessions_covered)
+        )
         sessions_total = summary.as_int(productivity.get("sessions_total"))
         unit = productivity.get("unit") or unit
 
@@ -375,8 +386,13 @@ def productivity_payload(events, gap_minutes):
     # Floor against divide-by-near-zero (DeepSeek Q3): each covered session implies
     # at least HUMAN_ATTENTION_FLOOR_MIN_PER_SESSION of human cost, so a lone tiny
     # prompt can't explode the multiplier.
-    if human_attention_hours > 0:
-        floor_hours = sessions_covered * (summary.HUMAN_ATTENTION_FLOOR_MIN_PER_SESSION / 60.0)
+    # Codex-audit HIGH: apply the floor whenever we have covered sessions, even if
+    # measured human attention is exactly 0 (sparse prompts >gap apart). Falling
+    # back to AI-active wall-clock there would re-inject autonomous runtime into the
+    # denominator — the very thing this metric was changed to exclude. AI-active is
+    # only used when there are no covered sessions at all (no floor basis).
+    floor_hours = distinct_sessions_covered * (summary.HUMAN_ATTENTION_FLOOR_MIN_PER_SESSION / 60.0)
+    if distinct_sessions_covered > 0:
         denom_hours = max(human_attention_hours, floor_hours)
     else:
         denom_hours = active_hours

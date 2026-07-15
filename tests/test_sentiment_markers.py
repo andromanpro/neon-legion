@@ -73,7 +73,10 @@ class CountAppreciationTests(unittest.TestCase):
         ])
         self.assertGreaterEqual(count, 4)
 
-    def test_short_acks_counted(self) -> None:
+    def test_short_acks_not_counted(self) -> None:
+        # Tightened lexicon (10164→30 fix): bare acks/approval markers are NOT
+        # gratitude — «отлично» means "proceed", not "thank you". They must not
+        # inflate the appreciation count.
         count = estimate_task.count_appreciation([
             "отлично",
             "круто",
@@ -83,9 +86,10 @@ class CountAppreciationTests(unittest.TestCase):
             "зашло",
             "то что надо",
         ])
-        self.assertGreaterEqual(count, 7)
+        self.assertEqual(count, 0)
 
-    def test_momentum_phrases_counted(self) -> None:
+    def test_momentum_phrases_not_counted(self) -> None:
+        # Momentum/continuation markers are energy, not gratitude.
         count = estimate_task.count_appreciation([
             "давай ещё",
             "погнали",
@@ -94,42 +98,47 @@ class CountAppreciationTests(unittest.TestCase):
             "keep going",
             "next step",
         ])
-        self.assertGreaterEqual(count, 6)
+        self.assertEqual(count, 0)
 
-    def test_emoji_counted(self) -> None:
+    def test_emoji_not_counted(self) -> None:
+        # Celebratory/momentum emoji read as energy, not thanks — excluded.
         count = estimate_task.count_appreciation([
             "🚀",
-            "👍 nice",
-            "❤️ love it",
+            "👍",
+            "❤️",
+            "🔥💯🎉",
         ])
-        self.assertGreaterEqual(count, 3)
+        self.assertEqual(count, 0)
 
-    def test_playful_counted(self) -> None:
+    def test_playful_not_counted(self) -> None:
+        # Laughter and «))» smileys are not gratitude markers.
         count = estimate_task.count_appreciation([
             "ахаха",
             "ну круто))",
             "ага)",
         ])
-        # «ахаха» + «))» + «круто» + «)» — at least 3 marker hits
-        self.assertGreaterEqual(count, 3)
+        self.assertEqual(count, 0)
 
-    def test_profanity_as_positive_exclamation_counted(self) -> None:
-        # Carve-out from oracle prompt: profanity-as-exclamation IS appreciation.
+    def test_profanity_as_positive_not_counted_as_appreciation(self) -> None:
+        # The old profanity-as-positive carve-out was dropped: «охуенно»/«нихуя
+        # себе» are logged by the profanity counter, not the appreciation one.
         count = estimate_task.count_appreciation([
             "охуенно вышло",
             "нихуя себе",
         ])
-        self.assertGreaterEqual(count, 2)
+        self.assertEqual(count, 0)
 
-    def test_english_positive_counted(self) -> None:
+    def test_english_only_strong_praise_counted(self) -> None:
+        # Generic acks ("perfect", "looks good", "nice one") don't count; only
+        # unambiguous praise ("awesome") does.
         count = estimate_task.count_appreciation([
-            "great work",
-            "perfect",
-            "looks good",
-            "awesome",
-            "nice one",
+            "great work",   # no
+            "perfect",      # no
+            "looks good",   # no
+            "awesome",      # yes
+            "nice one",     # no
         ])
-        self.assertGreaterEqual(count, 5)
+        self.assertEqual(count, 1)
 
 
 class SymmetryTests(unittest.TestCase):
