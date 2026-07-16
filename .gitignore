@@ -10,6 +10,9 @@ tracker/regressions.json
 tracker/slippage.json
 tracker/slop.json
 tracker/reputation.json
+# Frozen per-session human-prompt timestamps (session ids + activity times).
+# Timestamps only, never prompt text — but still personal activity data.
+tracker/human-attention.json
 prompts/private/
 orchestrate-runs/
 

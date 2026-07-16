@@ -17,6 +17,13 @@ CODEX_EVENTS_FILE = PROJECT_ROOT / "tracker" / "codex-events.jsonl"
 OPENCLAW_EVENTS_FILE = PROJECT_ROOT / "tracker" / "openclaw-events.jsonl"
 OPENCODE_EVENTS_FILE = PROJECT_ROOT / "tracker" / "opencode-events.jsonl"
 DSCALL_EVENTS_FILE = PROJECT_ROOT / "tracker" / "dscall-events.jsonl"
+# Frozen human-prompt timestamps per session, captured by
+# tracker/backfill-human-attention.py while the transcript is still on disk.
+# Claude Code rotates transcripts away, and without this cache those sessions
+# silently fell back to AI-event time (i.e. the AI-busy metric this whole
+# denominator was built to stop using), which made the all-time multiplier
+# drift downward on its own as history aged out.
+HUMAN_ATTENTION_CACHE_FILE = PROJECT_ROOT / "tracker" / "human-attention.json"
 EVENTS_FILE = CLAUDE_EVENTS_FILE
 TASKS_FILE = PROJECT_ROOT / "tracker" / "tasks.json"
 PRODUCTIVITY_UNIT = os.environ.get("PRODUCTIVITY_UNIT", "session")
@@ -748,6 +755,56 @@ def resolve_transcript_path(value: object):
         return None
 
 
+_HUMAN_ATTENTION_CACHE: dict[str, list[datetime]] | None = None
+
+
+def reset_human_attention_cache() -> None:
+    """Drop the in-process cache (tests / long-lived processes)."""
+    global _HUMAN_ATTENTION_CACHE
+    _HUMAN_ATTENTION_CACHE = None
+
+
+def read_human_attention_cache(path: Path | None = None) -> dict[str, list[datetime]]:
+    """session_id -> sorted human-prompt timestamps, from the frozen cache.
+
+    Timestamps are stored as epoch seconds and restored as tz-aware local
+    datetimes, so chunk_date() buckets them on the same local-day boundary as
+    the live-transcript path. Missing/corrupt file → {} (callers degrade to the
+    AI-event fallback exactly as before).
+    """
+    global _HUMAN_ATTENTION_CACHE
+    if path is None and _HUMAN_ATTENTION_CACHE is not None:
+        return _HUMAN_ATTENTION_CACHE
+
+    target = path or HUMAN_ATTENTION_CACHE_FILE
+    result: dict[str, list[datetime]] = {}
+    try:
+        with Path(target).open("r", encoding="utf-8") as source:
+            data = json.load(source)
+    except (OSError, json.JSONDecodeError, ValueError):
+        data = {}
+    if isinstance(data, dict):
+        for session_id, entry in data.items():
+            if not isinstance(session_id, str) or not isinstance(entry, dict):
+                continue
+            stamps = entry.get("ts")
+            if not isinstance(stamps, list):
+                continue
+            restored: list[datetime] = []
+            for raw in stamps:
+                try:
+                    restored.append(datetime.fromtimestamp(float(raw)).astimezone())
+                except (TypeError, ValueError, OSError, OverflowError):
+                    continue
+            if restored:
+                restored.sort()
+                result[session_id] = restored
+
+    if path is None:
+        _HUMAN_ATTENTION_CACHE = result
+    return result
+
+
 def _human_attention_hours_for_units(
     units,
     tasks: dict,
@@ -762,14 +819,23 @@ def _human_attention_hours_for_units(
     session (session mode / fallback un-chunked sessions). Missing transcript →
     fall back to the session's AI-event timestamps (restricted to the day too).
     Returns (hours, fallback_unit_count). Transcripts are read once per session.
+
+    Resolution order per session: live transcript (freshest) → frozen cache
+    (tracker/human-attention.json, captured while the transcript existed) → AI
+    events. The cache is what keeps an aged-out session measuring HUMAN time
+    instead of silently reverting to AI-busy time.
     """
     transcript_cache: dict[str, list] = {}
+    frozen = read_human_attention_cache()
 
     def human_ts_for(sid):
         if sid not in transcript_cache:
             entry = tasks.get(sid)
             tpath = resolve_transcript_path(entry.get("transcript_path")) if isinstance(entry, dict) else None
-            transcript_cache[sid] = read_human_message_timestamps(tpath) if tpath is not None else []
+            stamps = read_human_message_timestamps(tpath) if tpath is not None else []
+            if not stamps:
+                stamps = frozen.get(sid, [])
+            transcript_cache[sid] = stamps
         return transcript_cache[sid]
 
     pooled: list[datetime] = []
