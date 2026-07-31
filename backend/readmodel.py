@@ -206,12 +206,62 @@ def aggregate_by_provider(
         _add_stats(by_provider[key], stats)
         by_provider[key]["models"][model] = by_provider[key]["models"].get(model, 0) + _as_int(calls)
 
-        origin = _aggregate_origin(str(provider))
-        if origin is not None:
-            origins = by_provider[key]["origins"]
-            if origin not in origins:
-                origins[origin] = _empty_stats()
-            _add_stats(origins[origin], stats)
+    # Origins from the per-event origin_norm column (mirrors summary.py's
+    # openai/openrouter branches) instead of one hardcoded bucket per provider.
+    origins_sql = cte + """
+        SELECT
+            provider_norm,
+            origin_norm,
+            COUNT(*) AS calls,
+            SUM(input_tokens_norm) AS input_tokens,
+            SUM(output_tokens_norm) AS output_tokens,
+            SUM(cache_read_tokens_norm) AS cache_read_tokens,
+            SUM(cache_creation_tokens_norm) AS cache_creation_tokens,
+            SUM(cached_input_tokens_norm) AS cached_input_tokens,
+            SUM(reasoning_tokens_norm) AS reasoning_tokens,
+            SUM(total_tokens_norm) AS total_tokens,
+            SUM(cost_estimate_usd_norm) AS cost_estimate_usd,
+            SUM(unknown_pricing_flag) AS unknown_pricing_events
+        FROM deduped
+        WHERE origin_norm IS NOT NULL
+        GROUP BY provider_norm, origin_norm
+    """
+    for row in conn.execute(origins_sql, params):
+        (
+            provider,
+            origin,
+            calls,
+            input_tokens,
+            output_tokens,
+            cache_read_tokens,
+            cache_creation_tokens,
+            cached_input_tokens,
+            reasoning_tokens,
+            total_tokens,
+            cost_estimate_usd,
+            unknown_pricing_events,
+        ) = row
+        key = PROVIDER_KEYS.get(str(provider), str(provider))
+        if key not in by_provider:
+            continue
+        origins = by_provider[key]["origins"]
+        if origin not in origins:
+            origins[origin] = _empty_stats()
+        _add_stats(
+            origins[origin],
+            _stats_from_aggregate_row(
+                calls,
+                input_tokens,
+                output_tokens,
+                cache_read_tokens,
+                cache_creation_tokens,
+                cached_input_tokens,
+                reasoning_tokens,
+                total_tokens,
+                cost_estimate_usd,
+                unknown_pricing_events,
+            ),
+        )
 
     return by_provider
 
@@ -336,7 +386,7 @@ def read_events_fast(
             total_tokens, cost_estimate_usd, duration_ms, working_dir,
             tool_uses, stop_reason,
             event_id, tracking_run_id, cached_input_tokens, reasoning_tokens,
-            exit_code, json_provider
+            exit_code, json_provider, provider_norm, origin_norm
         FROM events
     """
     if where:
@@ -366,6 +416,8 @@ def read_events_fast(
             reasoning_tokens,
             exit_code,
             json_provider,
+            provider_norm,
+            origin_norm,
         ) = row
 
         parsed_ts = _parse_event_ts(ts)
@@ -411,6 +463,18 @@ def read_events_fast(
             "reasoning_tokens": reasoning_tokens if reasoning_tokens is not None else 0,
             "exit_code": exit_code,
         }
+        # Surface the stored per-event origin under the field name each
+        # provider's summarize_by_provider branch reads FIRST, so the fast
+        # path yields the same origins breakdown as raw-JSONL events
+        # (Codex-audit MED — fast-path events lost these fields and every
+        # openai event degraded to the "headless" fallback).
+        if origin_norm:
+            if provider_norm == "openai":
+                event["codex_origin"] = origin_norm
+            elif provider_norm == "openrouter":
+                event["openclaw_source"] = origin_norm
+            elif provider_norm == "opencode":
+                event["opencode_agent"] = origin_norm
         rows.append((event, str(provider_key), parsed_ts.timestamp()))
 
     events = _dedupe_fast_events(rows)
@@ -453,6 +517,7 @@ def _deduped_events_cte(
                 -- DeepSeek HIGH #1 on PR #81: NULL cost = missing pricing in source.
                 CASE WHEN cost_estimate_usd IS NULL THEN 1 ELSE 0 END
                     AS unknown_pricing_flag,
+                origin_norm,
                 dedupe_group
             FROM events
             WHERE {" AND ".join(where)}
@@ -549,13 +614,32 @@ def _provider_model_key(provider: str, model: str) -> str:
     return f"{prefix}/{model}"
 
 
-def _aggregate_origin(provider: str) -> str | None:
-    if provider == "openai":
+def _origin_norm(event: dict, provider_norm: str) -> str | None:
+    """Per-event origin — MUST mirror tracker/summary.py exactly:
+    summarize_by_model's openai branch (codex_origin) and openrouter branch.
+    Providers without an origins breakdown store NULL. The old fast path
+    hardcoded a single origin per provider, flattening 27k desktop Codex
+    events into "headless" (Codex-audit MED)."""
+    if provider_norm == "openai":
+        origin = event.get("codex_origin")
+        if isinstance(origin, str) and origin:
+            return origin
+        model = str(event.get("model") or "").lower()
+        originator = str(event.get("originator") or "").lower()
+        source = str(event.get("codex_source") or event.get("source") or "").lower()
+        if model == "codex-auto-review" or "subagent" in source:
+            return "auto_review"
+        if originator == "codex_exec" or source == "exec":
+            return "headless"
+        if originator == "codex-tui" or source == "cli":
+            return "tui"
+        if originator == "codex desktop" or source in {"vscode", "desktop"}:
+            return "desktop"
         return "headless"
-    if provider == "openrouter":
-        return "openclaw"
-    if provider == "opencode":
-        return "opencode"
+    if provider_norm == "openrouter":
+        return str(event.get("openclaw_source") or event.get("source") or "openclaw")
+    if provider_norm == "opencode":
+        return str(event.get("opencode_agent") or event.get("opencode_provider_id") or "opencode")
     return None
 
 
@@ -656,6 +740,12 @@ def _create_schema(conn: sqlite3.Connection) -> None:
             json_provider TEXT,
             provider_norm TEXT NOT NULL,
             model_name TEXT NOT NULL,
+            -- Per-event origin (mirrors summary.codex_origin / the openrouter
+            -- source rules). NULL for providers without an origins breakdown.
+            -- The old fast path hardcoded ALL openai events as "headless",
+            -- flattening 27k desktop rows into the headless bucket
+            -- (Codex-audit MED).
+            origin_norm TEXT,
             aggregate_cache_read_tokens INTEGER DEFAULT 0,
             aggregate_total_tokens INTEGER DEFAULT 0,
             dedupe_group TEXT NOT NULL,
@@ -768,11 +858,11 @@ def _load_event_file(
                     tool_uses, stop_reason,
                     event_id, tracking_run_id, cached_input_tokens,
                     reasoning_tokens, exit_code, json_provider,
-                    provider_norm, model_name, aggregate_cache_read_tokens,
+                    provider_norm, model_name, origin_norm, aggregate_cache_read_tokens,
                     aggregate_total_tokens, dedupe_group,
                     raw_json
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                           ?)
                 """,
                 (
@@ -808,6 +898,7 @@ def _load_event_file(
                     json_provider,
                     provider_norm,
                     model_name,
+                    _origin_norm(event, provider_norm),
                     aggregate_cache_read_tokens,
                     aggregate_total_tokens,
                     dedupe_group,

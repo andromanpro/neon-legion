@@ -24,8 +24,14 @@ def chunk_date(ts: datetime) -> str:
     to tracker/summary.chunk_date — producer (this hook) and the consumer
     (summarize_productivity) key on the same string. Replicated as a local
     one-liner instead of importing summary (which transitively pulls
-    tools.config) to keep this frequently-spawned hook subprocess light."""
-    return ts.date().isoformat()
+    tools.config) to keep this frequently-spawned hook subprocess light.
+
+    Codex-audit MED: the replica had drifted — summary buckets by the LOCAL
+    day (`ts.astimezone().date()`), this one used the timestamp's own zone
+    (UTC in transcripts), so a 22:30Z prompt landed in yesterday's chunk key
+    and the estimate was never found by the aggregator (baseline silently
+    lost for late-evening MSK work)."""
+    return ts.astimezone().date().isoformat()
 
 PROFANITY_RU_PATTERNS = [
     re.compile(r"\bбля[а-яё]*", re.IGNORECASE),

@@ -2,6 +2,7 @@
 import json
 import os
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -170,12 +171,21 @@ def build_event(hook_input: dict, assistant_event: dict, message: dict, usage: d
 
 
 def acquire_lock() -> int | None:
-    try:
-        fd = os.open(str(LOCK_FILE), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-        os.write(fd, str(os.getpid()).encode("ascii"))
-        return fd
-    except FileExistsError:
-        return None
+    """O_EXCL lock with a short retry (two overlapping Stop hooks contend for
+    well under a second). A final miss still returns None and the event is
+    silently skipped THIS run — that's acceptable by design: backfill.py
+    re-reads the transcripts on every deploy and re-ingests anything the hook
+    missed (dedup by session_id+message_uuid), so the ledger heals itself.
+    """
+    for attempt in range(4):
+        try:
+            fd = os.open(str(LOCK_FILE), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.write(fd, str(os.getpid()).encode("ascii"))
+            return fd
+        except FileExistsError:
+            if attempt < 3:
+                time.sleep(0.05)
+    return None
 
 
 def release_lock(fd: int | None) -> None:
