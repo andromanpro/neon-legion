@@ -81,21 +81,21 @@ class ReadHumanTimestampsTests(unittest.TestCase):
 
 class HumanAttentionHoursTests(unittest.TestCase):
     def test_parallel_overlap_human_lt_ai(self):
-        # Two sessions: dense AI events (every 30s for 30 min) but only 2 sparse
-        # human prompts each. Human attention must be << AI-active.
+        # Two sessions running 3h of dense AI work (an event every 30s) while the
+        # human only prompts twice, 25 min apart. Human attention must stay far
+        # below AI-busy time — that difference IS the parallelism credit.
         base = datetime(2026, 5, 20, 12, 0, tzinfo=timezone.utc)
         ai_ts = {"s1": [], "s2": []}
         with tempfile.TemporaryDirectory() as d:
             tasks = {}
             for sid, offset in (("s1", 0), ("s2", 1)):
                 lines = []
-                # dense AI assistant events
-                for i in range(60):
+                # dense AI assistant events, 3h straight
+                for i in range(360):
                     t = base + timedelta(seconds=offset + i * 30)
                     ai_ts[sid].append(t)
                     lines.append({"type": "assistant", "message": {"role": "assistant"},
                                   "timestamp": t.isoformat()})
-                # two human prompts 25 min apart (> 5-min gap → not bridged)
                 for j, mins in enumerate((0, 25)):
                     lines.append({**_user_prompt(f"p{j}"),
                                   "timestamp": (base + timedelta(minutes=mins)).isoformat()})
@@ -108,8 +108,11 @@ class HumanAttentionHoursTests(unittest.TestCase):
                 [{"session_id": s, "ts": t.isoformat()} for s in ai_ts for t in ai_ts[s]], 2
             )
         self.assertEqual(fb, 0)
-        self.assertLess(human_h, ai_merged)   # human attention strictly below AI-busy
-        self.assertEqual(human_h, 0.0)         # prompts 25 min apart, never bridged at 5 min
+        # Prompts 25 min apart sit inside one 30-min gap → they bridge into a
+        # single 25-min block of attention: the human read the diff between them,
+        # which is work and must be counted (it was silently dropped at gap=5).
+        self.assertAlmostEqual(human_h, 25 / 60, places=4)
+        self.assertLess(human_h, ai_merged / 3)  # still << 3h of AI runtime
 
     def test_missing_transcript_falls_back_to_ai(self):
         base = datetime(2026, 5, 20, 9, 0, tzinfo=timezone.utc)
@@ -117,7 +120,27 @@ class HumanAttentionHoursTests(unittest.TestCase):
         tasks = {"s1": {"transcript_path": "nonexistent.jsonl"}}
         human_h, fb = summary.human_attention_hours(["s1"], tasks, ai_ts)
         self.assertEqual(fb, 1)
-        self.assertAlmostEqual(human_h, 4 / 60, places=4)  # 2+2 min bridged at 5-min gap
+        self.assertAlmostEqual(human_h, 4 / 60, places=4)  # 2+2 min bridged at 30-min gap
+
+    def test_walk_away_longer_than_gap_is_not_counted(self):
+        # Negative control for the 30-min gap: a real break (45 min away from the
+        # keyboard) must still split the day into two blocks. If this ever merges,
+        # the denominator has started billing lunch as work.
+        base = datetime(2026, 5, 20, 9, 0, tzinfo=timezone.utc)
+        with tempfile.TemporaryDirectory() as d:
+            lines = [
+                {**_user_prompt("a"), "timestamp": base.isoformat()},
+                {**_user_prompt("b"), "timestamp": (base + timedelta(minutes=20)).isoformat()},
+                # 45-min walk-away — exceeds the gap, breaks the block
+                {**_user_prompt("c"), "timestamp": (base + timedelta(minutes=65)).isoformat()},
+                {**_user_prompt("d"), "timestamp": (base + timedelta(minutes=75)).isoformat()},
+            ]
+            p = Path(d) / "s.jsonl"
+            p.write_text("\n".join(json.dumps(x) for x in lines), encoding="utf-8")
+            human_h, fb = summary.human_attention_hours(["s"], {"s": {"transcript_path": str(p)}}, {})
+        self.assertEqual(fb, 0)
+        # 20 min + 10 min of engaged work, NOT the 75-min wall-clock span
+        self.assertAlmostEqual(human_h, 30 / 60, places=4)
 
     def test_empty_input(self):
         self.assertEqual(summary.human_attention_hours([], {}, {}), (0.0, 0))
@@ -136,7 +159,7 @@ class HumanAttentionHoursTests(unittest.TestCase):
             p = Path(d) / "s.jsonl"
             p.write_text("\n".join(json.dumps(x) for x in lines), encoding="utf-8")
             tasks = {"s": {"transcript_path": str(p)}}
-            # whole session: two 3-min spans bridged at 5-min gap = 6 min total
+            # whole session: two 3-min spans a day apart, never bridged = 6 min
             whole, _ = summary._human_attention_hours_for_units([("s", None)], tasks, {})
             # day-1 only: a single 3-min span
             day1, _ = summary._human_attention_hours_for_units([("s", "2026-05-20")], tasks, {})

@@ -670,9 +670,18 @@ def active_time_hours_merged(events: list[dict], gap_minutes: int = 2) -> float:
 #
 # This denominator instead counts the *human's* engaged time: timestamps of
 # genuine human prompts (NOT tool-result "user" lines, NOT sub-agent sidechain
-# turns), pooled across covered sessions, merged with a 5-min gap. Autonomous
+# turns), pooled across covered sessions, merged with the gap below. Autonomous
 # stretches between prompts cost ~0 → parallelism is credited honestly.
-HUMAN_ATTENTION_GAP_MINUTES = 5
+#
+# The gap was 5 min until 2026-07-31 and undercounted the human by ~4.6× against
+# observed behaviour: on 2026-07-30 the user prompted 114 times between 09:35 and
+# 23:56, yet a 5-min merge scored 0.31h of "attention". The reason is that 5 min
+# only merges *bursts of typing*. The real cycle with agents is prompt → read the
+# diff → verify → prompt again, and the reading half — the actual work — landed in
+# the gaps. 30 min keeps one prompt→review→prompt cycle intact while still
+# breaking on genuine walk-aways, and yields ~6h/day over the last 30 days, which
+# matches an observed 12-14h presence window with real breaks in it.
+HUMAN_ATTENTION_GAP_MINUTES = 30
 
 # Floor against divide-by-near-zero: a single 10-second prompt into a session
 # that then ran autonomously would otherwise give human_attention ≈ 0.003h and
