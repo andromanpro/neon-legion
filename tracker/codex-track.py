@@ -108,12 +108,22 @@ def estimate_cost(
     output_tokens: int,
     reasoning_tokens: int,
 ) -> float:
+    """OpenAI usage semantics: cached_input is a SUBSET of input_tokens, and
+    reasoning is a SUBSET of output_tokens (verified empirically on 38k ledger
+    events: cached<=input and reasoning<=output hold on every one). The old
+    formula billed all four fields additively, double-charging cache and
+    reasoning — the ledger carried $28.3k of Codex cost where the real figure
+    was ~$3.4k. Bill the uncached remainder at the input rate, the cached part
+    at the cache rate, and output once (reasoning is already inside it).
+    reasoning_tokens stays in the signature: it's recorded in events for
+    diagnostics, it just must not be priced separately.
+    """
     pricing = pricing_for_model(model)
+    uncached_input = max(0, input_tokens - cached_input_tokens)
     cost = (
-        input_tokens * pricing["input"]
+        uncached_input * pricing["input"]
         + cached_input_tokens * pricing["cached_input"]
         + output_tokens * pricing["output"]
-        + reasoning_tokens * pricing["reasoning"]
     )
     return round(cost, 6)
 

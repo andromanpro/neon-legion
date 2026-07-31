@@ -438,7 +438,11 @@ def _deduped_events_cte(
                 id,
                 provider_norm,
                 model_name,
-                COALESCE(input_tokens, 0) AS input_tokens_norm,
+                -- Mirrors summary.add_event: normalize to the Anthropic
+                -- convention (input EXCLUDES cache). OpenAI cached_input is a
+                -- subset of input_tokens; cached_input is 0 on Claude events.
+                MAX(COALESCE(input_tokens, 0) - COALESCE(cached_input_tokens, 0), 0)
+                    AS input_tokens_norm,
                 COALESCE(output_tokens, 0) AS output_tokens_norm,
                 COALESCE(aggregate_cache_read_tokens, 0) AS cache_read_tokens_norm,
                 COALESCE(cache_creation_tokens, 0) AS cache_creation_tokens_norm,
@@ -737,8 +741,12 @@ def _load_event_file(
             provider_norm = _normalize_event_provider(json_provider or default_provider)
             model_name = _model_name(event.get("model"))
             aggregate_cache_read_tokens = cache_read_tokens + cached_input_tokens
+            # Mirrors summary.add_event's fallback: uncached input + cached +
+            # output (reasoning is inside output on OpenAI events).
             aggregate_total_tokens = total_tokens or (
-                input_tokens + cached_input_tokens + output_tokens + reasoning_tokens
+                max(0, input_tokens - cached_input_tokens)
+                + cached_input_tokens
+                + output_tokens
             )
             dedupe_group = _event_dedupe_group(
                 event,

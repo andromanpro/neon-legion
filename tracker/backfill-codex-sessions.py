@@ -313,6 +313,11 @@ def main(argv: list[str]) -> int:
                 skipped_existing += 1
                 continue
             existing_event_ids.add(event_id)
+            # Codex-audit HIGH: without registering the semantic key too, a
+            # re-emitted last_token_usage later in the same run (same session,
+            # same counters, new line number => new event_id) passed the gate —
+            # 5,819 duplicate billable events accumulated in the ledger.
+            existing_semantic.add(sem_key)
             new_events.append(event)
 
     print(f"scanned_files={scanned_files}")

@@ -360,13 +360,22 @@ def add_event(stats: dict, event: dict) -> None:
     total_tokens = as_int(event.get("total_tokens"))
 
     stats["calls"] += 1
-    stats["input_tokens"] += input_tokens
+    # Normalize to the Anthropic convention (input EXCLUDES cache) before
+    # aggregating. OpenAI events report cached_input as a SUBSET of input, so
+    # adding both raw input and cached_input into the cache pool made a fully
+    # cached Codex call read as a 50% cache hit instead of 100%. cached_input
+    # is zero on Claude events, so this is a no-op for them.
+    stats["input_tokens"] += max(0, input_tokens - cached_input_tokens)
     stats["output_tokens"] += output_tokens
     stats["cache_read_tokens"] += cache_read_tokens + cached_input_tokens
     stats["cache_creation_tokens"] += as_int(event.get("cache_creation_tokens"))
     stats["cached_input_tokens"] += cached_input_tokens
     stats["reasoning_tokens"] += reasoning_tokens
-    stats["total_tokens"] += total_tokens or (input_tokens + cached_input_tokens + output_tokens + reasoning_tokens)
+    # Fallback mirrors the normalization: uncached input + cached + output
+    # (reasoning is inside output on OpenAI events; zero on Claude ones).
+    stats["total_tokens"] += total_tokens or (
+        max(0, input_tokens - cached_input_tokens) + cached_input_tokens + output_tokens
+    )
     api_equivalent_cost = as_float(event.get("cost_estimate_usd"))
     stats["cost_estimate_usd"] += api_equivalent_cost
     stats["api_equivalent_cost_usd"] += api_equivalent_cost
