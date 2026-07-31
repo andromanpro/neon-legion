@@ -38,16 +38,23 @@ FABLE_PRICING = {"in": 10.00, "out": 50.00, "cache_read": 1.00, "cache_write": 1
 
 
 def pricing_for_model(model: str) -> dict | None:
+    # Family prefixes, not version-pinned ones. Version-pinned matching burned us
+    # twice: fable-5 (invisible until added) and opus-5 (13.6k events / 6.6B tokens
+    # billed $0 for a week because "claude-opus-5" didn't match "claude-opus-4").
+    # A family-rate estimate for a future version beats a silent zero; if Anthropic
+    # reprices a family, update the map and recost.py the history.
     if not model:
         return None
-    if model.startswith("claude-opus-4"):
+    # Opus 4.x and 5 share the $5/$25 rate (verified 2026-07-31, platform docs).
+    if model.startswith("claude-opus-"):
         return OPUS_PRICING
     # Sonnet 4.x and 5 share the $3/$15 standard rate.
-    if model.startswith("claude-sonnet-4") or model.startswith("claude-sonnet-5"):
+    if model.startswith("claude-sonnet-"):
         return SONNET_PRICING
-    if model.startswith("claude-haiku-4"):
+    if model.startswith("claude-haiku-"):
         return HAIKU_PRICING
-    if model.startswith("claude-fable-5"):
+    # Fable/Mythos tier: $10/$50.
+    if model.startswith("claude-fable-") or model.startswith("claude-mythos-"):
         return FABLE_PRICING
     return None
 
