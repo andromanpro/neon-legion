@@ -286,6 +286,47 @@ def build_multi_repo_diff_cost(
     return base
 
 
+def public_payload(payload: dict) -> dict:
+    """Trim the payload to exactly what the public dashboard consumes.
+
+    The full payload leaks: `sessions` (every session's full UUID), `config`
+    (absolute Windows repo paths), `per_repo` (private project names),
+    `git_errors` (paths), and per-commit `hash`/`repo`/`files_changed`.
+    The widget renders only the top expensive sessions — short id, dates,
+    cost, line counts and commit subjects (subjects ARE displayed publicly
+    by design: the start→final arc) — plus summary counters.
+    """
+    expensive = []
+    for session in payload.get("expensive_sessions", []) or []:
+        commits = [
+            {
+                "subject": str(commit.get("subject") or ""),
+                "insertions": commit.get("insertions") or 0,
+                "deletions": commit.get("deletions") or 0,
+            }
+            for commit in (session.get("commits") or [])
+        ]
+        expensive.append(
+            {
+                "session_short": session.get("session_short")
+                or str(session.get("session_id") or "")[:8],
+                "start_ts": session.get("start_ts"),
+                "end_ts": session.get("end_ts"),
+                "cost_usd": session.get("cost_usd"),
+                "total_lines_changed": session.get("total_lines_changed"),
+                "cost_per_line_usd": session.get("cost_per_line_usd"),
+                "commits": commits,
+            }
+        )
+    return {
+        "schema_version": payload.get("schema_version"),
+        "generated_at": payload.get("generated_at"),
+        "public": True,
+        "summary": payload.get("summary", {}),
+        "expensive_sessions": expensive,
+    }
+
+
 def write_diff_cost(payload: dict, output_path: Path) -> None:
     """Atomic write."""
     path = _path(output_path)
@@ -323,8 +364,10 @@ def main() -> int:
     else:
         repo = _path(args.repo or cfg.get("git_diff_cost.repo_path", str(PROJECT_ROOT), str))
         payload = build_diff_cost(events, repo, lookback_days=lookback_days, top_decile_threshold=top_decile, now=now)
+    if args.public:
+        payload = public_payload(payload)
     write_diff_cost(payload, output)
-    _log(f"wrote {output}")
+    _log(f"wrote {output}{' (public)' if args.public else ''}")
     _log(
         "sessions={total} no_diff={no_diff} expensive={expensive}{repos}".format(
             total=payload["summary"]["total_sessions_scanned"],
@@ -343,6 +386,15 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--repos", help='Comma-separated multi-repo specs: "name:path,name:path".')
     parser.add_argument("--lookback-days", type=int, help="How many days of session events to scan.")
     parser.add_argument("--top-decile", type=float, help="Percentile threshold for expensive lines, default 0.9.")
+    parser.add_argument(
+        "--public",
+        action="store_true",
+        help=(
+            "Emit only what the public dashboard consumes (summary + top expensive "
+            "sessions, short ids, subjects). Drops full session UUIDs, repo paths, "
+            "project names and commit hashes."
+        ),
+    )
     return parser.parse_args()
 
 

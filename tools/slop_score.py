@@ -360,6 +360,15 @@ def main(argv: list[str] | None = None) -> int:
         default=str(PROJECT_ROOT / "tracker" / "slop.json"),
         help="Path to write slop.json aggregate.",
     )
+    parser.add_argument(
+        "--public",
+        action="store_true",
+        help=(
+            "Emit only what the public dashboard consumes (summary aggregates). "
+            "Drops per-item 'scored' rows and summary.sessions — both carry full "
+            "transcript/run UUIDs, which must not reach the published artifact."
+        ),
+    )
     args = parser.parse_args(argv)
 
     scored: list[dict] = []
@@ -394,6 +403,20 @@ def main(argv: list[str] | None = None) -> int:
         "scored": scored,
         "summary": summary,
     }
+    if args.public:
+        # The dashboard reads summary.by_role / summary.by_agent / counters only.
+        # Everything else (scored rows, summary.sessions, config) carries full
+        # transcript UUIDs or internal detail and stays local.
+        public_summary = {
+            key: value for key, value in summary.items() if key != "sessions"
+        }
+        payload = {
+            "schema_version": payload["schema_version"],
+            "generated_at": payload["generated_at"],
+            "source": payload["source"],
+            "public": True,
+            "summary": public_summary,
+        }
     output = Path(args.output)
     atomic_write(output, json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
     print(f"[slop-score] wrote {output}")
