@@ -121,25 +121,13 @@ class ProductivityCeilingGuardTests(unittest.TestCase):
             "sessions_total": 3,
             "sessions_covered": 2,
         }
-        today_payload = {
-            "active_hours": 1.0,
-            "active_hours_for_estimate": 1.0,
-            "active_hours_per_session_sum": 1.0,
-            "estimated_hours": 4.0,
-            "hours_saved": 3.0,
-            "baseline_floor_clamped": 0,
-            "hours_floor_added": 0.0,
-            "baseline_ceiling_clamped": 2,
-            "hours_ceiling_removed": 10.0,
-            "baseline_per_event_p95": 9.0,
-            "sessions_total": 3,
-            "estimated_sessions_covered": 2,
-        }
+        # Today is now built from the same build_productivity pipeline
+        # (1-day window) — the stub below serves it too.
         original_build_productivity = server.build_productivity
         server.build_productivity = lambda query: base_payload
         self.addCleanup(setattr, server, "build_productivity", original_build_productivity)
 
-        periods = server._productivity_periods(60, base_payload, today_payload)
+        periods = server._productivity_periods(60, base_payload)
 
         for key in ("today", "all", "7d", "30d", "60d"):
             self.assertEqual(periods[key]["baseline_ceiling_clamped"], 2)

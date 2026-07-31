@@ -1012,62 +1012,34 @@ def _productivity_block(productivity_data):
     }
 
 
-def _today_productivity_block(today_payload):
+def _today_productivity_block(day_productivity):
     """Productivity shape for the calendar-day Today filter.
 
-    The top "today active" tile intentionally shows full activity since
-    midnight. The multiplier, however, must compare like-with-like: estimated
-    manual hours only for sessions that have estimates vs active time from that
-    same estimated subset.
+    Built from the SAME human-attention pipeline as the other periods (a
+    build_productivity run over a 1-day window), so Today's multiplier is
+    comparable with 7d/30d. It used to divide task estimates by 2-minute
+    AI-active wall-clock — a different metric published under the same label
+    (Codex-audit HIGH), and with zero covered sessions it fabricated
+    `estimated = active × 7.3` out of thin air.
+
+    Partial-day guard (kept from the original widget, theme v0.8.30): intraday
+    denominators are tiny and noisy — 0.1h of attention estimated at 18.5h
+    reads ×185. Suppress the multiplier when the day's attention is under 30
+    minutes or the ratio exceeds ×50; the dashboard then falls back to its
+    legacy label instead of flashing an artefact.
     """
-    active_display = today_payload.get("active_hours") or 0
-    estimate_active = today_payload.get("active_hours_for_estimate") or 0
-    active_per_session_sum = today_payload.get("active_hours_per_session_sum")
-    if active_per_session_sum is None:
-        active_per_session_sum = estimate_active
-    estimated = today_payload.get("estimated_hours") or 0
-    saved_raw = today_payload.get("hours_saved") or 0
-
-    multiplier_raw = (estimated / estimate_active) if estimate_active > 0 else 0.0
-    # Mirror the dashboard widget sanity cap (theme v0.8.30): a 0.1h session
-    # estimated at 18.5h gives a ×185 artefact that misleads more than informs.
-    # Suppress it server-side too so any consumer of the snapshot gets the same
-    # answer as the live widget.
-    if (
-        multiplier_raw < 1
-        or saved_raw < 0
-        or estimate_active < 0.5
-        or multiplier_raw > 50
-    ):
-        multiplier = 0.0
-        saved = 0.0
-        estimated_hours = rounded(estimate_active, 1)
-    else:
-        multiplier = rounded(multiplier_raw, 3)
-        saved = rounded(saved_raw, 1)
-        estimated_hours = rounded(estimated, 1)
-
-    return {
-        "days": 1,
-        "active_hours": rounded(active_display, 1),
-        "estimate_active_hours": rounded(estimate_active, 1),
-        "active_hours_per_session_sum": rounded(active_per_session_sum, 1),
-        "calendar_hours": 24.0,
-        "multiplier": multiplier,
-        "hours_saved": saved,
-        "estimated_hours": estimated_hours,
-        "baseline_floor_clamped": int(today_payload.get("baseline_floor_clamped") or 0),
-        "hours_floor_added": rounded(today_payload.get("hours_floor_added") or 0, 1),
-        "baseline_ceiling_clamped": int(today_payload.get("baseline_ceiling_clamped") or 0),
-        "hours_ceiling_removed": rounded(today_payload.get("hours_ceiling_removed") or 0, 1),
-        "baseline_per_event_p95": rounded(today_payload.get("baseline_per_event_p95") or 0, 1),
-        "sessions_total": int(today_payload.get("sessions_total") or 0),
-        "sessions_covered": int(today_payload.get("estimated_sessions_covered") or 0),
-        "unit": today_payload.get("unit") or summary.productivity_unit(),
-    }
+    block = _productivity_block(day_productivity)
+    block["days"] = 1
+    block["calendar_hours"] = 24.0
+    attention = block.get("active_hours") or 0
+    if block["multiplier"] > 50 or attention < 0.5:
+        block["multiplier"] = 0.0
+        block["hours_saved"] = 0.0
+        block["estimated_hours"] = block["estimate_active_hours"]
+    return block
 
 
-def _productivity_periods(total_days, base_productivity, today_payload):
+def _productivity_periods(total_days, base_productivity):
     """Precompute period-specific productivity.
 
     The dashboard period selector should not pro-rate productivity ratios:
@@ -1076,7 +1048,7 @@ def _productivity_periods(total_days, base_productivity, today_payload):
     coverage for each period.
     """
     periods = {
-        "today": _today_productivity_block(today_payload),
+        "today": _today_productivity_block(build_productivity({"days": ["1"]})),
         "all": _productivity_block(base_productivity),
     }
     periods["all"]["days"] = int(total_days)
@@ -1387,7 +1359,12 @@ def _today_payload_unit_aware(events_24h, sessions_recent, tasks, since_dt=None,
     else:
         active_hours_for_estimate = active_hours_24h_full
         active_hours_per_session_sum = active_hours_24h_per_session_sum
-        estimated_hours_sum = active_hours_24h_full * 7.3
+        # No covered estimates today → no estimate. The old code fabricated
+        # `active × 7.3` here, publishing an invented multiplier for any day
+        # with ≥0.5h of AI activity and zero estimated sessions (Codex-audit
+        # HIGH). Zero means "nothing to claim yet", and the dashboard's
+        # fallback label handles it honestly.
+        estimated_hours_sum = 0.0
 
     hours_saved_today = rounded(max(0.0, estimated_hours_sum - active_hours_for_estimate), 1)
 
@@ -1498,7 +1475,7 @@ def build_wp_snapshot(
         },
         "providers": providers,
         "productivity": _productivity_block(productivity_data),
-        "productivity_periods": _productivity_periods(period["days"], productivity_data, today_payload),
+        "productivity_periods": _productivity_periods(period["days"], productivity_data),
         "budget": {
             "tokens_used": int(budget_data["window_5h"].get("tokens_used") or 0),
             "limit_5h": ESTIMATED_LIMIT_MAX5X,
