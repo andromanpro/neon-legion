@@ -27,10 +27,10 @@ This tool is what came out of that.
 
 <!-- START_STATS -->
 
-**Past 146 days from the author's local instance** (`2026-03-08` → `2026-07-31`)
+**Past 145 days from the author's local instance** (`2026-03-09` → `2026-07-31`)
 
-- **297,499 AI calls** across Claude Code + Codex CLI + OpenClaw + OpenCode
-- **$123,041 saved** vs equivalent API rate (API would cost $124,987, subscriptions cost a fraction)
+- **292,098 AI calls** across Claude Code + Codex CLI + OpenClaw + OpenCode
+- **$98,411 saved** vs equivalent API rate (API would cost $100,344, subscriptions cost a fraction)
 - **×4.13 productivity multiplier** — 2,469 human-hours of work compressed
 - **Sentiment markers:** 54 thanks / 257 swears — ratio 0:1, mostly happy
 - **Most stressed day:** 2026-05-09 (23 frustrated mentions — yes, we count them)
