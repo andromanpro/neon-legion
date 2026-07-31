@@ -9,7 +9,7 @@ import os
 import re
 import subprocess
 import sys
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -211,17 +211,49 @@ def build_multi_repo_diff_cost(
         reverse=True,
     )
 
+    # Codex-audit HIGH: the old loop attributed EVERY commit in ANY repo to
+    # EVERY session overlapping it in time — 306 commits ballooned into 3,077
+    # session-attributions (one commit credited to 15 sessions), so $/line and
+    # the expensive top were fiction. A commit now gets exactly ONE owner:
+    #   tier 1 — among time-overlapping sessions, those whose working_dir sits
+    #            inside the commit's repo (specific cwd beats the generic
+    #            multi-project root, which is a parent of every repo and
+    #            discriminates nothing);
+    #   tier 2 — otherwise all overlapping sessions;
+    #   pick   — the session with an event closest in time to the commit (the
+    #            session that produced a commit has events dense around it).
+    # Cross-session mis-attribution is still possible for truly concurrent
+    # work, but each line is counted once globally instead of N times.
+    repo_paths = {name: repo_path for name, repo_path in normalized_repos}
+    session_commits: dict[str, list[dict[str, Any]]] = {sid: [] for sid in sessions}
+    for commit in all_commits:
+        committed_at = commit["_committed_at"]
+        candidates = [
+            sid
+            for sid, bucket in sessions.items()
+            if bucket["start"] <= committed_at <= bucket["end"]
+        ]
+        if not candidates:
+            continue
+        repo_path = repo_paths.get(str(commit.get("repo")))
+        tier1 = [
+            sid
+            for sid in candidates
+            if repo_path is not None
+            and _wd_inside_repo(sessions[sid].get("working_dir", ""), repo_path)
+        ]
+        pool = tier1 or candidates
+        moment = committed_at.timestamp()
+        owner = min(pool, key=lambda sid: _nearest_event_gap(sessions[sid]["ts"], moment))
+        session_commits[owner].append(commit)
+
     payload_sessions = []
     repo_session_lines: dict[str, dict[str, int]] = {
         session_id: {name: 0 for name, _repo in normalized_repos}
         for session_id in sessions
     }
     for session_id, bucket in sorted(sessions.items(), key=lambda item: (item[1]["start"], item[0])):
-        commits = [
-            _public_commit(commit)
-            for commit in all_commits
-            if bucket["start"] <= commit["_committed_at"] <= bucket["end"]
-        ]
+        commits = [_public_commit(commit) for commit in session_commits[session_id]]
         if not commits:
             payload_sessions.append(_no_diff_session(session_id, bucket))
             continue
@@ -438,7 +470,9 @@ def _parse_repo_specs(value: Any) -> list[tuple[str, Path]]:
 
 def _session_buckets(events: list[dict], now: datetime, lookback_days: int) -> dict[str, dict[str, Any]]:
     cutoff = now - timedelta(days=lookback_days)
-    buckets: dict[str, dict[str, Any]] = defaultdict(lambda: {"start": None, "end": None, "cost": 0.0})
+    buckets: dict[str, dict[str, Any]] = defaultdict(
+        lambda: {"start": None, "end": None, "cost": 0.0, "ts": [], "working_dirs": Counter()}
+    )
     for event in events:
         session_id = event.get("session_id")
         if not isinstance(session_id, str) or not session_id:
@@ -453,7 +487,58 @@ def _session_buckets(events: list[dict], now: datetime, lookback_days: int) -> d
         bucket["start"] = ts if bucket["start"] is None else min(bucket["start"], ts)
         bucket["end"] = ts if bucket["end"] is None else max(bucket["end"], ts)
         bucket["cost"] += summary.as_float(event.get("cost_estimate_usd"))
-    return {sid: bucket for sid, bucket in buckets.items() if bucket["start"] is not None and bucket["end"] is not None}
+        bucket["ts"].append(ts.timestamp())
+        working_dir = event.get("working_dir")
+        if isinstance(working_dir, str) and working_dir:
+            bucket["working_dirs"][working_dir] += 1
+    result = {}
+    for sid, bucket in buckets.items():
+        if bucket["start"] is None or bucket["end"] is None:
+            continue
+        bucket["ts"].sort()
+        bucket["working_dir"] = (
+            bucket["working_dirs"].most_common(1)[0][0] if bucket["working_dirs"] else ""
+        )
+        result[sid] = bucket
+    return result
+
+
+def _norm_dir(path_text: str) -> str:
+    """Normalize a directory string for containment checks: repair the classic
+    cp1251-of-utf8 mojibake some hooks recorded for Cyrillic paths, unify
+    slashes, strip trailing separators, casefold (Windows FS)."""
+    text = str(path_text or "")
+    try:
+        repaired = text.encode("cp1251").decode("utf-8")
+        # Only accept the repair if it actually removed mojibake markers.
+        if "Р" in text or "С" in text:
+            text = repaired
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        pass
+    return text.replace("\\", "/").rstrip("/").casefold()
+
+
+def _wd_inside_repo(working_dir: str, repo_path: Path) -> bool:
+    wd = _norm_dir(working_dir)
+    repo = _norm_dir(str(repo_path))
+    if not wd or not repo:
+        return False
+    return wd == repo or wd.startswith(repo + "/")
+
+
+def _nearest_event_gap(sorted_ts: list[float], moment: float) -> float:
+    """Seconds from `moment` to the session's nearest event (bisect)."""
+    if not sorted_ts:
+        return float("inf")
+    import bisect
+
+    index = bisect.bisect_left(sorted_ts, moment)
+    best = float("inf")
+    if index < len(sorted_ts):
+        best = min(best, abs(sorted_ts[index] - moment))
+    if index > 0:
+        best = min(best, abs(sorted_ts[index - 1] - moment))
+    return best
 
 
 def _commits_in_range(repo: Path, start: datetime, end: datetime) -> tuple[list[dict[str, Any]], list[str]]:

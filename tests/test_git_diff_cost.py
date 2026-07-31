@@ -426,6 +426,73 @@ class MultiRepoTests(unittest.TestCase):
             [s["session_id"] for s in payload["expensive_sessions"]],
         )
 
+    def test_overlapping_sessions_commit_attributed_exactly_once(self) -> None:
+        # Regression for the cross-product bug: two sessions fully overlapping
+        # in time must NOT both absorb the same commit. working_dir picks the
+        # owner when it points inside a repo (tier 1).
+        start = NOW - timedelta(hours=2)
+        self.commit_lines(self.repo_a, "a.txt", 3, "work in A", start + timedelta(minutes=30))
+        self.commit_lines(self.repo_b, "b.txt", 5, "work in B", start + timedelta(minutes=31))
+
+        def wd_event(session_id: str, ts: datetime, cost: float, working_dir: str) -> dict:
+            payload = event(session_id, ts, cost)
+            payload["working_dir"] = working_dir
+            return payload
+
+        events = [
+            wd_event("session-a", start, 3.0, str(self.repo_a)),
+            wd_event("session-a", start + timedelta(minutes=59), 3.0, str(self.repo_a)),
+            wd_event("session-b", start, 5.0, str(self.repo_b / "subdir")),
+            wd_event("session-b", start + timedelta(minutes=59), 5.0, str(self.repo_b / "subdir")),
+        ]
+        payload = build_multi_repo_diff_cost(
+            events, [("A", self.repo_a), ("B", self.repo_b)], top_decile_threshold=0.5, now=NOW
+        )
+
+        session_a = self.session(payload, "session-a")
+        session_b = self.session(payload, "session-b")
+        self.assertEqual({"A"}, {commit["repo"] for commit in session_a["commits"]})
+        self.assertEqual({"B"}, {commit["repo"] for commit in session_b["commits"]})
+        self.assertEqual(3, session_a["total_lines_changed"])
+        self.assertEqual(5, session_b["total_lines_changed"])
+        # Global conservation: every commit counted exactly once.
+        total_attributed = sum(len(s["commits"]) for s in payload["sessions"])
+        self.assertEqual(2, total_attributed)
+
+    def test_generic_root_working_dir_falls_back_to_nearest_event(self) -> None:
+        # Both sessions ran from the multi-project root (a PARENT of every
+        # repo — discriminates nothing), so tier 1 is empty and the commit
+        # goes to the single session with the closest event.
+        start = NOW - timedelta(hours=2)
+        commit_at = start + timedelta(minutes=30)
+        self.commit_lines(self.repo_a, "near.txt", 4, "near P", commit_at)
+
+        def wd_event(session_id: str, ts: datetime, cost: float) -> dict:
+            payload = event(session_id, ts, cost)
+            payload["working_dir"] = str(self.root)  # parent of repo-a and repo-b
+            return payload
+
+        events = [
+            # session-near has an event 1 minute from the commit
+            wd_event("session-near", start, 2.0),
+            wd_event("session-near", commit_at + timedelta(minutes=1), 2.0),
+            wd_event("session-near", start + timedelta(minutes=59), 2.0),
+            # session-far overlaps but its events are ~29 min away
+            wd_event("session-far", start, 2.0),
+            wd_event("session-far", start + timedelta(minutes=59), 2.0),
+        ]
+        payload = build_multi_repo_diff_cost(
+            events, [("A", self.repo_a), ("B", self.repo_b)], top_decile_threshold=0.5, now=NOW
+        )
+
+        near = self.session(payload, "session-near")
+        far = self.session(payload, "session-far")
+        self.assertEqual(1, len(near["commits"]))
+        # A session that lost the tie has no commits at all — it lands in the
+        # no_diff bucket (whose payload shape carries no "commits" key).
+        self.assertEqual(0, len(far.get("commits", [])))
+        self.assertTrue(far["no_diff"])
+
 
 if __name__ == "__main__":
     unittest.main()
