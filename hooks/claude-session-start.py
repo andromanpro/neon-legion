@@ -150,6 +150,30 @@ def log_line(session_id: str, message: str) -> None:
         target.write(f"{datetime.now().astimezone().isoformat(timespec='seconds')} {message}\n")
 
 
+def needs_estimation(entry) -> bool:
+    """True when a session still has no baseline estimate.
+
+    This used to be a bare `session_id not in tasks`, which silently disabled
+    the estimator: backfill-sentiment-markers.py (runs on EVERY deploy) calls
+    update_task_entry() to record profanity/appreciation counts, creating the
+    tasks.json entry BEFORE the session is ever estimated. From then on the
+    session "already exists" and never enters the pending queue again.
+    Estimation stopped completely on 2026-08-01: 91 sessions ended up with an
+    entry but no hours, so they were excluded from productivity on both sides
+    (no baseline in the numerator, no attention in the denominator) — days of
+    real work read as "nothing happened".
+
+    Presence of the entry is therefore not the signal; presence of an ESTIMATE
+    is. `needs_manual_review` counts as attempted — those failed estimation
+    for their own reason and must not be retried on every session start.
+    """
+    if not isinstance(entry, dict):
+        return True
+    if entry.get("needs_manual_review"):
+        return False
+    return not entry.get("estimated_at") and entry.get("ai_baseline_hours") is None
+
+
 def find_transcript(session_id: str) -> str | None:
     pattern = str(Path.home() / ".claude" / "projects" / "*" / f"{session_id}.jsonl")
     matches = [Path(path) for path in glob.glob(pattern)]
@@ -232,7 +256,10 @@ def main() -> int:
             return 0
 
         tasks = read_tasks()
-        pending = sorted(session_id for session_id in recent_session_ids if session_id not in tasks)
+        pending = sorted(
+            session_id for session_id in recent_session_ids
+            if needs_estimation(tasks.get(session_id))
+        )
         pending = pending[:MAX_DISPATCH_PER_FIRE]
         if not pending:
             return 0

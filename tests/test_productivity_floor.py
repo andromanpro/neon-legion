@@ -104,3 +104,42 @@ class ProductivityFloorTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FloorDrivenDenominatorTests(unittest.TestCase):
+    """A multiplier computed against the safety floor is not a measurement.
+
+    2026-08-18: the estimator had been disabled for two weeks, so the 7d window
+    kept only 2 covered sessions carrying 4.7 minutes of measured attention.
+    The floor (2 x 5 min) became the divisor and the dashboard published x144.
+    """
+
+    def _payload(self, **over):
+        base = {
+            "active_hours": 0.167,
+            "active_hours_per_session_sum": 0.167,
+            "calendar_span_hours": 8.0,
+            "multiplier": 144.0,
+            "hours_saved": 23.8,
+            "sessions_covered": 2,
+            "sessions_total": 13,
+            "unit": "chunk",
+        }
+        base.update(over)
+        return base
+
+    def test_floor_driven_multiplier_is_suppressed(self):
+        block = server._productivity_block(self._payload(denominator_is_floor=True))
+        self.assertEqual(block["multiplier"], 0.0)
+        self.assertEqual(block["hours_saved"], 0.0)
+
+    def test_measured_denominator_passes_through(self):
+        block = server._productivity_block(self._payload(
+            denominator_is_floor=False, active_hours=67.2, multiplier=4.5, hours_saved=236.2,
+        ))
+        self.assertAlmostEqual(block["multiplier"], 4.5, places=2)
+        self.assertAlmostEqual(block["hours_saved"], 236.2, places=1)
+
+    def test_absent_flag_behaves_as_measured(self):
+        block = server._productivity_block(self._payload(multiplier=4.5, hours_saved=236.2))
+        self.assertAlmostEqual(block["multiplier"], 4.5, places=2)

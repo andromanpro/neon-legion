@@ -399,8 +399,16 @@ def productivity_payload(events, gap_minutes):
     hours_saved = hours_without_ai - denom_hours
     multiplier = hours_without_ai / denom_hours if denom_hours > 0 else 0.0
 
+    # When the floor WINS, the denominator is a safety constant, not a
+    # measurement — the ratio is then bounded only by the baseline estimate and
+    # means nothing. On 2026-08-18 the 7d window had 4.7 minutes of measured
+    # attention across 2 covered sessions and published x144. Flag it so
+    # consumers can suppress the number instead of printing a fake record.
+    floor_driven = distinct_sessions_covered > 0 and floor_hours > human_attention_hours
+
     return {
         "active_hours": rounded(denom_hours),
+        "denominator_is_floor": floor_driven,
         "human_attention_hours": rounded(human_attention_hours),
         "human_attention_fallbacks": human_attention_fallbacks,
         "ai_active_wall_clock_hours": rounded(active_hours),
@@ -986,7 +994,15 @@ def _productivity_block(productivity_data):
     multiplier_raw = productivity_data.get("multiplier") or 0
     saved_raw = productivity_data.get("hours_saved") or 0
 
-    if multiplier_raw < 1 or saved_raw < 0:
+    # `denominator_is_floor` means the divisor was the per-session safety floor
+    # rather than measured attention: the ratio is then just baseline/constant
+    # and is not a productivity figure at all (7d read x144 on 2026-08-18 off
+    # 4.7 minutes of attention). Suppress like the sub-1 case — the dashboard
+    # falls back to its legacy label instead of printing a fabricated record.
+    if productivity_data.get("denominator_is_floor"):
+        multiplier = 0.0
+        saved = 0.0
+    elif multiplier_raw < 1 or saved_raw < 0:
         multiplier = 0.0
         saved = 0.0
     else:
