@@ -63,5 +63,56 @@ class NeedsEstimationTests(unittest.TestCase):
         self.assertTrue(needs_estimation({"profanity_count": 3}))
 
 
+class ManualReviewMergeTests(unittest.TestCase):
+    """write_manual_review_entry must MERGE, or the fixed queue never drains.
+
+    With the queue keyed on "has an estimate", a session whose transcript
+    rotated away is dispatched, fails to find the transcript, and must be
+    flagged. If flagging bailed out because a sentiment-only entry already
+    existed, that session would be re-dispatched on every SessionStart forever.
+    """
+
+    def setUp(self):
+        import json, tempfile
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        root = Path(self._tmp.name)
+        self._orig_tasks = session_start.TASKS_FILE
+        self._orig_lock = session_start.TASKS_LOCK_FILE
+        session_start.TASKS_FILE = root / "tasks.json"
+        session_start.TASKS_LOCK_FILE = root / "tasks.lock"
+        self.addCleanup(setattr, session_start, "TASKS_FILE", self._orig_tasks)
+        self.addCleanup(setattr, session_start, "TASKS_LOCK_FILE", self._orig_lock)
+        self._json = json
+
+    def _write(self, data):
+        session_start.TASKS_FILE.write_text(self._json.dumps(data), encoding="utf-8")
+
+    def _read(self):
+        return self._json.loads(session_start.TASKS_FILE.read_text(encoding="utf-8"))
+
+    def test_merges_into_sentiment_only_entry(self):
+        self._write({"s1": {"profanity_count": 2, "appreciation_count": 1}})
+        session_start.write_manual_review_entry("s1", "", "transcript not found")
+        entry = self._read()["s1"]
+        self.assertTrue(entry["needs_manual_review"])
+        self.assertEqual(entry["profanity_count"], 2)   # existing data preserved
+        self.assertFalse(session_start.needs_estimation(entry))  # queue drains
+
+    def test_does_not_clobber_an_existing_estimate(self):
+        self._write({"s1": {"ai_baseline_hours": 5.0, "estimated_at": "2026-08-18T10:00:00+03:00"}})
+        session_start.write_manual_review_entry("s1", "", "transcript not found")
+        entry = self._read()["s1"]
+        self.assertEqual(entry["ai_baseline_hours"], 5.0)
+        self.assertNotIn("needs_manual_review", entry)
+
+    def test_creates_entry_when_absent(self):
+        self._write({})
+        session_start.write_manual_review_entry("s1", "C:/t.jsonl", "transcript not found")
+        entry = self._read()["s1"]
+        self.assertTrue(entry["needs_manual_review"])
+        self.assertEqual(entry["transcript_path"], "C:/t.jsonl")
+
+
 if __name__ == "__main__":
     unittest.main()

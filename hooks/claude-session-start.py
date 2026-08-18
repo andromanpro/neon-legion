@@ -121,23 +121,36 @@ def release_tasks_lock(fd: int | None) -> None:
 
 
 def write_manual_review_entry(session_id: str, transcript_path: str, description: str) -> None:
+    """Mark a session as un-estimatable, MERGING into any existing entry.
+
+    This used to bail out on `session_id in tasks`, which was harmless only
+    while the pending queue also keyed on entry presence. Now that the queue
+    keys on whether an ESTIMATE exists (see needs_estimation), bailing here
+    would be an infinite retry: a session with a rotated-away transcript would
+    be re-dispatched on every single SessionStart and never get the flag that
+    takes it out of the queue. Merge instead, and never clobber an estimate
+    that some other path managed to produce meanwhile.
+    """
     fd = acquire_tasks_lock()
     if fd is None:
         return
 
     try:
         tasks = read_tasks()
-        if session_id in tasks:
-            return
-        tasks[session_id] = {
+        entry = tasks.get(session_id)
+        entry = dict(entry) if isinstance(entry, dict) else {}
+        if entry.get("ai_baseline_hours") is not None:
+            return  # already estimated by another path — leave it alone
+        entry.update({
             "ai_baseline_hours": None,
-            "human_corrected_hours": None,
+            "human_corrected_hours": entry.get("human_corrected_hours"),
             "brief_description": description,
             "estimated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
             "estimation_confidence": "low",
             "needs_manual_review": True,
-            "transcript_path": transcript_path,
-        }
+            "transcript_path": transcript_path or entry.get("transcript_path", ""),
+        })
+        tasks[session_id] = entry
         atomic_write_json(TASKS_FILE, tasks)
     finally:
         release_tasks_lock(fd)
