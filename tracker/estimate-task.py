@@ -12,6 +12,8 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 TRACKER_DIR = PROJECT_ROOT / "tracker"
+sys.path.insert(0, str(TRACKER_DIR))
+import codex_transcript  # noqa: E402  (Codex rollout reader, stdlib only)
 TASKS_FILE = TRACKER_DIR / "tasks.json"
 TASKS_LOCK_FILE = TRACKER_DIR / ".tasks.lock"
 LOG_DIR = TRACKER_DIR / ".estimation-logs"
@@ -361,6 +363,13 @@ def compute_session_metrics(transcript_path) -> dict:
 
 
 def read_transcript(path: Path) -> tuple[list[str], list[str]]:
+    # Codex rollouts have their own shape and, crucially, inject plugin
+    # catalogues / AGENTS.md dumps under role="user". The prompt budget takes
+    # the FIRST three user messages, so an unfiltered read would spend the
+    # whole 15k-char context on an 11.8 KB plugin list.
+    if codex_transcript.is_rollout(path):
+        return codex_transcript.read_messages(path)
+
     user_messages = []
     assistant_messages = []
 

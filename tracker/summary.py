@@ -10,7 +10,9 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(PROJECT_ROOT / "tracker"))
 from tools import config as cfg  # noqa: E402
+import codex_transcript  # noqa: E402  (Codex rollout reader, stdlib only)
 
 CLAUDE_EVENTS_FILE = PROJECT_ROOT / "tracker" / "claude-events.jsonl"
 CODEX_EVENTS_FILE = PROJECT_ROOT / "tracker" / "codex-events.jsonl"
@@ -737,10 +739,16 @@ def is_human_prompt(event: dict) -> bool:
 
 
 def read_human_message_timestamps(transcript_path) -> list[datetime]:
-    """Sorted timestamps of genuine human prompts in a Claude transcript .jsonl.
+    """Sorted timestamps of genuine human prompts in a transcript .jsonl.
 
-    Returns [] if the file is missing/unreadable (caller falls back to AI events).
+    Handles both formats: Claude Code transcripts and Codex rollouts (the
+    latter delegated to codex_transcript, which strips the app-injected blocks
+    that also carry role="user"). Returns [] if the file is missing or
+    unreadable (caller falls back to AI events).
     """
+    if codex_transcript.is_rollout(transcript_path):
+        return codex_transcript.read_human_timestamps(transcript_path)
+
     timestamps: list[datetime] = []
     try:
         with Path(transcript_path).open("r", encoding="utf-8") as source:
