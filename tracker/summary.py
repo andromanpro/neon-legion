@@ -317,12 +317,35 @@ def events_for_provider(events: list[dict], provider: str) -> list[dict]:
     return [event for event in events if event_provider(event) == provider]
 
 
+# Codex sessions the HUMAN drove. `codex exec` dispatches (headless) and
+# auto-review runs are launched by Claude from inside a Claude session whose
+# baseline already covers that work — counting them again would double-count.
+HUMAN_CODEX_ORIGINS = frozenset({"desktop", "tui"})
+
+
 def events_for_task_metrics(events: list[dict]) -> list[dict]:
-    # tasks.json is keyed by Claude Code sessions. Codex/OpenClaw/OpenCode calls are
-    # counted in usage/cost, but not in task/productivity metrics to avoid
-    # double counting work that was already estimated from the Claude
-    # orchestrator session.
-    return events_for_provider(events, "anthropic")
+    """Events that may carry a productivity baseline.
+
+    Claude Code sessions, plus Codex sessions the human drove directly.
+
+    This used to be anthropic-only, on the rationale that Codex work is
+    "already estimated from the Claude orchestrator session". That holds for
+    `codex exec` dispatches — but not for Codex Desktop, where there IS no
+    orchestrator: the human sits in the Codex app and works. On 2026-08-18
+    that exclusion hid 19,129 desktop calls (99.7% of all Codex usage) from
+    the productivity metric, so the published multiplier described only the
+    Claude half of the workload.
+
+    OpenClaw/OpenCode stay out: no per-session estimate exists for them.
+    """
+    selected = []
+    for event in events:
+        provider = event_provider(event)
+        if provider == "anthropic":
+            selected.append(event)
+        elif provider == "openai" and codex_origin(event) in HUMAN_CODEX_ORIGINS:
+            selected.append(event)
+    return selected
 
 
 def read_tasks() -> dict:
