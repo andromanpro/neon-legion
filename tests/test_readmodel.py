@@ -674,6 +674,186 @@ class ReadModelTests(unittest.TestCase):
             finally:
                 conn.close()
 
+    # Two distinct calls that happen to share a millisecond, a model and a
+    # token count are still two calls. Until 2026-08-18 the legacy dedupe key
+    # omitted message_uuid and folded them into one — 496 real calls in the
+    # claude ledger. Events written since carry event_id and take the strong
+    # path; this guards the history that does not.
+    @staticmethod
+    def _identical_except_uuid(message_uuid):
+        return json.dumps({
+            "ts": "2026-05-10T12:00:00.200Z",
+            "provider": "anthropic",
+            "model": "claude-sonnet-4",
+            "session_id": "s1",
+            "message_uuid": message_uuid,
+            "input_tokens": 2,
+            "output_tokens": 0,
+            "cost_estimate_usd": 0.0001,
+        })
+
+    def test_legacy_key_keeps_distinct_calls_apart(self):
+        with temporary_events_dir() as tmp:
+            (Path(tmp) / "claude-events.jsonl").write_text(
+                self._identical_except_uuid("u1") + "\n" + self._identical_except_uuid("u2") + "\n",
+                encoding="utf-8",
+            )
+            conn = readmodel.build(Path(tmp))
+            try:
+                total = readmodel.aggregate_totals(conn, date(2026, 5, 10), date(2026, 5, 10))
+                self.assertEqual(total["calls"], 2)
+            finally:
+                conn.close()
+
+    def test_a_cost_correction_moves_money_and_nothing_else(self):
+        """The ledger is append-only, so a mispriced event is restated by a
+        compensating record. It must not read as another call, or every price
+        fix would inflate the headline it was meant to correct."""
+        original = json.dumps({
+            "ts": "2026-05-10T12:00:00+03:00",
+            "provider": "anthropic",
+            "model": "claude-opus-5",
+            "session_id": "s1",
+            "message_uuid": "u1",
+            "event_id": "claude:s1:u1",
+            "input_tokens": 10,
+            "output_tokens": 20,
+            "cost_estimate_usd": 1.00,
+        })
+        correction = json.dumps({
+            "ts": "2026-05-10T12:00:00+03:00",
+            "provider": "anthropic",
+            "model": "claude-opus-5",
+            "session_id": "s1",
+            "message_uuid": "u1",
+            "event_id": "claude:s1:u1#cache-ttl-correction",
+            "correction_of": "claude:s1:u1",
+            "kind": "cost_correction",
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cost_estimate_usd": 0.25,
+        })
+        with temporary_events_dir() as tmp:
+            (Path(tmp) / "claude-events.jsonl").write_text(original + "\n" + correction + "\n", encoding="utf-8")
+            conn = readmodel.build(Path(tmp))
+            try:
+                import summary as summary_mod
+                total = readmodel.aggregate_totals(conn, date(2026, 5, 10), date(2026, 5, 10))
+                _by_model, loop = summary_mod.summarize_by_model(
+                    [json.loads(original), json.loads(correction)]
+                )
+                self.assertEqual(total["calls"], 1, "a correction is not a second call")
+                self.assertAlmostEqual(total["cost_estimate_usd"], 1.25, places=6)
+                self.assertEqual(total["input_tokens"], 10)
+                self.assertEqual(loop["calls"], total["calls"])
+                self.assertAlmostEqual(loop["cost_estimate_usd"], total["cost_estimate_usd"], places=6)
+            finally:
+                conn.close()
+
+    def test_claude_total_tokens_include_the_cache_traffic(self):
+        """Anthropic reports cache reads and writes OUTSIDE input_tokens, so
+        the old input+output fallback made a fully cached turn count as its
+        output alone."""
+        line = json.dumps({
+            "ts": "2026-05-10T12:00:00+03:00",
+            "provider": "anthropic",
+            "model": "claude-opus-5",
+            "session_id": "s1",
+            "message_uuid": "u1",
+            "input_tokens": 2,
+            "output_tokens": 100,
+            "cache_read_tokens": 500_000,
+            "cache_creation_tokens": 1_000,
+            "cost_estimate_usd": 0.25,
+        })
+        with temporary_events_dir() as tmp:
+            (Path(tmp) / "claude-events.jsonl").write_text(line + "\n", encoding="utf-8")
+            conn = readmodel.build(Path(tmp))
+            try:
+                import summary as summary_mod
+                _by_model, aggregate = readmodel.aggregate_by_model(
+                    conn, date(2026, 5, 10), date(2026, 5, 10),
+                )
+                _loop_by_model, loop = summary_mod.summarize_by_model([json.loads(line)])
+                self.assertEqual(aggregate["total_tokens"], 501_102)
+                self.assertEqual(
+                    loop["total_tokens"], aggregate["total_tokens"],
+                    "summary.add_event and readmodel must keep the same fallback",
+                )
+            finally:
+                conn.close()
+
+    def test_explicit_total_tokens_still_wins(self):
+        """Negative control: providers that report their own total (every one
+        except Claude) must not be recomputed."""
+        line = json.dumps({
+            "ts": "2026-05-10T12:00:00+03:00",
+            "provider": "openai",
+            "model": "gpt-5.5",
+            "session_id": "s1",
+            "input_tokens": 16910,
+            "cached_input_tokens": 7552,
+            "output_tokens": 270,
+            "total_tokens": 24991,
+            "cost_estimate_usd": 0.1,
+        })
+        with temporary_events_dir() as tmp:
+            (Path(tmp) / "codex-events.jsonl").write_text(line + "\n", encoding="utf-8")
+            conn = readmodel.build(Path(tmp))
+            try:
+                _by_model, aggregate = readmodel.aggregate_by_model(
+                    conn, date(2026, 5, 10), date(2026, 5, 10),
+                )
+                self.assertEqual(aggregate["total_tokens"], 24991)
+            finally:
+                conn.close()
+
+    def test_all_three_dedupe_paths_agree_on_distinct_calls(self):
+        """The SQL key gained message_uuid first and the two in-memory paths
+        did not follow, so aggregates and read_events disagreed on the same
+        ledger. One helper feeds all three now; this is the guard."""
+        with temporary_events_dir() as tmp:
+            (Path(tmp) / "claude-events.jsonl").write_text(
+                self._identical_except_uuid("u1") + "\n" + self._identical_except_uuid("u2") + "\n",
+                encoding="utf-8",
+            )
+            conn = readmodel.build(Path(tmp))
+            try:
+                aggregate = readmodel.aggregate_totals(conn, date(2026, 5, 10), date(2026, 5, 10))
+                slow = readmodel.read_events(conn, date(2026, 5, 10), date(2026, 5, 10))
+                fast = readmodel.read_events_fast(conn, date(2026, 5, 10), date(2026, 5, 10))
+                self.assertEqual(
+                    (aggregate["calls"], len(slow), len(fast)), (2, 2, 2),
+                    "aggregate, read_events and read_events_fast must count the same ledger alike",
+                )
+            finally:
+                conn.close()
+
+    def test_in_memory_paths_still_fold_a_replay(self):
+        """Negative control for the two in-memory paths."""
+        with temporary_events_dir() as tmp:
+            replay = self._identical_except_uuid("u1")
+            (Path(tmp) / "claude-events.jsonl").write_text(replay + "\n" + replay + "\n", encoding="utf-8")
+            conn = readmodel.build(Path(tmp))
+            try:
+                self.assertEqual(len(readmodel.read_events(conn, date(2026, 5, 10), date(2026, 5, 10))), 1)
+                self.assertEqual(len(readmodel.read_events_fast(conn, date(2026, 5, 10), date(2026, 5, 10))), 1)
+            finally:
+                conn.close()
+
+    def test_legacy_key_still_folds_a_replay(self):
+        """Negative control: sharpening the key must not switch dedupe off.
+        The same event written twice is still one call."""
+        with temporary_events_dir() as tmp:
+            replay = self._identical_except_uuid("u1")
+            (Path(tmp) / "claude-events.jsonl").write_text(replay + "\n" + replay + "\n", encoding="utf-8")
+            conn = readmodel.build(Path(tmp))
+            try:
+                total = readmodel.aggregate_totals(conn, date(2026, 5, 10), date(2026, 5, 10))
+                self.assertEqual(total["calls"], 1)
+            finally:
+                conn.close()
+
 
 if __name__ == "__main__":
     unittest.main()

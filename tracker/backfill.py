@@ -77,8 +77,43 @@ def decode_project_dir(name: str) -> tuple[str, bool]:
 
 
 def transcript_files(scan_dir: Path) -> list[Path]:
-    pattern = str(scan_dir.expanduser() / "*" / "*.jsonl")
-    return [Path(path) for path in glob.glob(pattern)]
+    """Session transcripts plus the subagent transcripts beneath them.
+
+    The pattern used to be `*/*.jsonl` — one level — which saw 90 of the
+    318 files on disk and skipped every subagent and workflow run: 6046
+    billable calls that nothing else collected, since a subagent never
+    fires Stop.
+    """
+    root = scan_dir.expanduser()
+    sessions = glob.glob(str(root / "*" / "*.jsonl"))
+    agents = glob.glob(
+        str(root / "*" / "*" / HOOK.SUBAGENT_DIR_NAME / "**" / "agent-*.jsonl"),
+        recursive=True,
+    )
+    return [Path(path) for path in sessions + agents]
+
+
+def stream_identity(transcript_path: Path) -> tuple[str, str, bool, str | None]:
+    """(session_id, working_dir, working_dir_raw, agent_id) for one file.
+
+    A subagent transcript is named after the agent, not the session, and
+    sits two or more levels below the project directory — so neither the
+    stem nor the parent directory means what they mean for a session
+    transcript. Records normally carry `sessionId` and `cwd` and override
+    these; this is the fallback when they do not.
+    """
+    agent_id = HOOK.agent_id_of(transcript_path)
+    if agent_id is None:
+        working_dir, working_dir_raw = decode_project_dir(transcript_path.parent.name)
+        return transcript_path.stem, working_dir, working_dir_raw, None
+
+    session_dir = HOOK.session_dir_of(transcript_path)
+    if session_dir is None:
+        working_dir, working_dir_raw = decode_project_dir(transcript_path.parent.name)
+        return transcript_path.stem, working_dir, working_dir_raw, agent_id
+
+    working_dir, working_dir_raw = decode_project_dir(session_dir.parent.name)
+    return session_dir.name, working_dir, working_dir_raw, agent_id
 
 
 def read_last_uuids() -> dict:
@@ -122,9 +157,13 @@ def read_existing_state() -> tuple[set[tuple[str, str]], dict[str, tuple[datetim
             if ts is None:
                 continue
 
-            current = latest_by_session.get(session_id)
+            # Keyed by stream, not by session: a session's own transcript and
+            # each of its subagent transcripts advance independently, and one
+            # cursor for all of them would keep re-reading the whole session.
+            key = HOOK.stream_key_of_event(event)
+            current = latest_by_session.get(key)
             if current is None or ts.timestamp() > current[0].timestamp():
-                latest_by_session[session_id] = (ts, message_uuid)
+                latest_by_session[key] = (ts, message_uuid)
 
     return seen, latest_by_session
 
@@ -160,10 +199,21 @@ def build_tracker_event(
     transcript_event: dict,
     message: dict,
     usage: dict,
+    agent_id: str | None = None,
 ) -> dict | None:
     message_uuid = transcript_event.get("uuid")
     timestamp = transcript_event.get("timestamp")
     model = message.get("model")
+    if agent_id:
+        # Attribution stays on the parent session — see the same reasoning in
+        # hooks/claude-track-calls.build_event. The record knows both.
+        record_session = transcript_event.get("sessionId")
+        record_cwd = transcript_event.get("cwd")
+        if isinstance(record_session, str) and record_session:
+            session_id = record_session
+        if isinstance(record_cwd, str) and record_cwd:
+            working_dir = record_cwd
+            working_dir_raw = False
     if not isinstance(message_uuid, str) or not message_uuid:
         return None
     if not isinstance(timestamp, str) or not timestamp:
@@ -171,10 +221,13 @@ def build_tracker_event(
     if not isinstance(model, str) or not model:
         return None
 
-    input_tokens = as_int(usage.get("input_tokens"))
-    output_tokens = as_int(usage.get("output_tokens"))
-    cache_creation_tokens = as_int(usage.get("cache_creation_input_tokens"))
-    cache_read_tokens = as_int(usage.get("cache_read_input_tokens"))
+    # Shared with the hook so the cache-write TTL split cannot be handled in
+    # one writer and forgotten in the other.
+    tokens = HOOK.usage_tokens(usage)
+    input_tokens = tokens["input_tokens"]
+    output_tokens = tokens["output_tokens"]
+    cache_creation_tokens = tokens["cache_creation_tokens"]
+    cache_read_tokens = tokens["cache_read_tokens"]
     cost_estimate_usd = None
     if HOOK.pricing_for_model(model) is not None:
         cost_estimate_usd = HOOK.estimate_cost(
@@ -183,6 +236,7 @@ def build_tracker_event(
             output_tokens,
             cache_creation_tokens,
             cache_read_tokens,
+            tokens["cache_creation_1h_tokens"],
         )
 
     event = {
@@ -190,13 +244,19 @@ def build_tracker_event(
         "ts": timestamp,
         "session_id": session_id,
         "message_uuid": message_uuid,
+        # Same identity the Stop hook stamps, so a message captured by both
+        # collapses into one dedupe group in readmodel instead of counting
+        # twice. Keep in step with hooks/claude-track-calls.build_event.
+        "event_id": f"claude:{session_id}:{message_uuid}",
         "model": model,
         "input_tokens": input_tokens,
         "output_tokens": output_tokens,
         "cache_creation_tokens": cache_creation_tokens,
+        "cache_creation_1h_tokens": tokens["cache_creation_1h_tokens"],
+        "cache_creation_5m_tokens": tokens["cache_creation_5m_tokens"],
         "cache_read_tokens": cache_read_tokens,
         "cost_estimate_usd": cost_estimate_usd,
-        "duration_ms": 0,
+        # Absent, not zero — see hooks/claude-track-calls.build_event.
         "working_dir": working_dir,
         "tool_uses": count_tool_uses(message.get("content")),
         "stop_reason": message.get("stop_reason", ""),
@@ -204,6 +264,9 @@ def build_tracker_event(
     }
     if working_dir_raw:
         event["working_dir_raw"] = True
+    if agent_id:
+        event["agent_id"] = agent_id
+        event["is_sidechain"] = True
     return event
 
 
@@ -225,8 +288,7 @@ def collect_events(
     duplicates = 0
 
     for transcript_path in files:
-        session_id = transcript_path.stem
-        working_dir, working_dir_raw = decode_project_dir(transcript_path.parent.name)
+        session_id, working_dir, working_dir_raw, agent_id = stream_identity(transcript_path)
 
         try:
             source = transcript_path.open("r", encoding="utf-8")
@@ -259,6 +321,7 @@ def collect_events(
                     transcript_event,
                     message,
                     usage,
+                    agent_id,
                 )
                 if tracker_event is None:
                     log_verbose(verbose, f"Skipping incomplete assistant usage event in {transcript_path}:{line_number}")
@@ -298,19 +361,26 @@ def atomic_write_text(path: Path, text: str) -> None:
 
 
 def append_events(events: list[dict]) -> None:
+    """Append under the caller's lock. Never rewrite.
+
+    This used to read the whole ledger and replace it through a temp copy,
+    which contradicted the project's append-only contract in the one place
+    that mattered most: a Stop hook appending while this rewrite was in
+    flight lost its line to the os.replace, and a writer that died mid-copy
+    left a full-size orphan behind (22 of them, 1.8 GB, cleaned 2026-08-18).
+    """
     if not events:
         return
 
-    existing = ""
-    if EVENTS_FILE.exists():
-        with EVENTS_FILE.open("r", encoding="utf-8") as source:
-            existing = source.read()
+    TRACKER_DIR.mkdir(parents=True, exist_ok=True)
+    payload = "".join(json.dumps(event, ensure_ascii=False, separators=(",", ":")) + "\n" for event in events)
+    if HOOK.needs_leading_newline(EVENTS_FILE):
+        payload = "\n" + payload
 
-    merged = existing
-    if merged and not merged.endswith("\n"):
-        merged += "\n"
-    merged += "".join(json.dumps(event, ensure_ascii=False, separators=(",", ":")) + "\n" for event in events)
-    atomic_write_text(EVENTS_FILE, merged)
+    with EVENTS_FILE.open("a", encoding="utf-8", newline="\n") as target:
+        target.write(payload)
+        target.flush()
+        os.fsync(target.fileno())
 
 
 def remove_fresh_duplicates(
@@ -336,19 +406,22 @@ def update_last_uuids(events_with_ts: list[tuple[datetime, dict]], existing_late
     last_uuids = read_last_uuids()
     new_latest: dict[str, tuple[datetime, str]] = {}
     for ts, event in events_with_ts:
-        session_id = event["session_id"]
+        # Per stream. Writing an agent's uuid under the bare parent session
+        # key would leave the next Stop hook looking for it in the main
+        # transcript, failing, and re-emitting that whole file every turn.
+        key = HOOK.stream_key_of_event(event)
         message_uuid = event["message_uuid"]
-        current = new_latest.get(session_id)
+        current = new_latest.get(key)
         if current is None or ts.timestamp() > current[0].timestamp():
-            new_latest[session_id] = (ts, message_uuid)
+            new_latest[key] = (ts, message_uuid)
 
     changed = False
-    for session_id, (new_ts, new_uuid) in new_latest.items():
-        existing = existing_latest.get(session_id)
+    for key, (new_ts, new_uuid) in new_latest.items():
+        existing = existing_latest.get(key)
         if existing is not None and existing[0].timestamp() > new_ts.timestamp():
             continue
-        if last_uuids.get(session_id) != new_uuid:
-            last_uuids[session_id] = new_uuid
+        if last_uuids.get(key) != new_uuid:
+            last_uuids[key] = new_uuid
             changed = True
 
     if changed:

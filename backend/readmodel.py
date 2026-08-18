@@ -58,7 +58,7 @@ def aggregate_by_model(
         SELECT
             provider_norm,
             model_name,
-            COUNT(*) AS calls,
+            SUM(1 - is_correction) AS calls,
             SUM(input_tokens_norm) AS input_tokens,
             SUM(output_tokens_norm) AS output_tokens,
             SUM(cache_read_tokens_norm) AS cache_read_tokens,
@@ -123,7 +123,7 @@ def aggregate_totals(
     cte, params = _deduped_events_cte(start, end, provider_keys)
     sql = cte + """
         SELECT
-            COUNT(*) AS calls,
+            SUM(1 - is_correction) AS calls,
             SUM(input_tokens_norm) AS input_tokens,
             SUM(output_tokens_norm) AS output_tokens,
             SUM(cache_read_tokens_norm) AS cache_read_tokens,
@@ -155,7 +155,7 @@ def aggregate_by_provider(
         SELECT
             provider_norm,
             model_name,
-            COUNT(*) AS calls,
+            SUM(1 - is_correction) AS calls,
             SUM(input_tokens_norm) AS input_tokens,
             SUM(output_tokens_norm) AS output_tokens,
             SUM(cache_read_tokens_norm) AS cache_read_tokens,
@@ -212,7 +212,7 @@ def aggregate_by_provider(
         SELECT
             provider_norm,
             origin_norm,
-            COUNT(*) AS calls,
+            SUM(1 - is_correction) AS calls,
             SUM(input_tokens_norm) AS input_tokens,
             SUM(output_tokens_norm) AS output_tokens,
             SUM(cache_read_tokens_norm) AS cache_read_tokens,
@@ -518,6 +518,7 @@ def _deduped_events_cte(
                 CASE WHEN cost_estimate_usd IS NULL THEN 1 ELSE 0 END
                     AS unknown_pricing_flag,
                 origin_norm,
+                COALESCE(is_correction, 0) AS is_correction,
                 dedupe_group
             FROM events
             WHERE {" AND ".join(where)}
@@ -671,6 +672,45 @@ def _model_name(model: object) -> str:
     return "unknown"
 
 
+def _legacy_dedupe_tuple(
+    provider: str,
+    event: dict,
+    input_tokens: object,
+    cached_input_tokens: object,
+    output_tokens: object,
+    reasoning_tokens: object,
+    total_tokens: object,
+    exit_code: object,
+) -> tuple:
+    """Fallback identity for events with no event_id — ONE definition.
+
+    Three call sites build this key: the SQL projection and the two
+    in-memory dedupe paths. They drifted once already — the SQL key gained
+    message_uuid on 2026-08-18 while the other two kept merging distinct
+    calls, so aggregates and read_events disagreed on the same ledger.
+
+    message_uuid matters: without it two distinct calls that happen to
+    share a millisecond, a model and a token count fold into one. Measured
+    on the claude ledger, 496 real calls were being merged away. Events
+    written since 2026-08-18 carry event_id and never reach this branch;
+    only older history needs it. No other provider writes message_uuid, so
+    their key is unchanged.
+    """
+    return (
+        provider,
+        event.get("session_id"),
+        event.get("message_uuid"),
+        event.get("ts"),
+        event.get("model"),
+        input_tokens,
+        cached_input_tokens,
+        output_tokens,
+        reasoning_tokens,
+        total_tokens,
+        exit_code,
+    )
+
+
 def _event_dedupe_group(
     event: dict,
     default_provider: str,
@@ -686,11 +726,9 @@ def _event_dedupe_group(
     if isinstance(event_id, str) and event_id:
         return "event_id:" + event_id
 
-    key = (
+    key = _legacy_dedupe_tuple(
         _normalize_dedupe_provider(json_provider, default_provider),
-        event.get("session_id"),
-        event.get("ts"),
-        event.get("model"),
+        event,
         input_tokens,
         cached_input_tokens,
         output_tokens,
@@ -721,7 +759,10 @@ def _create_schema(conn: sqlite3.Connection) -> None:
             -- source JSONL did not include cost_estimate_usd at all, which
             -- is the signal summarize uses to increment unknown_pricing.
             cost_estimate_usd REAL,
-            duration_ms INTEGER DEFAULT 0,
+            duration_ms INTEGER,
+            -- A cost correction adjusts an earlier event's money and
+            -- nothing else: it is not another call and carries no tokens.
+            is_correction INTEGER DEFAULT 0,
             working_dir TEXT,
             tool_uses INTEGER DEFAULT 0,
             stop_reason TEXT,
@@ -832,11 +873,21 @@ def _load_event_file(
             model_name = _model_name(event.get("model"))
             aggregate_cache_read_tokens = cache_read_tokens + cached_input_tokens
             # Mirrors summary.add_event's fallback: uncached input + cached +
-            # output (reasoning is inside output on OpenAI events).
+            # output (reasoning is inside output on OpenAI events) + the
+            # cache traffic Anthropic reports OUTSIDE input_tokens.
+            #
+            # Without those last two terms "total tokens" was, on Claude, very
+            # nearly just the output: a cached turn here reads input=2 with
+            # 600k tokens served from cache. Only Claude events reach this
+            # fallback — every other provider writes total_tokens explicitly —
+            # and there cache_read/cache_creation are zero, so the OpenAI
+            # subset convention is untouched.
             aggregate_total_tokens = total_tokens or (
                 max(0, input_tokens - cached_input_tokens)
                 + cached_input_tokens
                 + output_tokens
+                + cache_read_tokens
+                + _as_int(event.get("cache_creation_tokens"))
             )
             dedupe_group = _event_dedupe_group(
                 event,
@@ -859,10 +910,10 @@ def _load_event_file(
                     event_id, tracking_run_id, cached_input_tokens,
                     reasoning_tokens, exit_code, json_provider,
                     provider_norm, model_name, origin_norm, aggregate_cache_read_tokens,
-                    aggregate_total_tokens, dedupe_group,
+                    aggregate_total_tokens, dedupe_group, is_correction,
                     raw_json
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                           ?)
                 """,
                 (
@@ -886,7 +937,9 @@ def _load_event_file(
                     (_as_float(event["cost_estimate_usd"])
                      if event.get("cost_estimate_usd") is not None
                      else None),
-                    _as_int(event.get("duration_ms")),
+                    # None, not 0: an absent duration means "not measured",
+                    # and a floor of zeros would poison any average built on it.
+                    _as_int_or_none(event.get("duration_ms")),
                     event.get("working_dir"),
                     _as_int(event.get("tool_uses")),
                     event.get("stop_reason"),
@@ -902,6 +955,10 @@ def _load_event_file(
                     aggregate_cache_read_tokens,
                     aggregate_total_tokens,
                     dedupe_group,
+                    # A correction adjusts money on an event already counted;
+                    # counting it as a call too would inflate the headline every
+                    # time a price is fixed.
+                    1 if event.get("correction_of") else 0,
                     raw,
                 ),
             )
@@ -1040,11 +1097,9 @@ def _dedupe_events(rows: list[tuple[dict, str]]) -> list[tuple[dict, str]]:
                 continue
             seen_event_ids.add(event_id)
         else:
-            legacy_key = (
+            legacy_key = _legacy_dedupe_tuple(
                 _event_provider(event, provider_key),
-                event.get("session_id"),
-                event.get("ts"),
-                event.get("model"),
+                event,
                 event.get("input_tokens"),
                 event.get("cached_input_tokens"),
                 event.get("output_tokens"),
@@ -1078,11 +1133,9 @@ def _dedupe_fast_events(rows: list[tuple[dict, str, float]]) -> list[tuple[dict,
                 continue
             seen_event_ids.add(event_id)
         else:
-            legacy_key = (
+            legacy_key = _legacy_dedupe_tuple(
                 _event_provider(event, provider_key),
-                event.get("session_id"),
-                event.get("ts"),
-                event.get("model"),
+                event,
                 event.get("input_tokens"),
                 event.get("cached_input_tokens"),
                 event.get("output_tokens"),

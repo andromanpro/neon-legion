@@ -384,7 +384,12 @@ def add_event(stats: dict, event: dict) -> None:
     reasoning_tokens = as_int(event.get("reasoning_tokens"))
     total_tokens = as_int(event.get("total_tokens"))
 
-    stats["calls"] += 1
+    # A cost correction restates the money on an event that was already
+    # counted. It is not another call, and it carries no tokens of its own —
+    # counting it would inflate the headline every time a price is fixed.
+    # Keep in step with readmodel's is_correction column.
+    if not event.get("correction_of"):
+        stats["calls"] += 1
     # Normalize to the Anthropic convention (input EXCLUDES cache) before
     # aggregating. OpenAI events report cached_input as a SUBSET of input, so
     # adding both raw input and cached_input into the cache pool made a fully
@@ -398,8 +403,15 @@ def add_event(stats: dict, event: dict) -> None:
     stats["reasoning_tokens"] += reasoning_tokens
     # Fallback mirrors the normalization: uncached input + cached + output
     # (reasoning is inside output on OpenAI events; zero on Claude ones).
+    # The cache terms matter on Claude, where reads and writes sit OUTSIDE
+    # input_tokens: without them a fully cached turn counted as its output
+    # alone. Only Claude events reach this fallback — everyone else writes
+    # total_tokens explicitly — and there both cache fields are zero, so the
+    # OpenAI subset convention above is unaffected.
+    # Keep identical to readmodel._load_event_file's aggregate_total_tokens.
     stats["total_tokens"] += total_tokens or (
         max(0, input_tokens - cached_input_tokens) + cached_input_tokens + output_tokens
+        + cache_read_tokens + as_int(event.get("cache_creation_tokens"))
     )
     api_equivalent_cost = as_float(event.get("cost_estimate_usd"))
     stats["cost_estimate_usd"] += api_equivalent_cost
