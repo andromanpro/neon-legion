@@ -125,6 +125,10 @@ class LiveChunkEstimationTests(unittest.TestCase):
         self.assertEqual(first_chunk["estimation_mode"], "calendar-day-chunk-live")
         self.assertEqual(first_chunk["transcript_path"], str(transcript))
         self.assertEqual(tasks[f"multi:{day_two}"]["ai_baseline_hours"], 2.0)
+        self.assertEqual(tasks["multi"]["session_event_count"], 4)
+        self.assertTrue(tasks["multi"]["chunk_estimation_complete"])
+        self.assertEqual(tasks["multi"]["chunk_estimation_completed"], 2)
+        self.assertEqual(tasks["multi"]["chunk_estimation_expected"], 2)
 
     def test_past_day_is_frozen_and_latest_day_is_rewritten(self):
         transcript = self.tmp_path / "rewrite.jsonl"
@@ -191,6 +195,9 @@ class LiveChunkEstimationTests(unittest.TestCase):
         self.assertNotIn("failure:2026-05-15", tasks)
         self.assertEqual(tasks["failure:2026-05-16"]["ai_baseline_hours"], 20.0)
         self.assertEqual(tasks["failure:2026-05-17"]["ai_baseline_hours"], 30.0)
+        self.assertFalse(tasks["failure"]["chunk_estimation_complete"])
+        self.assertEqual(tasks["failure"]["chunk_estimation_completed"], 2)
+        self.assertEqual(tasks["failure"]["chunk_estimation_expected"], 3)
 
         calls = self.set_oracle_results(101, 11, 31)
         self.estimator.estimate_session("failure", str(transcript))
@@ -200,6 +207,8 @@ class LiveChunkEstimationTests(unittest.TestCase):
         self.assertEqual(tasks["failure:2026-05-15"]["ai_baseline_hours"], 11.0)
         self.assertEqual(tasks["failure:2026-05-16"]["ai_baseline_hours"], 20.0)
         self.assertEqual(tasks["failure:2026-05-17"]["ai_baseline_hours"], 31.0)
+        self.assertTrue(tasks["failure"]["chunk_estimation_complete"])
+        self.assertEqual(tasks["failure"]["chunk_estimation_completed"], 3)
 
     def test_profanity_and_sentiment_stay_on_session_entry_only(self):
         transcript = self.tmp_path / "sentiment.jsonl"

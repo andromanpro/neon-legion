@@ -71,6 +71,29 @@ def candidates(sessions_root: Path, tasks: dict):
     return rows
 
 
+def estimation_status(entry: object) -> tuple[str, object, str]:
+    """Return (complete|partial|missing, hours, human-readable chunk progress)."""
+    if not isinstance(entry, dict):
+        return "missing", None, "чанки ?/?"
+    hours = entry.get("ai_baseline_hours")
+    if hours is None:
+        return "missing", None, "чанки ?/?"
+
+    completed = entry.get("chunk_estimation_completed")
+    expected = entry.get("chunk_estimation_expected")
+    if (
+        isinstance(completed, int)
+        and not isinstance(completed, bool)
+        and isinstance(expected, int)
+        and not isinstance(expected, bool)
+    ):
+        progress = f"чанки {completed}/{expected}"
+    else:
+        progress = "чанки ?/?"
+    status = "complete" if entry.get("chunk_estimation_complete") is True else "partial"
+    return status, hours, progress
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--sessions-root", type=Path, default=DEFAULT_SESSIONS_ROOT)
@@ -102,9 +125,10 @@ def main(argv: list[str]) -> int:
     if args.list:
         return 0
 
-    ok = failed = 0
+    ok = partial = failed = 0
     for index, (session_id, path, last, _prompts) in enumerate(rows, start=1):
         label = f"[{index}/{len(rows)}] {session_id[:8]}"
+        interruption = ""
         try:
             completed = subprocess.run(
                 ["py", "-3.14", str(ESTIMATOR), session_id, str(path)],
@@ -116,23 +140,26 @@ def main(argv: list[str]) -> int:
                 timeout=args.timeout,
             )
         except subprocess.TimeoutExpired:
-            failed += 1
-            print(f"{label} ✗ таймаут {args.timeout}s")
-            continue
-        if completed.returncode != 0:
-            failed += 1
-            print(f"{label} ✗ rc={completed.returncode} {completed.stderr.strip()[:160]}")
-            continue
+            completed = None
+            interruption = f"таймаут {args.timeout}s"
+        if completed is not None and completed.returncode != 0:
+            interruption = f"rc={completed.returncode} {completed.stderr.strip()[:160]}"
+
         entry = summary.read_tasks().get(session_id) or {}
-        hours = entry.get("ai_baseline_hours")
-        if hours is None:
+        status, hours, progress = estimation_status(entry)
+        suffix = f"; {interruption}" if interruption else ""
+        if status == "missing":
             failed += 1
-            print(f"{label} ✗ оценка не записана ({str(entry.get('brief_description', ''))[:60]})")
+            detail = str(entry.get("brief_description", ""))[:60]
+            print(f"{label} ✗ оценка не записана ({detail}){suffix}")
+        elif status == "partial":
+            partial += 1
+            print(f"{label} ⚠ {hours} ч, нарезка не завершена ({progress}){suffix}")
         else:
             ok += 1
-            print(f"{label} ✓ {hours} ч")
+            print(f"{label} ✓ {hours} ч, нарезка завершена ({progress}){suffix}")
 
-    print(f"[codex-est] готово: успешно {ok}, не вышло {failed}")
+    print(f"[codex-est] готово: полностью {ok}, частично {partial}, не вышло {failed}")
     return 0
 
 

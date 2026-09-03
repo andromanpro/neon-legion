@@ -680,6 +680,13 @@ def estimate_session(session_id: str, transcript_path: str) -> None:
     entry = run_oracle(prompt)
     entry["transcript_path"] = transcript_path
     entry["profanity_count"] = profanity
+    entry["session_event_count"] = int(metrics.get("event_count") or 0)
+    # Written before chunk oracle calls on purpose: if the parent backfill kills
+    # this process on timeout, the session baseline remains explicitly partial
+    # instead of looking like a completed estimate.
+    entry["chunk_estimation_complete"] = False
+    entry["chunk_estimation_completed"] = 0
+    entry["chunk_estimation_expected"] = None
     update_task_entry(session_id, entry)
 
     chunks: dict[str, list[tuple[dict, datetime]]] = {}
@@ -704,10 +711,20 @@ def estimate_session(session_id: str, transcript_path: str) -> None:
         return
 
     if not chunks:
+        update_task_entry(session_id, {
+            "chunk_estimation_complete": True,
+            "chunk_estimation_completed": 0,
+            "chunk_estimation_expected": 0,
+        })
         return
 
     latest_date = max(chunks)
     tasks = read_tasks()
+    update_task_entry(session_id, {
+        "chunk_estimation_complete": False,
+        "chunk_estimation_completed": 0,
+        "chunk_estimation_expected": len(chunks),
+    })
 
     def has_numeric_baseline(task_key: str) -> bool:
         previous = tasks.get(task_key)
@@ -794,6 +811,16 @@ def estimate_session(session_id: str, transcript_path: str) -> None:
         except Exception as exc:
             print(f"chunk-estimate-failed\t{session_id}\t{date_key}\t{exc}", file=sys.stderr)
             continue
+
+    completed_chunks = sum(
+        has_numeric_baseline(f"{session_id}:{date_key}")
+        for date_key in chunks
+    )
+    update_task_entry(session_id, {
+        "chunk_estimation_complete": completed_chunks == len(chunks),
+        "chunk_estimation_completed": completed_chunks,
+        "chunk_estimation_expected": len(chunks),
+    })
 
 
 def _safe_count_profanity(transcript_path: str) -> int | None:

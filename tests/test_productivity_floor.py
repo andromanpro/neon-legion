@@ -42,10 +42,13 @@ class ProductivityFloorTests(unittest.TestCase):
     def setUp(self):
         self._orig_unit = summary.PRODUCTIVITY_UNIT
         self._orig_read_tasks = summary.read_tasks
+        self._orig_read_lifetime_counts = summary.read_lifetime_session_event_counts
+        summary.read_lifetime_session_event_counts = lambda: {}
 
     def tearDown(self):
         summary.PRODUCTIVITY_UNIT = self._orig_unit
         summary.read_tasks = self._orig_read_tasks
+        summary.read_lifetime_session_event_counts = self._orig_read_lifetime_counts
 
     def _stub_tasks(self, tasks):
         summary.read_tasks = lambda: tasks

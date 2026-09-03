@@ -1,0 +1,55 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "files_changed": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "path": {"type": "string"},
+          "what": {"type": "string"}
+        },
+        "required": ["path", "what"]
+      }
+    },
+    "summary": {"type": "string"},
+    "proration_rule": {"type": "string"},
+    "tested": {"type": "boolean"},
+    "test_results": {"type": "string"},
+    "negative_control_verified": {"type": "boolean"},
+    "negative_control_note": {"type": "string"},
+    "before_after": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "window_days": {"type": "integer"},
+          "hours_before": {"type": "number"},
+          "hours_after": {"type": "number"},
+          "multiplier_before": {"type": "number"},
+          "multiplier_after": {"type": "number"}
+        },
+        "required": ["window_days", "hours_before", "hours_after", "multiplier_before", "multiplier_after"]
+      }
+    },
+    "invariant_note": {"type": "string"},
+    "open_questions": {"type": "array", "items": {"type": "string"}},
+    "deviations_from_spec": {"type": "array", "items": {"type": "string"}}
+  },
+  "required": [
+    "files_changed",
+    "summary",
+    "proration_rule",
+    "tested",
+    "test_results",
+    "negative_control_verified",
+    "negative_control_note",
+    "before_after",
+    "invariant_note",
+    "open_questions",
+    "deviations_from_spec"
+  ]
+}

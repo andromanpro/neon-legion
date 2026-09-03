@@ -19,11 +19,14 @@ import server  # noqa: E402
 class ChunkModeTests(unittest.TestCase):
     def setUp(self):
         self._read_tasks = summary.read_tasks
+        self._read_lifetime_counts = summary.read_lifetime_session_event_counts
         self._unit = summary.PRODUCTIVITY_UNIT
+        summary.read_lifetime_session_event_counts = lambda: {}
         self.addCleanup(self._restore_state)
 
     def _restore_state(self):
         summary.read_tasks = self._read_tasks
+        summary.read_lifetime_session_event_counts = self._read_lifetime_counts
         summary.PRODUCTIVITY_UNIT = self._unit
 
     def _set_tasks(self, tasks):
