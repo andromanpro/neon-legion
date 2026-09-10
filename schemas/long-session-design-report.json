@@ -1,0 +1,52 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "recommendation": {"type": "string"},
+    "unit_of_estimation": {"type": "string"},
+    "source_of_truth": {"type": "string"},
+    "incremental_estimation": {"type": "string"},
+    "trigger": {"type": "string"},
+    "compaction_handling": {"type": "string"},
+    "attention_changes": {"type": "string"},
+    "migration_plan": {"type": "string"},
+    "invariants": {"type": "array", "items": {"type": "string"}},
+    "test_plan": {"type": "array", "items": {"type": "string"}},
+    "expected_effect": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "window": {"type": "string"},
+          "current": {"type": "string"},
+          "proposed": {"type": "string"},
+          "how_computed": {"type": "string"}
+        },
+        "required": ["window", "current", "proposed", "how_computed"]
+      }
+    },
+    "verified_facts": {"type": "array", "items": {"type": "string"}},
+    "alternatives_rejected": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "option": {"type": "string"},
+          "why_rejected": {"type": "string"}
+        },
+        "required": ["option", "why_rejected"]
+      }
+    },
+    "risks": {"type": "array", "items": {"type": "string"}},
+    "open_questions": {"type": "array", "items": {"type": "string"}},
+    "design_doc_path": {"type": "string"}
+  },
+  "required": [
+    "recommendation", "unit_of_estimation", "source_of_truth", "incremental_estimation",
+    "trigger", "compaction_handling", "attention_changes", "migration_plan", "invariants",
+    "test_plan", "expected_effect", "verified_facts", "alternatives_rejected", "risks",
+    "open_questions", "design_doc_path"
+  ]
+}
