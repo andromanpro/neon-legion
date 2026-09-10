@@ -93,12 +93,15 @@ class CodexProvider:
 
     def cost(self, event: dict) -> float | None:
         # OpenAI is pay-per-token; pricing_for_model never returns None.
+        # Bill at the rate in force on the event's date: recosting history
+        # must not apply a later price cut to events that happened before it.
         return self.pricer.estimate_cost(
             event.get("model"),
             as_int(event.get("input_tokens")),
             as_int(event.get("cached_input_tokens")),
             as_int(event.get("output_tokens")),
             as_int(event.get("reasoning_tokens")),
+            at=event.get("ts"),
         )
 
 

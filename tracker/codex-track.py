@@ -18,7 +18,7 @@ import subprocess
 import sys
 import time
 import uuid
-from datetime import datetime
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 
@@ -31,17 +31,24 @@ EVENTS_FILE = TRACKER_DIR / "codex-events.jsonl"
 LOCK_FILE = TRACKER_DIR / ".codex-events.lock"
 
 # Pricing per MILLION tokens — "what the API would have cost" if the user paid
-# OpenAI per token instead of via a ChatGPT subscription. Rates are per-model
-# (OpenAI split GPT-5.6 into Sol/Terra/Luna tiers, July 2026):
-#   gpt-5.6-sol   $5 in / $30 out   (flagship)
-#   gpt-5.6-terra $2.50 / $15       (balanced)
-#   gpt-5.6-luna  $1 / $6           (fastest/cheapest)
-#   gpt-5.5       $5 / $30          (prev default was $10 in — 2x too high)
-#   gpt-5.4       $2.50 / $15
-# cached_input = 10% of input (90% cache-read discount); reasoning tokens are
-# billed at the output rate. Source: OpenAI pricing (aipricing.guru / finout,
-# July 2026). The global OPENAI_TOKEN_PRICE_* env vars still override the
-# DEFAULT tier (used for unrecognized model strings) for back-compat.
+# OpenAI per token instead of via a ChatGPT subscription.
+#
+# Source of truth: OpenAI's own rate card and changelog
+# (developers.openai.com/api/docs/pricing, .../models/gpt-6-astra,
+# .../changelog), verified 2026-09-10. Third-party price blogs contradicted
+# each other on exactly these numbers — do not update them from blogs.
+#
+# MODEL_PRICING holds each model's LAUNCH rate; PRICE_CHANGES holds later
+# official cuts with their effective date, so an event is billed at the rate in
+# force on its UTC date and history before a cut keeps the old rate:
+#   gpt-5.6-terra  $2.50 / $15  -> $2 / $12       from 2026-07-30 (-20%)
+#   gpt-5.6-luna   $1 / $6      -> $0.20 / $1.20  from 2026-07-30 (-80%)
+#   gpt-5.6-sol    $5 / $30     -> $4 / $20       from 2026-08-21
+#   gpt-6-astra    $10 / $50    launched 2026-09-03, long-context tier below
+#   gpt-5.5        $5 / $30     gpt-5.4 $2.50 / $15 (unchanged)
+# cached_input = 10% of input; reasoning tokens are part of output and billed
+# once, at the output rate. The global OPENAI_TOKEN_PRICE_* env vars still
+# override the DEFAULT tier (unrecognized model strings) for back-compat.
 def _rate(inp: float, cached: float, out: float, reasoning: float) -> dict:
     return {
         "input": inp / 1_000_000,
@@ -52,6 +59,7 @@ def _rate(inp: float, cached: float, out: float, reasoning: float) -> dict:
 
 
 MODEL_PRICING = {
+    "gpt-6-astra": _rate(10.0, 1.0, 50.0, 50.0),
     "gpt-5.6-sol": _rate(5.0, 0.5, 30.0, 30.0),
     "gpt-5.6-terra": _rate(2.5, 0.25, 15.0, 15.0),
     "gpt-5.6-luna": _rate(1.0, 0.1, 6.0, 6.0),
@@ -59,8 +67,26 @@ MODEL_PRICING = {
     "gpt-5.4": _rate(2.5, 0.25, 15.0, 15.0),
 }
 
+# (effective-from UTC date, rate), ascending. Found 2026-09-10: the ledger was
+# still billing Sol at $5/$30 three weeks after OpenAI cut it, and gpt-6-astra
+# was absent entirely — silently billed at the Sol fallback, 2.6x too low.
+PRICE_CHANGES = {
+    "gpt-5.6-terra": [(date(2026, 7, 30), _rate(2.0, 0.2, 12.0, 12.0))],
+    "gpt-5.6-luna": [(date(2026, 7, 30), _rate(0.2, 0.02, 1.2, 1.2))],
+    "gpt-5.6-sol": [(date(2026, 8, 21), _rate(4.0, 0.4, 20.0, 20.0))],
+}
+
+# Long-context tier: a request with MORE than `threshold` input tokens is billed
+# at the multiplied rates for the WHOLE request. Official wording for
+# gpt-6-astra: "more than 272K input tokens are priced at 2x input and cache
+# rates and 1.5x output for the full request". Only models whose threshold is
+# confirmed on their OpenAI model page are listed here.
+LONG_CONTEXT = {
+    "gpt-6-astra": {"threshold": 272_000, "input": 2.0, "cached_input": 2.0, "output": 1.5},
+}
+
 # Fallback for unrecognized models (e.g. "codex-auto-review", future variants):
-# flagship Sol/5.5 rates, env-overridable for back-compat.
+# flagship Sol/5.5 launch rates, env-overridable for back-compat.
 DEFAULT_PRICING = _rate(
     cfg.get_legacy_env("OPENAI_TOKEN_PRICE_INPUT", 5.0, float),
     cfg.get_legacy_env("OPENAI_TOKEN_PRICE_CACHED_INPUT", 0.5, float),
@@ -69,20 +95,57 @@ DEFAULT_PRICING = _rate(
 )
 
 
-def pricing_for_model(model: object) -> dict:
-    """Per-token price dict for an OpenAI/Codex model string.
+def _model_key(model: object) -> str | None:
+    """MODEL_PRICING key for a model string (exact match, then prefix), else None.
 
     Sub-variant tolerant: "gpt-5.6-sol-ultra" or "gpt-5.6-sol (2026-07)" resolve
-    to the sol tier via prefix match. Unknown → DEFAULT_PRICING (never None, so
-    Codex cost is always populated — OpenAI is pay-per-token, no free tier).
+    to the sol tier.
     """
     name = str(model or "").lower().strip()
     if name in MODEL_PRICING:
-        return MODEL_PRICING[name]
-    for key, rate in MODEL_PRICING.items():
+        return name
+    for key in MODEL_PRICING:
         if name.startswith(key):
-            return rate
-    return DEFAULT_PRICING
+            return key
+    return None
+
+
+def _price_date(at: object) -> date | None:
+    """UTC calendar date for a pricing timestamp; None means "now".
+
+    Accepts a date, a datetime (naive = UTC) or an ISO-8601 string. An
+    unparseable value prices at the current rate, exactly like a live event.
+    """
+    if at is None:
+        return None
+    if isinstance(at, datetime):  # before `date`: datetime subclasses date
+        moment = at if at.tzinfo else at.replace(tzinfo=timezone.utc)
+        return moment.astimezone(timezone.utc).date()
+    if isinstance(at, date):
+        return at
+    try:
+        parsed = datetime.fromisoformat(str(at).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return _price_date(parsed)
+
+
+def pricing_for_model(model: object, at: object = None) -> dict:
+    """Per-token price dict for an OpenAI/Codex model at a point in time.
+
+    `at` (the event timestamp) selects the rate in force on that UTC date;
+    None means the current rate. Unknown model → DEFAULT_PRICING (never None,
+    so Codex cost is always populated — OpenAI is pay-per-token, no free tier).
+    """
+    key = _model_key(model)
+    if key is None:
+        return DEFAULT_PRICING
+    rate = MODEL_PRICING[key]
+    when = _price_date(at)
+    for effective_from, changed in PRICE_CHANGES.get(key, []):
+        if when is None or when >= effective_from:
+            rate = changed
+    return rate
 
 LOCK_TIMEOUT_SECONDS = 10.0
 STALE_LOCK_SECONDS = 120.0
@@ -107,6 +170,7 @@ def estimate_cost(
     cached_input_tokens: int,
     output_tokens: int,
     reasoning_tokens: int,
+    at: object = None,
 ) -> float:
     """OpenAI usage semantics: cached_input is a SUBSET of input_tokens, and
     reasoning is a SUBSET of output_tokens (verified empirically on 38k ledger
@@ -117,13 +181,26 @@ def estimate_cost(
     at the cache rate, and output once (reasoning is already inside it).
     reasoning_tokens stays in the signature: it's recorded in events for
     diagnostics, it just must not be priced separately.
+
+    `at` is the event timestamp: the rate in force on that date applies (see
+    PRICE_CHANGES), and a request above a model's LONG_CONTEXT threshold is
+    billed at the multiplied rates for the whole request.
     """
-    pricing = pricing_for_model(model)
+    pricing = pricing_for_model(model, at)
+    input_rate = pricing["input"]
+    cached_rate = pricing["cached_input"]
+    output_rate = pricing["output"]
+    key = _model_key(model)
+    long_context = LONG_CONTEXT.get(key) if key else None
+    if long_context and input_tokens > long_context["threshold"]:
+        input_rate *= long_context["input"]
+        cached_rate *= long_context["cached_input"]
+        output_rate *= long_context["output"]
     uncached_input = max(0, input_tokens - cached_input_tokens)
     cost = (
-        uncached_input * pricing["input"]
-        + cached_input_tokens * pricing["cached_input"]
-        + output_tokens * pricing["output"]
+        uncached_input * input_rate
+        + cached_input_tokens * cached_rate
+        + output_tokens * output_rate
     )
     return round(cost, 6)
 

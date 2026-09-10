@@ -258,6 +258,7 @@ def read_session_events(path: Path, since: datetime | None) -> list[dict]:
                     cached_input_tokens,
                     output_tokens,
                     reasoning_tokens,
+                    at=item.get("timestamp"),
                 ),
                 "exit_code": 0,
                 "partial": False,
