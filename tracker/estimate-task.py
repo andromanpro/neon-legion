@@ -14,6 +14,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 TRACKER_DIR = PROJECT_ROOT / "tracker"
 sys.path.insert(0, str(TRACKER_DIR))
 import codex_transcript  # noqa: E402  (Codex rollout reader, stdlib only)
+from transcript_events import is_compact_summary  # noqa: E402
 TASKS_FILE = TRACKER_DIR / "tasks.json"
 TASKS_LOCK_FILE = TRACKER_DIR / ".tasks.lock"
 LOG_DIR = TRACKER_DIR / ".estimation-logs"
@@ -247,6 +248,19 @@ def transcript_text(event: dict) -> str:
     return extract_text(event.get("content"))
 
 
+def transcript_message(event: dict) -> tuple[str, str] | None:
+    """One message classifier for both whole-session and daily oracle input."""
+    if not isinstance(event, dict) or is_compact_summary(event):
+        return None
+    if event.get("type") == "response_item":
+        return codex_transcript.message_from_event(event)
+    role = transcript_role(event)
+    if role is None:
+        return None
+    text = transcript_text(event).strip()
+    return (role, text) if text else None
+
+
 def parse_transcript_ts(value: object) -> datetime | None:
     if not isinstance(value, str) or not value:
         return None
@@ -363,17 +377,11 @@ def compute_session_metrics(transcript_path) -> dict:
 
 
 def read_transcript(path: Path) -> tuple[list[str], list[str]]:
-    # Codex rollouts have their own shape and, crucially, inject plugin
-    # catalogues / AGENTS.md dumps under role="user". The prompt budget takes
-    # the FIRST three user messages, so an unfiltered read would spend the
-    # whole 15k-char context on an 11.8 KB plugin list.
-    if codex_transcript.is_rollout(path):
-        return codex_transcript.read_messages(path)
-
     user_messages = []
     assistant_messages = []
 
-    with path.open("r", encoding="utf-8") as source:
+    errors = "replace" if codex_transcript.is_rollout(path) else "strict"
+    with path.open("r", encoding="utf-8", errors=errors) as source:
         for line in source:
             if not line.strip():
                 continue
@@ -381,17 +389,11 @@ def read_transcript(path: Path) -> tuple[list[str], list[str]]:
                 event = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            if not isinstance(event, dict):
+            message = transcript_message(event)
+            if message is None:
                 continue
 
-            role = transcript_role(event)
-            if role is None:
-                continue
-
-            text = transcript_text(event).strip()
-            if not text:
-                continue
-
+            role, text = message
             if role == "user":
                 user_messages.append(text)
             elif role == "assistant":
@@ -767,11 +769,10 @@ def estimate_session(session_id: str, transcript_path: str) -> None:
                     chunk_metrics["assistant_message_count"] += 1
                 chunk_metrics["tool_call_count"] += _tool_call_count_for_event(event, role)
 
-                if role is None:
+                message = transcript_message(event)
+                if message is None:
                     continue
-                text = transcript_text(event).strip()
-                if not text:
-                    continue
+                role, text = message
                 if role == "user":
                     chunk_user_messages.append(text)
                 elif role == "assistant":

@@ -13,6 +13,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(PROJECT_ROOT / "tracker"))
 from tools import config as cfg  # noqa: E402
 import codex_transcript  # noqa: E402  (Codex rollout reader, stdlib only)
+from transcript_events import is_compact_summary  # noqa: E402
 
 CLAUDE_EVENTS_FILE = PROJECT_ROOT / "tracker" / "claude-events.jsonl"
 CODEX_EVENTS_FILE = PROJECT_ROOT / "tracker" / "codex-events.jsonl"
@@ -852,13 +853,14 @@ def is_human_prompt(event: dict) -> bool:
     """True only for a genuine human-typed prompt in a Claude transcript line.
 
     Excludes:
+      - synthetic compaction summaries replaying earlier conversation;
       - sub-agent turns (`isSidechain: true`) — Task-tool children, not the user;
       - tool-result "user" lines — Claude logs tool output as role=user; counting
         them would re-measure AI-busy time (a single session has ~1000 of them vs
         ~80 real prompts).
     A genuine prompt has string content or a non-empty text block.
     """
-    if not isinstance(event, dict):
+    if not isinstance(event, dict) or is_compact_summary(event):
         return False
     message = event.get("message")
     role = message.get("role") if isinstance(message, dict) else None

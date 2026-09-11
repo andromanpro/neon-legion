@@ -111,13 +111,21 @@ def message_role(event: dict) -> str | None:
     return str(role) if role in ("user", "assistant") else None
 
 
+def message_from_event(event: dict) -> tuple[str, str] | None:
+    """Extract a readable conversation message, excluding injected user text."""
+    role = message_role(event)
+    if role is None:
+        return None
+    text = payload_text(event["payload"]).strip()
+    if not text or (role == "user" and is_injected(text)):
+        return None
+    return role, text
+
+
 def is_human_prompt(event: dict) -> bool:
     """True only for a genuine human-typed (or human-attached) rollout message."""
-    if message_role(event) != "user":
-        return False
-    payload = event.get("payload")
-    text = payload_text(payload).strip() if isinstance(payload, dict) else ""
-    return bool(text) and not is_injected(text)
+    message = message_from_event(event)
+    return message is not None and message[0] == "user"
 
 
 def parse_ts(value: object) -> datetime | None:
@@ -208,15 +216,11 @@ def read_messages(path) -> tuple[list[str], list[str]]:
                     event = json.loads(line)
                 except json.JSONDecodeError:
                     continue
-                role = message_role(event)
-                if role is None:
+                message = message_from_event(event)
+                if message is None:
                     continue
-                text = payload_text(event.get("payload") or {}).strip()
-                if not text:
-                    continue
+                role, text = message
                 if role == "user":
-                    if is_injected(text):
-                        continue
                     user_messages.append(text)
                 else:
                     assistant_messages.append(text)
