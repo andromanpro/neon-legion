@@ -128,6 +128,21 @@ def is_human_prompt(event: dict) -> bool:
     return message is not None and message[0] == "user"
 
 
+# Rollout records that are a tool INVOCATION. Their results arrive as separate
+# `*_output` records and are not calls. Observed in real rollouts (2026-09-11,
+# session 019f8053): custom_tool_call 9,774, function_call 2,267,
+# web_search_call 8.
+TOOL_CALL_PAYLOAD_TYPES = frozenset({"function_call", "custom_tool_call", "web_search_call"})
+
+
+def tool_call_count(event: dict) -> int:
+    """1 for a rollout record that invokes a tool, else 0."""
+    if not isinstance(event, dict) or event.get("type") != "response_item":
+        return 0
+    payload = event.get("payload")
+    return int(isinstance(payload, dict) and payload.get("type") in TOOL_CALL_PAYLOAD_TYPES)
+
+
 def parse_ts(value: object) -> datetime | None:
     if not isinstance(value, str) or not value:
         return None

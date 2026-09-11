@@ -312,6 +312,29 @@ def _tool_call_count_for_event(event: dict, role: str | None) -> int:
     return 0
 
 
+def size_signal(event: dict) -> tuple[str | None, int]:
+    """(role to count, tool calls) for the oracle's SESSION SIZE block.
+
+    One rule for both transcript formats and for both the whole-session and the
+    daily metrics. Found in review of phase 1a: this block still used the
+    Claude-only reader, so Codex days reported zero messages and zero tool calls
+    next to real conversation text, and compaction summaries were counted as
+    user messages.
+
+    Claude keeps its historical semantics (every role line counts, tool_result
+    lines included — pinned by tests/test_session_metrics.py). Codex rollouts
+    count genuine messages (not injected context or developer scaffolding) and
+    tool invocations, not their outputs. Compaction output never counts.
+    """
+    if not isinstance(event, dict) or is_compact_summary(event):
+        return None, 0
+    if event.get("type") == "response_item":
+        message = codex_transcript.message_from_event(event)
+        return (message[0] if message else None), codex_transcript.tool_call_count(event)
+    role = transcript_role(event)
+    return role, _tool_call_count_for_event(event, role)
+
+
 def compute_session_metrics(transcript_path) -> dict:
     metrics = {
         "event_count": 0,
@@ -345,13 +368,13 @@ def compute_session_metrics(transcript_path) -> dict:
                     continue
 
                 try:
-                    role = transcript_role(event)
+                    role, tool_calls = size_signal(event)
                     if role == "user":
                         metrics["user_message_count"] += 1
                     elif role == "assistant":
                         metrics["assistant_message_count"] += 1
 
-                    metrics["tool_call_count"] += _tool_call_count_for_event(event, role)
+                    metrics["tool_call_count"] += tool_calls
 
                     ts = parse_transcript_ts(event.get("timestamp") or event.get("ts"))
                     if ts is not None:
@@ -762,12 +785,12 @@ def estimate_session(session_id: str, transcript_path: str) -> None:
             }
 
             for event in events:
-                role = transcript_role(event)
+                role, tool_calls = size_signal(event)
                 if role == "user":
                     chunk_metrics["user_message_count"] += 1
                 elif role == "assistant":
                     chunk_metrics["assistant_message_count"] += 1
-                chunk_metrics["tool_call_count"] += _tool_call_count_for_event(event, role)
+                chunk_metrics["tool_call_count"] += tool_calls
 
                 message = transcript_message(event)
                 if message is None:
