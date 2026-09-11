@@ -134,6 +134,11 @@ def chunk_date(ts: datetime) -> str:
     return ts.date().isoformat()
 
 
+def current_local_date() -> str:
+    """Return the open local calendar day; kept separate for deterministic tests."""
+    return date.today().isoformat()
+
+
 def productivity_unit() -> str:
     return PRODUCTIVITY_UNIT if PRODUCTIVITY_UNIT in {"session", "chunk"} else "session"
 
@@ -371,11 +376,9 @@ def _event_file_specs() -> tuple[tuple[Path, str], ...]:
 def read_lifetime_session_event_counts() -> dict[str, int]:
     """Return deduplicated event counts over each task session's full life.
 
-    ``summarize_productivity`` normally receives only the requested date window,
-    so those events cannot be their own denominator for prorating a session
-    baseline. Scan the canonical append-only ledgers instead. The fingerprinted
-    in-process cache makes this a one-time cost for the dashboard while still
-    noticing appended rows in a long-lived process.
+    This diagnostic scans the canonical append-only ledgers independently of
+    requested date windows. Daily productivity does not use lifetime counts.
+    The fingerprinted cache notices appended rows in a long-lived process.
     """
     global _LIFETIME_EVENT_COUNT_CACHE
 
@@ -1053,7 +1056,7 @@ def summarize_productivity(events: list[dict], gap_minutes: int = 2) -> dict | N
     unit = productivity_unit()
     events = events_for_task_metrics(events)
     tasks = read_tasks()
-    if not tasks:
+    if not tasks and unit == "session":
         return None
 
     session_ranges: dict[str, tuple[float, float]] = {}
@@ -1075,7 +1078,7 @@ def summarize_productivity(events: list[dict], gap_minutes: int = 2) -> dict | N
         else:
             session_ranges[session_id] = (min(current[0], event_time), max(current[1], event_time))
 
-    if not session_ranges:
+    if not session_ranges and unit == "session":
         return None
 
     if unit == "session":
@@ -1182,16 +1185,15 @@ def summarize_productivity(events: list[dict], gap_minutes: int = 2) -> dict | N
     baseline_ceiling_clamped = 0
     hours_ceiling_removed = 0.0
     baseline_per_event_values: list[float] = []
-    total_units = 0
-    lifetime_event_counts = read_lifetime_session_event_counts()
-    known_chunk_event_counts = _known_chunk_event_counts(tasks)
+    today = current_local_date()
+    units_eligible = sum(day < today for _, day in chunk_timestamps)
+    units_open = sum(day == today for _, day in chunk_timestamps)
 
     def record_unit(
         baseline_hours: float,
         timestamps: list[datetime],
         event_range: tuple[float, float],
-        covered_chunk_key: tuple[str, str] | None = None,
-        prorated_session_baseline: bool = False,
+        covered_chunk_key: tuple[str, str],
     ) -> None:
         nonlocal hours_without_ai
         nonlocal active_hours_per_unit_sum
@@ -1207,12 +1209,6 @@ def summarize_productivity(events: list[dict], gap_minutes: int = 2) -> dict | N
             unit_active_hours,
             event_count,
         )
-        if prorated_session_baseline and effective_hours > baseline_hours:
-            # A per-day share is an allocation from a fixed session baseline.
-            # Applying the ordinary active-time floor here could make the sum of
-            # all days exceed that baseline, violating the allocation invariant.
-            effective_hours = baseline_hours
-            kind = "normal"
         if kind == "floor":
             baseline_floor_clamped += 1
             hours_floor_added += effective_hours - baseline_hours
@@ -1221,81 +1217,24 @@ def summarize_productivity(events: list[dict], gap_minutes: int = 2) -> dict | N
             hours_ceiling_removed += baseline_hours - effective_hours
         if event_count > 0:
             baseline_per_event_values.append(baseline_hours / event_count)
-        if covered_chunk_key is not None:
-            covered_chunk_keys.append(covered_chunk_key)
+        covered_chunk_keys.append(covered_chunk_key)
         covered_ranges.append(event_range)
         active_hours_per_unit_sum += unit_active_hours
         hours_without_ai += effective_hours
 
-    for session_id in session_ranges:
-        dates = sorted(
-            date_key
-            for sid, date_key in chunk_timestamps
-            if sid == session_id
-        )
-        if not dates:
+    for key, timestamps in chunk_timestamps.items():
+        session_id, date_key = key
+        # Today's estimate is provisional; only past local days are eligible.
+        if date_key >= today:
             continue
+        entry = tasks.get(f"{session_id}:{date_key}")
+        hours = effective_task_hours(entry) if isinstance(entry, dict) else None
+        if hours is None:
+            continue
+        record_unit(hours, timestamps, chunk_ranges[key], covered_chunk_key=key)
 
-        session_entry = tasks.get(session_id)
-        session_hours = (
-            effective_task_hours(session_entry)
-            if isinstance(session_entry, dict)
-            else None
-        )
-        total_units += len(dates)
-        window_event_count = len(session_timestamps.get(session_id, []))
-        stored_session_event_count = 0
-        if isinstance(session_entry, dict):
-            try:
-                stored_session_event_count = int(
-                    session_entry.get("session_event_count") or 0
-                )
-            except (TypeError, ValueError):
-                stored_session_event_count = 0
-        ledger_event_count = lifetime_event_counts.get(session_id, 0)
-        if ledger_event_count > 0:
-            # Same population as the daily numerator: canonical tracker events.
-            lifetime_event_count = max(ledger_event_count, window_event_count)
-        else:
-            # Portable/in-memory callers may not have the canonical ledgers.
-            # Use the largest available lower bound, which yields the smallest
-            # (most conservative) defensible share without inventing activity.
-            lifetime_event_count = max(
-                known_chunk_event_counts.get(session_id, 0),
-                stored_session_event_count,
-                window_event_count,
-            )
-        for date_key in dates:
-            task_key = f"{session_id}:{date_key}"
-            entry = tasks.get(task_key)
-            hours = effective_task_hours(entry) if isinstance(entry, dict) else None
-            key = (session_id, date_key)
-            if hours is not None:
-                record_unit(
-                    hours,
-                    chunk_timestamps.get(key, []),
-                    chunk_ranges[key],
-                    covered_chunk_key=key,
-                )
-                continue
-
-            if session_hours is None or lifetime_event_count <= 0:
-                continue
-            day_event_count = len(chunk_timestamps.get(key, []))
-            if day_event_count <= 0:
-                continue
-            prorated_hours = session_hours * day_event_count / lifetime_event_count
-            record_unit(
-                prorated_hours,
-                chunk_timestamps.get(key, []),
-                chunk_ranges[key],
-                covered_chunk_key=key,
-                prorated_session_baseline=True,
-            )
-
-    if not covered_chunk_keys:
-        return None
-
+    units_estimated = len(covered_chunk_keys)
+    units_unknown = units_eligible - units_estimated
     covered_chunk_key_set = set(covered_chunk_keys)
     covered_events = []
     for ev in events:
@@ -1308,8 +1247,7 @@ def summarize_productivity(events: list[dict], gap_minutes: int = 2) -> dict | N
         if (session_id, chunk_date(ts)) in covered_chunk_key_set:
             covered_events.append(ev)
 
-    # Human attention is matched to the numerator's covered calendar-day units,
-    # including days whose baseline was prorated from a session estimate.
+    # Match attention to the same estimated, closed calendar-day units.
     human_units = [(key[0], key[1]) for key in covered_chunk_key_set]
     human_hours, human_fallbacks = _human_attention_hours_for_units(
         human_units, tasks, session_timestamps
@@ -1328,14 +1266,19 @@ def summarize_productivity(events: list[dict], gap_minutes: int = 2) -> dict | N
         "baseline_ceiling_clamped": baseline_ceiling_clamped,
         "hours_ceiling_removed": hours_ceiling_removed,
         "baseline_per_event_p95": percentile(baseline_per_event_values, 95),
-        "sessions_covered": len(covered_chunk_keys),
-        # Distinct real sessions across all covered chunks + fallbacks. A
+        "units_eligible": units_eligible,
+        "units_estimated": units_estimated,
+        "units_unknown": units_unknown,
+        "units_open": units_open,
+        "window_complete": units_eligible > 0 and units_unknown == 0,
+        "sessions_covered": units_estimated,
+        # Distinct real sessions across all estimated closed chunks. A
         # multi-day session spans several (session, day) chunk keys but is ONE
         # session for floor purposes — otherwise the floor is multiplied per day.
         "distinct_sessions_covered": len(
             {key[0] for key in covered_chunk_key_set}
         ),
-        "sessions_total": total_units,
+        "sessions_total": units_eligible,
         "unit": unit,
     }
 

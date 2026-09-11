@@ -405,6 +405,7 @@ def productivity_payload(events, gap_minutes):
     # attention across 2 covered sessions and published x144. Flag it so
     # consumers can suppress the number instead of printing a fake record.
     floor_driven = distinct_sessions_covered > 0 and floor_hours > human_attention_hours
+    coverage = productivity or {}
 
     return {
         "active_hours": rounded(denom_hours),
@@ -424,6 +425,11 @@ def productivity_payload(events, gap_minutes):
         "baseline_per_event_p95": rounded(baseline_per_event_p95),
         "sessions_covered": sessions_covered,
         "sessions_total": sessions_total,
+        "units_eligible": summary.as_int(coverage.get("units_eligible")),
+        "units_estimated": summary.as_int(coverage.get("units_estimated")),
+        "units_unknown": summary.as_int(coverage.get("units_unknown")),
+        "units_open": summary.as_int(coverage.get("units_open")),
+        "window_complete": bool(coverage.get("window_complete")),
         "unit": unit,
     }
 
@@ -981,11 +987,11 @@ def _profanity_since(transcript_path, since_dt):
 
 
 def _productivity_block(productivity_data):
-    """Sanity-clamp productivity values to 0 if math implies AI is slower than
-    manual (multiplier < 1, saved < 0). The summary.summarize_productivity now
-    computes everything over the same covered-sessions subset (like-with-like),
-    so coverage doesn't need its own threshold — the math is consistent
-    regardless of how many sessions have estimates."""
+    """Suppress unsafe ratios and expose whether the daily window is complete.
+
+    Partial-window ratios remain available to consumers; the theme decides
+    whether to display them using multiplier_complete.
+    """
     active = productivity_data.get("active_hours") or 0
     active_per_session_sum = productivity_data.get("active_hours_per_session_sum")
     if active_per_session_sum is None:
@@ -1015,6 +1021,7 @@ def _productivity_block(productivity_data):
         "active_hours_per_session_sum": rounded(active_per_session_sum, 1),
         "calendar_hours": rounded(calendar, 1),
         "multiplier": multiplier,
+        "multiplier_complete": bool(productivity_data.get("window_complete")) and multiplier >= 1,
         "hours_saved": saved,
         "estimated_hours": rounded(active + saved, 1),
         "baseline_floor_clamped": int(productivity_data.get("baseline_floor_clamped") or 0),
@@ -1024,6 +1031,11 @@ def _productivity_block(productivity_data):
         "baseline_per_event_p95": rounded(productivity_data.get("baseline_per_event_p95") or 0, 1),
         "sessions_total": int(productivity_data.get("sessions_total") or 0),
         "sessions_covered": int(productivity_data.get("sessions_covered") or 0),
+        "units_eligible": int(productivity_data.get("units_eligible") or 0),
+        "units_estimated": int(productivity_data.get("units_estimated") or 0),
+        "units_unknown": int(productivity_data.get("units_unknown") or 0),
+        "units_open": int(productivity_data.get("units_open") or 0),
+        "window_complete": bool(productivity_data.get("window_complete")),
         "unit": productivity_data.get("unit") or summary.productivity_unit(),
     }
 
@@ -1038,6 +1050,9 @@ def _today_productivity_block(day_productivity):
     (Codex-audit HIGH), and with zero covered sessions it fabricated
     `estimated = active × 7.3` out of thin air.
 
+    In chunk mode today is open: the pipeline returns zero estimated hours
+    and units_open, with no eligible units or complete multiplier.
+
     Partial-day guard (kept from the original widget, theme v0.8.30): intraday
     denominators are tiny and noisy — 0.1h of attention estimated at 18.5h
     reads ×185. Suppress the multiplier when the day's attention is under 30
@@ -1050,6 +1065,7 @@ def _today_productivity_block(day_productivity):
     attention = block.get("active_hours") or 0
     if block["multiplier"] > 50 or attention < 0.5:
         block["multiplier"] = 0.0
+        block["multiplier_complete"] = False
         block["hours_saved"] = 0.0
         block["estimated_hours"] = block["estimate_active_hours"]
     return block

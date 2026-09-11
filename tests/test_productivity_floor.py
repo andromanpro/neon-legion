@@ -94,7 +94,10 @@ class ProductivityFloorTests(unittest.TestCase):
         # One session spanning 3 calendar days → 3 chunks but 1 distinct session.
         # Floor must be 1×, not 3×.
         summary.PRODUCTIVITY_UNIT = "chunk"
-        self._stub_tasks({"s1": {"ai_baseline_hours": 9.0}})
+        self._stub_tasks({
+            f"s1:2026-05-{day}": {"ai_baseline_hours": 3.0}
+            for day in (16, 17, 18)
+        })
         events = []
         for day in range(3):
             d = datetime(2026, 5, 16 + day, 12, tzinfo=timezone.utc)
@@ -102,6 +105,7 @@ class ProductivityFloorTests(unittest.TestCase):
             events.append(_event("s1", d + timedelta(minutes=90)))
         result = server.productivity_payload(events, 5)
         expected_floor = 1 * FLOOR_H  # 1 distinct session, not 3 chunks
+        self.assertEqual(result["sessions_covered"], 3)
         self.assertAlmostEqual(result["active_hours"], expected_floor, places=4)
 
 

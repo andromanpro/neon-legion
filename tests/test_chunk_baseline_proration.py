@@ -1,7 +1,8 @@
 import sys
 import unittest
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from pathlib import Path
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -13,13 +14,15 @@ if str(ROOT / "tracker") not in sys.path:
 import summary  # noqa: E402
 
 
-class ChunkBaselineProrationTests(unittest.TestCase):
+class DailyBaselineOnlyTests(unittest.TestCase):
     def setUp(self):
         self._read_tasks = summary.read_tasks
         self._read_lifetime_counts = summary.read_lifetime_session_event_counts
         self._unit = summary.PRODUCTIVITY_UNIT
         summary.PRODUCTIVITY_UNIT = "chunk"
         self.addCleanup(self._restore_state)
+        self.enterContext(patch.object(summary, "current_local_date", return_value="2026-05-10", create=True))
+        self.enterContext(patch.object(summary, "read_human_attention_cache", return_value={}))
 
     def _restore_state(self):
         summary.read_tasks = self._read_tasks
@@ -32,7 +35,7 @@ class ChunkBaselineProrationTests(unittest.TestCase):
 
     @staticmethod
     def _day_events(session_id, day, count):
-        start = datetime.fromisoformat(f"{day}T10:00:00+00:00")
+        start = datetime.fromisoformat(f"{day}T10:00:00")
         return [
             {
                 "ts": (start + timedelta(seconds=index)).isoformat(),
@@ -42,7 +45,7 @@ class ChunkBaselineProrationTests(unittest.TestCase):
             for index in range(count)
         ]
 
-    def test_one_day_of_multiday_session_gets_event_share_not_full_baseline(self):
+    def test_one_day_without_daily_estimate_remains_unknown(self):
         self._configure(
             {"long": {"ai_baseline_hours": 12.0}},
             {"long": 60},
@@ -52,9 +55,13 @@ class ChunkBaselineProrationTests(unittest.TestCase):
         result = summary.summarize_productivity(one_day)
 
         self.assertIsNotNone(result)
-        self.assertAlmostEqual(result["hours_without_ai"], 4.0)
+        self.assertAlmostEqual(result["hours_without_ai"], 0.0)
+        self.assertEqual(result["units_unknown"], 1)
+        self.assertEqual(result["units_estimated"], 0)
+        self.assertEqual(result["human_attention_hours_with_ai"], 0.0)
+        self.assertFalse(result["window_complete"])
 
-    def test_sum_of_all_daily_shares_does_not_exceed_session_baseline(self):
+    def test_daily_windows_do_not_allocate_any_session_baseline(self):
         baseline = 12.0
         self._configure(
             {"long": {"ai_baseline_hours": baseline}},
@@ -70,10 +77,7 @@ class ChunkBaselineProrationTests(unittest.TestCase):
             for events in days
         ]
 
-        self.assertAlmostEqual(sum(daily_hours), baseline)
-        self.assertLessEqual(sum(daily_hours), baseline)
-        for hours in daily_hours:
-            self.assertLessEqual(hours, baseline)
+        self.assertEqual(daily_hours, [0.0, 0.0, 0.0])
 
     def test_complete_day_chunk_breakdown_is_unchanged(self):
         day_one = self._day_events("split", "2026-05-01", 6)
@@ -90,8 +94,11 @@ class ChunkBaselineProrationTests(unittest.TestCase):
 
         self.assertAlmostEqual(result["hours_without_ai"], 7.0)
         self.assertEqual(result["sessions_covered"], 2)
+        self.assertEqual(result["units_estimated"], 2)
+        self.assertEqual(result["units_unknown"], 0)
+        self.assertTrue(result["window_complete"])
 
-    def test_session_entirely_inside_window_contributes_full_baseline(self):
+    def test_session_entirely_inside_window_still_requires_daily_estimates(self):
         baseline = 12.0
         all_events = []
         for day in (1, 2, 3):
@@ -103,9 +110,11 @@ class ChunkBaselineProrationTests(unittest.TestCase):
 
         result = summary.summarize_productivity(all_events)
 
-        self.assertAlmostEqual(result["hours_without_ai"], baseline)
+        self.assertAlmostEqual(result["hours_without_ai"], 0.0)
+        self.assertEqual(result["units_eligible"], 3)
+        self.assertEqual(result["units_unknown"], 3)
 
-    def test_day_without_session_events_gets_no_share(self):
+    def test_day_without_session_events_is_not_an_eligible_unit(self):
         other_events = self._day_events("other", "2026-05-04", 6)
         self._configure(
             {
@@ -119,6 +128,7 @@ class ChunkBaselineProrationTests(unittest.TestCase):
 
         self.assertAlmostEqual(result["hours_without_ai"], 2.0)
         self.assertEqual(result["distinct_sessions_covered"], 1)
+        self.assertEqual(result["units_eligible"], 1)
 
 
 if __name__ == "__main__":

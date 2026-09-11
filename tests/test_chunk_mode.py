@@ -108,7 +108,7 @@ class ChunkModeTests(unittest.TestCase):
             "unit": "session",
         })
 
-    def test_chunk_mode_without_chunk_keys_matches_session_aggregate(self):
+    def test_chunk_mode_requires_daily_estimates_but_session_mode_keeps_baseline(self):
         self._set_tasks({"s1": {"ai_baseline_hours": 4.0}})
         base = datetime(2026, 5, 15, 23, 59, tzinfo=timezone.utc)
         events = [
@@ -123,10 +123,10 @@ class ChunkModeTests(unittest.TestCase):
 
         self.assertEqual(session_result["unit"], "session")
         self.assertEqual(chunk_result["unit"], "chunk")
-        self.assertEqual(
-            {key: value for key, value in session_result.items() if key != "unit"},
-            {key: value for key, value in chunk_result.items() if key != "unit"},
-        )
+        self.assertGreater(session_result["hours_without_ai"], 0)
+        self.assertEqual(chunk_result["hours_without_ai"], 0)
+        self.assertEqual(chunk_result["sessions_covered"], 0)
+        self.assertEqual(chunk_result["units_unknown"], chunk_result["units_eligible"])
 
     def test_chunk_mode_uses_day_baselines_and_guards_per_chunk(self):
         self._set_unit("chunk")
