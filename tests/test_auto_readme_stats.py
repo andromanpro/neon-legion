@@ -50,6 +50,38 @@ class FormatStatsBlockTests(unittest.TestCase):
         self.assertIn("×7.17 productivity multiplier", block)
         self.assertIn("1,236 human-hours", block)
 
+    def test_withholds_multiplier_when_window_incomplete(self) -> None:
+        # Since day-estimate-only accounting (2026-09-11) a partial window's ratio
+        # covers only the estimated days and reads HIGHER than the truth — sample
+        # selection, not productivity (30d x12.6 -> x16.9 with 138 of 242 days).
+        snapshot = dict(SAMPLE_SNAPSHOT)
+        snapshot["productivity"] = {
+            "multiplier": 16.85,
+            "hours_saved": 2503.6,
+            "window_complete": False,
+            "units_estimated": 138,
+            "units_eligible": 242,
+        }
+
+        block = format_stats_block(snapshot)
+
+        self.assertNotIn("×16.85", block)
+        self.assertIn("productivity multiplier withheld", block)
+        self.assertIn("138 of 242", block)
+
+    def test_shows_multiplier_when_window_complete(self) -> None:
+        snapshot = dict(SAMPLE_SNAPSHOT)
+        snapshot["productivity"] = dict(
+            SAMPLE_SNAPSHOT["productivity"],
+            window_complete=True,
+            units_estimated=30,
+            units_eligible=30,
+        )
+
+        block = format_stats_block(snapshot)
+
+        self.assertIn("×7.17 productivity multiplier", block)
+
     def test_renders_top_stress_day(self) -> None:
         block = format_stats_block(SAMPLE_SNAPSHOT)
 

@@ -35,6 +35,21 @@ def format_stats_block(snapshot: dict) -> str:
     saved = _safe_float(totals.get("savings_usd"))
     multiplier = _safe_float(productivity.get("multiplier"))
     hours_saved = _safe_float(productivity.get("hours_saved"))
+    # Day-estimate-only accounting (2026-09-11) reports window_complete. A partial
+    # window's ratio covers only the estimated days and reads HIGHER than the
+    # truth (sample selection), so it is withheld. Snapshots without the field
+    # keep the old line.
+    if productivity.get("window_complete") is False:
+        productivity_line = (
+            "- **productivity multiplier withheld** — "
+            f"{_safe_int(productivity.get('units_estimated')):,} of "
+            f"{_safe_int(productivity.get('units_eligible')):,} closed days estimated so far"
+        )
+    else:
+        productivity_line = (
+            f"- **×{multiplier:.2f} productivity multiplier** "
+            f"— {hours_saved:,.0f} human-hours of work compressed"
+        )
 
     top_day = sentiment.get("top_day") or {}
     top_date = top_day.get("date") or ""
@@ -54,8 +69,7 @@ def format_stats_block(snapshot: dict) -> str:
         f"- **{calls:,} AI calls** across Claude Code + Codex CLI + OpenClaw + OpenCode",
         f"- **${saved:,.0f} saved** vs equivalent API rate "
         f"(API would cost ${cost:,.0f}, subscriptions cost a fraction)",
-        f"- **×{multiplier:.2f} productivity multiplier** "
-        f"— {hours_saved:,.0f} human-hours of work compressed",
+        productivity_line,
     ]
     if appreciation_total or profanity_total:
         ratio_note = ""
