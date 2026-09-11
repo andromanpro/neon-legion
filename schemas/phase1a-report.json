@@ -1,0 +1,43 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "files_changed": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "path": {"type": "string"},
+          "what": {"type": "string"}
+        },
+        "required": ["path", "what"]
+      }
+    },
+    "summary": {"type": "string"},
+    "tested": {"type": "boolean"},
+    "test_results": {"type": "string"},
+    "negative_control_verified": {"type": "boolean"},
+    "negative_control_note": {"type": "string"},
+    "effect": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "metric": {"type": "string"},
+          "before": {"type": "string"},
+          "after": {"type": "string"}
+        },
+        "required": ["metric", "before", "after"]
+      }
+    },
+    "residual_risks": {"type": "array", "items": {"type": "string"}},
+    "deviations_from_spec": {"type": "array", "items": {"type": "string"}},
+    "open_questions": {"type": "array", "items": {"type": "string"}}
+  },
+  "required": [
+    "files_changed", "summary", "tested", "test_results", "negative_control_verified",
+    "negative_control_note", "effect", "residual_risks", "deviations_from_spec", "open_questions"
+  ]
+}
