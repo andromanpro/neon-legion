@@ -228,3 +228,93 @@ def test_session_day_loop_marks_day_entries_with_the_input_version(estimator, tm
     assert len(days) == 2
     assert {entry["day_input_version"] for entry in days.values()} == {2}
     assert {entry["estimation_mode"] for entry in days.values()} == {"calendar-day-chunk-live"}
+
+
+def test_concurrent_reestimation_keeps_every_replaced_value(estimator, tmp_path):
+    # Audit 1c, P2: the history was built before the tasks lock, so a run that
+    # landed in between vanished from replaced_estimates.
+    path = write(tmp_path / "long.jsonl", LONG_CLAUDE)
+    day_two = day_of(estimator, LONG_CLAUDE, "Day two task")
+    key = f"long:{day_two}"
+    estimator.TASKS_FILE.write_text(
+        json.dumps({key: {"ai_baseline_hours": 24.0, "estimated_at": "2026-05-16T19:33:19+03:00"}}),
+        encoding="utf-8",
+    )
+    real_acquire = estimator.acquire_tasks_lock
+    raced = []
+
+    def another_run_lands_first(*args, **kwargs):
+        if not raced:
+            raced.append(True)
+            estimator.run_oracle = Oracle(11)
+            estimator.estimate_day("long", str(path), day_two, reason="partial_day")
+        return real_acquire(*args, **kwargs)
+
+    estimator.run_oracle = Oracle(12)
+    estimator.acquire_tasks_lock = another_run_lands_first
+    estimator.estimate_day("long", str(path), day_two, reason="codex_blind")
+
+    day = read_tasks(estimator)[key]
+    assert day["ai_baseline_hours"] == 12.0
+    assert [(r["ai_baseline_hours"], r["reason"]) for r in day["replaced_estimates"]] == [
+        (24.0, "partial_day"),
+        (11.0, "codex_blind"),
+    ]
+
+
+def test_day_entries_record_when_the_transcript_was_read(estimator, tmp_path, monkeypatch):
+    # Audit 1c, P1: estimated_at is stamped when the oracle answers, possibly
+    # after midnight; the queue needs the moment the input was taken.
+    path = write(tmp_path / "long.jsonl", LONG_CLAUDE)
+    day_two = day_of(estimator, LONG_CLAUDE, "Day two task")
+    monkeypatch.setattr(estimator, "input_read_time", lambda: "2026-05-16T23:57:00+03:00", raising=False)
+
+    estimator.run_oracle = Oracle(10, 1, 2)
+    estimator.estimate_session("long", str(path))
+    loop_days = {key: entry for key, entry in read_tasks(estimator).items() if ":" in key}
+    assert {entry.get("day_input_read_at") for entry in loop_days.values()} == {"2026-05-16T23:57:00+03:00"}
+
+    monkeypatch.setattr(estimator, "input_read_time", lambda: "2026-05-17T09:00:00+03:00", raising=False)
+    estimator.run_oracle = Oracle(3)
+    entry = estimator.estimate_day("long", str(path), day_two)
+    assert entry.get("day_input_read_at") == "2026-05-17T09:00:00+03:00"
+    assert read_tasks(estimator)[f"long:{day_two}"]["day_input_read_at"] == "2026-05-17T09:00:00+03:00"
+
+
+@pytest.fixture
+def rechunk():
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    from tools import rechunk_estimate
+    return rechunk_estimate
+
+
+@pytest.mark.parametrize("events", [LONG_CLAUDE, LONG_CODEX], ids=["claude", "codex"])
+def test_rechunk_tool_builds_the_day_loop_prompt(estimator, rechunk, tmp_path, events):
+    # Audit 1c, P1: tools/rechunk_estimate.py was a second, Claude-only copy of
+    # the day input (Codex text dropped, compaction summaries kept).
+    path = write(tmp_path / "long.jsonl", events)
+    day_two = day_of(estimator, events, "Day two task")
+    loop = Oracle(10, 1, 2)
+    estimator.run_oracle = loop
+    estimator.estimate_session("long", str(path))
+
+    plan = rechunk.ChunkPlan(session_id="long", task_key=f"long:{day_two}", date=day_two,
+                             transcript_path=path, events=tuple(rechunk.transcript_chunks(path)[day_two]))
+
+    assert rechunk.build_chunk_prompt(estimator, plan) == loop.prompts[2]
+
+
+def test_rechunk_entries_carry_the_input_version_and_read_time(estimator, rechunk, tmp_path):
+    path = write(tmp_path / "long.jsonl", LONG_CODEX)
+    day_two = day_of(estimator, LONG_CODEX, "Day two task")
+    plan = rechunk.ChunkPlan(session_id="long", task_key=f"long:{day_two}", date=day_two,
+                             transcript_path=path, events=tuple(rechunk.transcript_chunks(path)[day_two]),
+                             read_at="2026-05-16T23:57:00+03:00")
+    estimator.run_oracle = Oracle(4, 5, 6)
+
+    entry = rechunk.estimate_chunk(estimator, plan, samples=3)
+
+    assert entry["ai_baseline_hours"] == 5.0
+    assert entry["day_input_version"] == estimator.DAY_INPUT_VERSION
+    assert entry["day_input_read_at"] == "2026-05-16T23:57:00+03:00"

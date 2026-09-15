@@ -36,6 +36,7 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import time
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 TRACKER_DIR = PROJECT_ROOT / "tracker"
@@ -63,6 +64,15 @@ if hasattr(sys.stdout, "reconfigure"):
 # summaries, e6ecac7 (08:58) fixed their SESSION SIZE counters. The later commit
 # is the boundary, because both halves of the prompt were wrong until then.
 DAY_INPUT_FIXED_AT = datetime.fromisoformat("2026-09-11T08:58:20+03:00")
+
+# tools/rechunk_estimate.py read days with its own Claude-only copy of the parser
+# until the 1c audit: an unversioned entry of this mode is old input whenever it
+# was written.
+RECHUNK_ESTIMATION_MODE = "calendar-day-chunk"
+
+# The attempt journal's read-modify-write takes milliseconds; a lock older than
+# this was left by a process that died inside it.
+ATTEMPTS_LOCK_STALE_SECONDS = 60
 
 # The old input gave the oracle the first three user messages of the day.
 OLD_INPUT_FIRST_USER_MESSAGES = 3
@@ -117,8 +127,7 @@ def closed_units(events: list[dict], today: str) -> dict[tuple[str, str], str]:
     return units
 
 
-def estimated_at(entry: dict) -> datetime | None:
-    value = entry.get("estimated_at")
+def parse_time(value: object) -> datetime | None:
     if not isinstance(value, str) or not value:
         return None
     try:
@@ -128,16 +137,32 @@ def estimated_at(entry: dict) -> datetime | None:
     return parsed if parsed.tzinfo is not None else parsed.astimezone()
 
 
+def estimated_at(entry: dict) -> datetime | None:
+    return parse_time(entry.get("estimated_at"))
+
+
+def input_taken_at(entry: dict) -> datetime | None:
+    """When the estimate's transcript was read.
+
+    estimated_at is stamped when the oracle answers, which can be after
+    midnight. day_input_read_at exists since the 1c audit; older entries have
+    only estimated_at.
+    """
+    return parse_time(entry.get("day_input_read_at")) or estimated_at(entry)
+
+
 def has_old_input(entry: dict) -> bool:
     version = entry.get("day_input_version")
     if isinstance(version, int) and not isinstance(version, bool) and version >= estimator.DAY_INPUT_VERSION:
         return False
-    at = estimated_at(entry)
+    if entry.get("estimation_mode") == RECHUNK_ESTIMATION_MODE:
+        return True
+    at = input_taken_at(entry)
     return at is not None and at < DAY_INPUT_FIXED_AT
 
 
 def estimated_while_open(entry: dict, day: str) -> bool:
-    at = estimated_at(entry)
+    at = input_taken_at(entry)
     return at is not None and at.astimezone().date().isoformat() <= day
 
 
@@ -276,6 +301,63 @@ def write_attempts(path: Path, data: dict) -> None:
     os.replace(temp_path, path)
 
 
+def _acquire_lock(lock_path: Path, timeout_seconds: float = 10.0) -> int | None:
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        try:
+            fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.write(fd, str(os.getpid()).encode("ascii"))
+            return fd
+        except FileExistsError:
+            try:
+                if time.time() - lock_path.stat().st_mtime > ATTEMPTS_LOCK_STALE_SECONDS:
+                    lock_path.unlink()
+                    continue
+            except OSError:
+                pass
+            if time.monotonic() >= deadline:
+                return None
+            time.sleep(0.05)
+        except OSError:
+            return None
+
+
+def record_attempt(path: Path, task_key: str, error: str | None) -> None:
+    """Count a failed attempt (error given) or clear the day after a success.
+
+    One key per read-modify-write, under a lock file. The journal used to be
+    read once per run and written back whole, dropping what an overlapping run
+    had recorded (1c audit, P2).
+    """
+    path = Path(path)
+    lock_path = path.with_name(path.name + ".lock")
+    fd = _acquire_lock(lock_path)
+    if fd is None:
+        print(f"[closed-days] журнал попыток занят, отметка {task_key} пропущена", file=sys.stderr)
+        return
+    try:
+        attempts = read_attempts(path)
+        if error is None:
+            if attempts.pop(task_key, None) is None:
+                return
+        else:
+            previous = attempts.get(task_key)
+            failures = previous.get("failures") if isinstance(previous, dict) else 0
+            attempts[task_key] = {
+                "failures": int(failures or 0) + 1,
+                "last_failed_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+                "last_error": error[-160:],
+            }
+        write_attempts(path, attempts)
+    finally:
+        os.close(fd)
+        try:
+            lock_path.unlink()
+        except OSError:
+            pass
+
+
 def landed_now(entry: object, started: datetime) -> bool:
     """True when the estimator wrote a day estimate during this attempt."""
     if not isinstance(entry, dict) or entry.get("ai_baseline_hours") is None:
@@ -316,7 +398,6 @@ def run_queue(candidates, runner, read_tasks, attempts_path, timeout, out=print)
     Success is judged by what landed in tasks.json, not by the exit code alone:
     "partial" means a fresh estimate landed but the run was cut short.
     """
-    attempts = read_attempts(attempts_path)
     counts = {"ok": 0, "partial": 0, "failed": 0}
     for index, candidate in enumerate(candidates, start=1):
         label = f"[{index}/{len(candidates)}] {candidate.session_id[:8]} {candidate.day} {candidate.category}"
@@ -333,7 +414,7 @@ def run_queue(candidates, runner, read_tasks, attempts_path, timeout, out=print)
         was = f" (было {candidate.hours} ч)" if candidate.hours is not None else ""
 
         if landed_now(entry, started):
-            attempts.pop(candidate.task_key, None)
+            record_attempt(attempts_path, candidate.task_key, None)
             if interruption:
                 counts["partial"] += 1
                 out(f"{label} ⚠ {entry['ai_baseline_hours']} ч{was}, прогон прерван{suffix}")
@@ -342,15 +423,8 @@ def run_queue(candidates, runner, read_tasks, attempts_path, timeout, out=print)
                 out(f"{label} ✓ {entry['ai_baseline_hours']} ч{was}")
         else:
             counts["failed"] += 1
-            previous = attempts.get(candidate.task_key)
-            failures = previous.get("failures") if isinstance(previous, dict) else 0
-            attempts[candidate.task_key] = {
-                "failures": int(failures or 0) + 1,
-                "last_failed_at": datetime.now().astimezone().isoformat(timespec="seconds"),
-                "last_error": (interruption or "оценка не записана")[-160:],
-            }
+            record_attempt(attempts_path, candidate.task_key, interruption or "оценка не записана")
             out(f"{label} ✗ оценка не записана{suffix}")
-        write_attempts(attempts_path, attempts)
     return counts
 
 

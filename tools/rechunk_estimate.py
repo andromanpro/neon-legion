@@ -34,6 +34,7 @@ class ChunkPlan:
     date: str
     transcript_path: Path
     events: tuple[dict, ...]
+    read_at: str = ""  # when the transcript was read: the moment the input was fixed
 
     @property
     def event_count(self) -> int:
@@ -165,6 +166,7 @@ def covered_session_plans(
         if transcript_path is None:
             stats["missing_transcript"] += 1
             continue
+        read_at = datetime.now().astimezone().isoformat(timespec="seconds")
         try:
             chunks = transcript_chunks(transcript_path)
         except (OSError, UnicodeDecodeError):
@@ -186,6 +188,7 @@ def covered_session_plans(
                     date=date_key,
                     transcript_path=transcript_path,
                     events=tuple(events),
+                    read_at=read_at,
                 )
             )
             stats["chunks_planned"] += 1
@@ -193,61 +196,19 @@ def covered_session_plans(
     return plans, stats
 
 
-def chunk_messages(estimator, events: tuple[dict, ...]) -> tuple[list[str], list[str]]:
-    user_messages: list[str] = []
-    assistant_messages: list[str] = []
-    for event in events:
-        role = estimator.transcript_role(event)
-        if role is None:
-            continue
-        text = estimator.transcript_text(event).strip()
-        if not text:
-            continue
-        if role == "user":
-            user_messages.append(text)
-        elif role == "assistant":
-            assistant_messages.append(text)
-    return user_messages, assistant_messages
-
-
-def compute_chunk_metrics(estimator, events: tuple[dict, ...]) -> dict:
-    metrics = {
-        "event_count": len(events),
-        "user_message_count": 0,
-        "assistant_message_count": 0,
-        "tool_call_count": 0,
-        "span_hours": 0.0,
-        "active_hours": 0.0,
-    }
-    timestamps: list[datetime] = []
-
-    for event in events:
-        role = estimator.transcript_role(event)
-        if role == "user":
-            metrics["user_message_count"] += 1
-        elif role == "assistant":
-            metrics["assistant_message_count"] += 1
-        metrics["tool_call_count"] += estimator._tool_call_count_for_event(event, role)
-
-        ts = transcript_event_ts(event)
-        if ts is not None:
-            timestamps.append(ts)
-
-    if timestamps:
-        ordered = sorted(timestamps)
-        metrics["span_hours"] = max((ordered[-1] - ordered[0]).total_seconds(), 0.0) / 3600
-        metrics["active_hours"] = estimator.active_hours_for_timestamps(
-            timestamps,
-            getattr(estimator, "SESSION_SIZE_GAP_MINUTES", 2),
-        )
-
-    return metrics
-
-
 def build_chunk_prompt(estimator, plan: ChunkPlan) -> str:
-    user_messages, assistant_messages = chunk_messages(estimator, plan.events)
-    context = estimator.build_truncated_context_from_messages(user_messages, assistant_messages)
-    metrics = compute_chunk_metrics(estimator, plan.events)
+    """The day loop's prompt for this day.
+
+    estimate-task.py::build_day_input is the only reader of a day's input. This
+    tool used to keep its own Claude-only copy, which dropped Codex conversation,
+    zeroed its counters and passed compaction summaries as prompts (1c audit, P1).
+    """
+    pairs = []
+    for event in plan.events:
+        ts = estimator.parse_transcript_ts(event.get("timestamp") or event.get("ts"))
+        if ts is not None:
+            pairs.append((event, ts))
+    _, _, metrics, context = estimator.build_day_input(pairs)
     return estimator.build_estimation_prompt(context, metrics)
 
 
@@ -267,6 +228,8 @@ def estimate_chunk(estimator, plan: ChunkPlan, samples: int) -> dict:
     entry["chunk_date"] = plan.date
     entry["chunk_event_count"] = plan.event_count
     entry["estimation_mode"] = "calendar-day-chunk"
+    entry["day_input_version"] = estimator.DAY_INPUT_VERSION
+    entry["day_input_read_at"] = plan.read_at or estimator.input_read_time()
     entry["sample_count"] = len(entries)
     entry["sample_hours"] = [
         float(sample.get("ai_baseline_hours") or 0.0)

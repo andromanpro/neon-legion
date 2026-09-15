@@ -157,6 +157,38 @@ def test_unreadable_transcript_flags_no_compaction(queue, tmp_path):
     assert queue.old_input_compaction_days(tmp_path / "gone.jsonl", {"2026-09-01"}) == set()
 
 
+def test_unversioned_rechunk_entry_is_old_input_whenever_it_was_written(queue):
+    # Audit 1c, P1: tools/rechunk_estimate.py kept the Claude-only reader, so an
+    # entry it wrote after DAY_INPUT_FIXED_AT still saw a blind Codex day.
+    day, today = "2026-09-10", "2026-09-15"
+    events = ledger("cx", day, "openai", "desktop")
+    rechunked = {"ai_baseline_hours": 8.0, "estimated_at": "2026-09-12T12:00:00+00:00",
+                 "estimation_mode": "calendar-day-chunk"}
+
+    candidates = queue.build_queue(events, {f"cx:{day}": rechunked}, today, placeholder)
+    assert [(c.category, c.hours) for c in candidates] == [("codex_blind", 8.0)]
+
+    versioned = dict(rechunked, day_input_version=2)
+    assert queue.build_queue(events, {f"cx:{day}": versioned}, today, placeholder) == []
+
+
+def test_day_read_before_midnight_is_partial_although_the_answer_came_after(queue):
+    # Audit 1c, P1: estimated_at is stamped when the oracle answers; the input is
+    # what was on disk when the transcript was read.
+    day, today = "2026-09-14", "2026-09-16"
+    events = ledger("s", day)
+    entry = {"ai_baseline_hours": 5.0, "day_input_version": 2,
+             "day_input_read_at": datetime(2026, 9, 14, 23, 57).astimezone().isoformat(timespec="seconds"),
+             "estimated_at": datetime(2026, 9, 15, 0, 1).astimezone().isoformat(timespec="seconds")}
+
+    candidates = queue.build_queue(events, {f"s:{day}": entry}, today, placeholder)
+    assert [c.category for c in candidates] == ["partial_day"]
+
+    read_after_close = dict(entry, day_input_read_at=datetime(2026, 9, 15, 0, 0, 5).astimezone()
+                            .isoformat(timespec="seconds"))
+    assert queue.build_queue(events, {f"s:{day}": read_after_close}, today, placeholder) == []
+
+
 def test_estimate_made_before_the_day_closed_is_partial(queue):
     day, today = "2026-09-14", "2026-09-16"
     events = ledger("s", day)
@@ -272,6 +304,48 @@ def test_exit_code_zero_without_a_fresh_estimate_is_a_failure(queue, tmp_path):
                              tmp_path / "attempts.json", timeout=5, out=lambda *_: None)
 
     assert counts == {"ok": 0, "partial": 0, "failed": 1}
+
+
+def test_fresh_estimate_from_an_interrupted_run_counts_as_partial(queue, tmp_path):
+    day = "2026-05-02"
+    tasks = {}
+    attempts = tmp_path / "attempts.json"
+    attempts.write_text(json.dumps({f"s:{day}": {"failures": 1}}), encoding="utf-8")
+    transcript = write(tmp_path / "s.jsonl", [])
+    candidates = queue.build_queue(ledger("s", day), tasks, TODAY, lambda *_: transcript,
+                                   attempts=queue.read_attempts(attempts))
+
+    def written_then_cut_off(candidate, timeout):
+        tasks[f"s:{day}"] = {"ai_baseline_hours": 2.0, "day_input_version": 2,
+                             "estimated_at": datetime.now().astimezone().isoformat(timespec="seconds")}
+        return None, "таймаут 5s"
+
+    lines = []
+    counts = queue.run_queue(candidates, written_then_cut_off, lambda: tasks, attempts, timeout=5,
+                             out=lines.append)
+
+    assert counts == {"ok": 0, "partial": 1, "failed": 0}
+    assert queue.read_attempts(attempts) == {}
+    assert "⚠" in lines[0] and "2.0" in lines[0]
+
+
+def test_attempt_journal_keeps_what_a_concurrent_run_recorded(queue, tmp_path):
+    # Audit 1c, P2: the journal was read once before the loop and written back
+    # whole, dropping another run's records.
+    attempts = tmp_path / "attempts.json"
+    transcript = write(tmp_path / "s.jsonl", [])
+    candidates = queue.build_queue(ledger("s", "2026-05-02"), {}, TODAY, lambda *_: transcript)
+
+    def failing_while_another_run_writes(candidate, timeout):
+        attempts.write_text(json.dumps({"other:2026-05-01": {"failures": 2}}), encoding="utf-8")
+        return 1, "estimation failed: codex exited with 1"
+
+    queue.run_queue(candidates, failing_while_another_run_writes, lambda: {}, attempts, timeout=5,
+                    out=lambda *_: None)
+
+    journal = queue.read_attempts(attempts)
+    assert journal["other:2026-05-01"] == {"failures": 2}
+    assert journal["s:2026-05-02"]["failures"] == 1
 
 
 def test_failed_day_is_retried_until_the_attempt_limit(queue, tmp_path):

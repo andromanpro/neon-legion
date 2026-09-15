@@ -181,8 +181,25 @@ _PROTECTED_NONE_FIELDS = frozenset({
 })
 
 
-def update_task_entry(session_id: str, entry: dict) -> None:
+# Copied into `replaced_estimates` when a day is estimated again. An audit trail
+# only: nothing in the accounting reads it.
+_REPLACED_ESTIMATE_FIELDS = (
+    "ai_baseline_hours",
+    "estimated_at",
+    "estimation_mode",
+    "estimation_confidence",
+    "brief_description",
+    "day_input_version",
+)
+
+
+def update_task_entry(session_id: str, entry: dict, replace_reason: str | None = None) -> None:
     """Merge `entry` into the existing record (if any).
+
+    `replace_reason` marks a deliberate re-estimation (the closed-day queue): the
+    estimate being replaced is copied into `replaced_estimates` from the record
+    read under the lock. Built outside the lock, the history lost a run that
+    wrote in between (1c audit, P2).
 
     B1 (Codex review): protected fields are not overwritten by None — when
     a fresh `failure_entry` lacks `human_corrected_hours`, we keep the prior
@@ -201,6 +218,15 @@ def update_task_entry(session_id: str, entry: dict) -> None:
     try:
         tasks = read_tasks()
         previous = tasks.get(session_id)
+        if (
+            replace_reason is not None
+            and isinstance(previous, dict)
+            and previous.get("ai_baseline_hours") is not None
+        ):
+            history = previous.get("replaced_estimates")
+            replaced = {field: previous.get(field) for field in _REPLACED_ESTIMATE_FIELDS}
+            replaced["reason"] = replace_reason
+            entry = dict(entry, replaced_estimates=(list(history) if isinstance(history, list) else []) + [replaced])
         if isinstance(previous, dict):
             merged = dict(previous)
             for key, value in entry.items():
@@ -706,6 +732,15 @@ def failure_entry(transcript_path: str, reason: str, profanity: int | None = Non
     return entry
 
 
+def input_read_time() -> str:
+    """The moment a day's transcript is read, which fixes the oracle's input.
+
+    estimated_at is stamped later, when the oracle answers, and can fall after
+    midnight; a day read before its end must still count as partial (1c audit, P1).
+    """
+    return datetime.now().astimezone().isoformat(timespec="seconds")
+
+
 def read_day_chunks(transcript_path: str, only_day: str | None = None) -> dict[str, list[tuple[dict, datetime]]]:
     """Transcript events grouped by local calendar day, in file order.
 
@@ -795,9 +830,13 @@ def build_day_entry(
     transcript_path: str,
     date_key: str,
     event_pairs: list[tuple[dict, datetime]],
+    read_at: str,
     estimation_mode: str = "calendar-day-chunk-live",
 ) -> dict:
-    """One oracle call for one calendar day; returns the day entry, writes nothing."""
+    """One oracle call for one calendar day; returns the day entry, writes nothing.
+
+    `read_at` is input_read_time() taken before the transcript was read.
+    """
     _, _, chunk_metrics, chunk_context = build_day_input(event_pairs)
     chunk_prompt = build_estimation_prompt(chunk_context, chunk_metrics)
     chunk_entry = run_oracle(chunk_prompt)
@@ -814,19 +853,8 @@ def build_day_entry(
     chunk_entry["chunk_event_count"] = len(event_pairs)
     chunk_entry["estimation_mode"] = estimation_mode
     chunk_entry["day_input_version"] = DAY_INPUT_VERSION
+    chunk_entry["day_input_read_at"] = read_at
     return chunk_entry
-
-
-# Copied into `replaced_estimates` when a day is estimated again. An audit trail
-# only: nothing in the accounting reads it.
-_REPLACED_ESTIMATE_FIELDS = (
-    "ai_baseline_hours",
-    "estimated_at",
-    "estimation_mode",
-    "estimation_confidence",
-    "brief_description",
-    "day_input_version",
-)
 
 
 def estimate_day(session_id: str, transcript_path: str, date_key: str, reason: str | None = None) -> dict:
@@ -836,23 +864,15 @@ def estimate_day(session_id: str, transcript_path: str, date_key: str, reason: s
     that already had an estimate keeps it in `replaced_estimates` with the
     reason; `human_corrected_hours` survives through update_task_entry.
     """
+    read_at = input_read_time()
     event_pairs = read_day_chunks(transcript_path, only_day=date_key).get(date_key)
     if not event_pairs:
         raise ValueError(f"no transcript events on {date_key}")
 
     entry = build_day_entry(
-        session_id, transcript_path, date_key, event_pairs, estimation_mode="calendar-day-single"
+        session_id, transcript_path, date_key, event_pairs, read_at, estimation_mode="calendar-day-single"
     )
-    task_key = f"{session_id}:{date_key}"
-    # Read the value being replaced after the oracle call, as close to the write
-    # as possible: the call takes minutes and the hook may write meanwhile.
-    previous = read_tasks().get(task_key)
-    if isinstance(previous, dict) and previous.get("ai_baseline_hours") is not None:
-        history = previous.get("replaced_estimates")
-        replaced = {field: previous.get(field) for field in _REPLACED_ESTIMATE_FIELDS}
-        replaced["reason"] = reason or "re-estimated"
-        entry["replaced_estimates"] = (list(history) if isinstance(history, list) else []) + [replaced]
-    update_task_entry(task_key, entry)
+    update_task_entry(f"{session_id}:{date_key}", entry, replace_reason=reason or "re-estimated")
     return entry
 
 
@@ -880,6 +900,7 @@ def estimate_session(session_id: str, transcript_path: str) -> None:
     entry["chunk_estimation_expected"] = None
     update_task_entry(session_id, entry)
 
+    read_at = input_read_time()
     try:
         chunks = read_day_chunks(transcript_path)
     except (OSError, UnicodeDecodeError) as exc:
@@ -921,7 +942,7 @@ def estimate_session(session_id: str, transcript_path: str) -> None:
             continue
 
         try:
-            chunk_entry = build_day_entry(session_id, transcript_path, date_key, chunks[date_key])
+            chunk_entry = build_day_entry(session_id, transcript_path, date_key, chunks[date_key], read_at)
             update_task_entry(task_key, chunk_entry)
             tasks[task_key] = chunk_entry
         except Exception as exc:
