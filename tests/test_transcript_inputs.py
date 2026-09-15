@@ -27,8 +27,22 @@ def estimator():
     return module
 
 
+def calls_in(tree, function_name):
+    function = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == function_name)
+    return {n.func.id for n in ast.walk(function) if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
+
+
 def daily_input(estimator, events):
     tree = ast.parse(Path(estimator.__file__).read_text(encoding="utf-8"))
+    if hasattr(estimator, "build_day_input"):
+        # Since phase 1c the day input has one home, shared by the session day
+        # loop and `--day`; prove the loop still goes through it. The AST probe
+        # below remains for runs against pre-1c code (negative controls).
+        assert "build_day_entry" in calls_in(tree, "estimate_session")
+        assert "build_day_input" in calls_in(tree, "build_day_entry")
+        pairs = [(event, estimator.parse_transcript_ts(event["timestamp"])) for event in events]
+        user_messages, assistant_messages, _metrics, context = estimator.build_day_input(pairs)
+        return user_messages, assistant_messages, context
     session = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "estimate_session")
     day_loop = next(n for n in ast.walk(session) if isinstance(n, ast.For)
                     and isinstance(n.target, ast.Name) and n.target.id == "date_key")

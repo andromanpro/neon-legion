@@ -37,8 +37,19 @@ def daily_metrics(estimator, events):
 
     Same AST probe as tests/test_transcript_inputs.py: no oracle call and no
     task writes; returns the chunk_metrics the oracle would have received.
+    Since phase 1c those statements live in build_day_input, which both the day
+    loop and `--day` call; the AST path remains for runs against pre-1c code.
     """
     tree = ast.parse(Path(estimator.__file__).read_text(encoding="utf-8"))
+    if hasattr(estimator, "build_day_input"):
+        def calls_in(function_name):
+            function = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == function_name)
+            return {n.func.id for n in ast.walk(function)
+                    if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
+        assert "build_day_entry" in calls_in("estimate_session")
+        assert "build_day_input" in calls_in("build_day_entry")
+        pairs = [(event, estimator.parse_transcript_ts(event["timestamp"])) for event in events]
+        return estimator.build_day_input(pairs)[2]
     session = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "estimate_session")
     day_loop = next(n for n in ast.walk(session) if isinstance(n, ast.For)
                     and isinstance(n.target, ast.Name) and n.target.id == "date_key")

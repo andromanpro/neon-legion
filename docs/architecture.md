@@ -93,8 +93,10 @@ Plain JSONL files under `tracker/`. No database. Reasons:
 
 Per-session enrichment lives in `tasks.json`: oracle-estimated
 `ai_baseline_hours`, optional user-corrected `human_corrected_hours`,
-`profanity_count`, `mood_arc`. Updated by `estimate-task.py` after each
-session.
+`profanity_count`, `mood_arc`. Updated by `estimate-task.py` when the
+SessionStart hook sees a session without an estimate. Day entries sit next to
+them under `<session_id>:<YYYY-MM-DD>`, one oracle estimate per local calendar
+day, and they are what the productivity windows count.
 
 ## Layer 3 — Analytics
 
@@ -105,15 +107,19 @@ read_events(start, end)
   → read_claude_events + read_codex_events + read_openclaw_events + read_opencode_events
   → tagged with provider, sorted by ts
 
-events_for_task_metrics(events)  → Claude-only (avoid double-counting orchestrator work)
+events_for_task_metrics(events)  → Claude sessions + Codex sessions the human drove (desktop/TUI), no codex exec dispatches
 events_for_provider(events, "openai")  → filtered slice
 summarize_by_provider(events)  → {provider: stats}
-summarize_productivity(events)  → like-with-like: active hours over covered sessions only
+summarize_productivity(events)  → per session by default; the deploy counts closed local days with a day estimate, coverage in units_*
 ```
 
 `tracker/estimate-task.py` calls an LLM (currently Codex CLI, fallback to
 Claude when OAuth-refresh works) to estimate "human-time equivalent" per
-session. Output goes into `tasks.json`.
+session and per calendar day of it; `--day` estimates a single day.
+`tracker/estimate-closed-days.py`, a deploy step, queues closed days that have
+no day estimate or a suspect one (made with the input from before 2026-09-11,
+or before the day ended) and feeds them to `--day` a few per run. Output goes
+into `tasks.json`.
 
 ## Layer 4 — Backend
 

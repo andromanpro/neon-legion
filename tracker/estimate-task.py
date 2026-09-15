@@ -6,7 +6,7 @@ import re
 import subprocess
 import sys
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 
@@ -21,6 +21,13 @@ LOG_DIR = TRACKER_DIR / ".estimation-logs"
 ORACLE_PROMPT_FILE = TRACKER_DIR / "oracle-prompt.txt"
 MAX_CONTEXT_CHARS = 15_000
 SESSION_SIZE_GAP_MINUTES = 2
+
+# Version of the per-day oracle input, stored on every day entry. Version 1 (no
+# field) is everything written before 941db5b/e6ecac7 (2026-09-11): Codex days
+# were read with the Claude-only parser — empty conversation, zero message and
+# tool counters — and compaction summaries passed as the user's prompts.
+# Version 2 reads both formats through transcript_message/size_signal.
+DAY_INPUT_VERSION = 2
 
 def chunk_date(ts: datetime) -> str:
     """Calendar-day key for per-day chunk task ids. MUST stay byte-identical
@@ -107,6 +114,15 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Estimate human-time complexity for one Claude Code session.")
     parser.add_argument("session_id")
     parser.add_argument("transcript_path")
+    parser.add_argument(
+        "--day",
+        help="Estimate only this local calendar day (YYYY-MM-DD) as a day entry; "
+        "no whole-session oracle call, the session entry is left alone.",
+    )
+    parser.add_argument(
+        "--reason",
+        help="Why the day is estimated again; stored with the replaced value for audit.",
+    )
     return parser.parse_args(argv)
 
 
@@ -690,6 +706,156 @@ def failure_entry(transcript_path: str, reason: str, profanity: int | None = Non
     return entry
 
 
+def read_day_chunks(transcript_path: str, only_day: str | None = None) -> dict[str, list[tuple[dict, datetime]]]:
+    """Transcript events grouped by local calendar day, in file order.
+
+    `only_day` keeps one day, so a one-day estimate of a transcript that runs to
+    hundreds of megabytes does not hold every event in memory. Read errors
+    propagate: the callers decide what a failed read means.
+    """
+    chunks: dict[str, list[tuple[dict, datetime]]] = {}
+    with Path(transcript_path).open("r", encoding="utf-8") as source:
+        for line in source:
+            if not line.strip():
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(event, dict):
+                continue
+
+            ts = parse_transcript_ts(event.get("timestamp") or event.get("ts"))
+            if ts is None:
+                continue
+            date_key = chunk_date(ts)
+            if only_day is not None and date_key != only_day:
+                continue
+            chunks.setdefault(date_key, []).append((event, ts))
+    return chunks
+
+
+def build_day_input(event_pairs: list[tuple[dict, datetime]]) -> tuple[list[str], list[str], dict, str]:
+    """(user messages, assistant messages, SESSION SIZE metrics, context) for one day.
+
+    The only place a day's oracle input is assembled: the session day loop and
+    `--day` both come through here, so one date cannot reach the oracle in two
+    shapes (phase 1a found a second, Claude-only copy of this code).
+    """
+    events = [item[0] for item in event_pairs]
+    timestamps = [item[1] for item in event_pairs]
+    chunk_user_messages: list[str] = []
+    chunk_assistant_messages: list[str] = []
+    chunk_metrics = {
+        "event_count": len(events),
+        "user_message_count": 0,
+        "assistant_message_count": 0,
+        "tool_call_count": 0,
+        "span_hours": 0.0,
+        "active_hours": 0.0,
+    }
+
+    for event in events:
+        role, tool_calls = size_signal(event)
+        if role == "user":
+            chunk_metrics["user_message_count"] += 1
+        elif role == "assistant":
+            chunk_metrics["assistant_message_count"] += 1
+        chunk_metrics["tool_call_count"] += tool_calls
+
+        message = transcript_message(event)
+        if message is None:
+            continue
+        role, text = message
+        if role == "user":
+            chunk_user_messages.append(text)
+        elif role == "assistant":
+            chunk_assistant_messages.append(text)
+
+    if timestamps:
+        ordered = sorted(timestamps)
+        chunk_metrics["span_hours"] = max(
+            (ordered[-1] - ordered[0]).total_seconds(),
+            0.0,
+        ) / 3600
+        chunk_metrics["active_hours"] = active_hours_for_timestamps(
+            timestamps,
+            SESSION_SIZE_GAP_MINUTES,
+        )
+
+    chunk_context = build_truncated_context_from_messages(
+        chunk_user_messages,
+        chunk_assistant_messages,
+    )
+    return chunk_user_messages, chunk_assistant_messages, chunk_metrics, chunk_context
+
+
+def build_day_entry(
+    session_id: str,
+    transcript_path: str,
+    date_key: str,
+    event_pairs: list[tuple[dict, datetime]],
+    estimation_mode: str = "calendar-day-chunk-live",
+) -> dict:
+    """One oracle call for one calendar day; returns the day entry, writes nothing."""
+    _, _, chunk_metrics, chunk_context = build_day_input(event_pairs)
+    chunk_prompt = build_estimation_prompt(chunk_context, chunk_metrics)
+    chunk_entry = run_oracle(chunk_prompt)
+    for sentiment_key in (
+        "frustration_score",
+        "appreciation_score",
+        "mood_arc",
+        "sentiment_intensity",
+    ):
+        chunk_entry.pop(sentiment_key, None)
+    chunk_entry["transcript_path"] = transcript_path
+    chunk_entry["source_session_id"] = session_id
+    chunk_entry["chunk_date"] = date_key
+    chunk_entry["chunk_event_count"] = len(event_pairs)
+    chunk_entry["estimation_mode"] = estimation_mode
+    chunk_entry["day_input_version"] = DAY_INPUT_VERSION
+    return chunk_entry
+
+
+# Copied into `replaced_estimates` when a day is estimated again. An audit trail
+# only: nothing in the accounting reads it.
+_REPLACED_ESTIMATE_FIELDS = (
+    "ai_baseline_hours",
+    "estimated_at",
+    "estimation_mode",
+    "estimation_confidence",
+    "brief_description",
+    "day_input_version",
+)
+
+
+def estimate_day(session_id: str, transcript_path: str, date_key: str, reason: str | None = None) -> dict:
+    """Estimate one local calendar day of a transcript as `<session_id>:<date>`.
+
+    No whole-session oracle call, and the session entry is not touched. A day
+    that already had an estimate keeps it in `replaced_estimates` with the
+    reason; `human_corrected_hours` survives through update_task_entry.
+    """
+    event_pairs = read_day_chunks(transcript_path, only_day=date_key).get(date_key)
+    if not event_pairs:
+        raise ValueError(f"no transcript events on {date_key}")
+
+    entry = build_day_entry(
+        session_id, transcript_path, date_key, event_pairs, estimation_mode="calendar-day-single"
+    )
+    task_key = f"{session_id}:{date_key}"
+    # Read the value being replaced after the oracle call, as close to the write
+    # as possible: the call takes minutes and the hook may write meanwhile.
+    previous = read_tasks().get(task_key)
+    if isinstance(previous, dict) and previous.get("ai_baseline_hours") is not None:
+        history = previous.get("replaced_estimates")
+        replaced = {field: previous.get(field) for field in _REPLACED_ESTIMATE_FIELDS}
+        replaced["reason"] = reason or "re-estimated"
+        entry["replaced_estimates"] = (list(history) if isinstance(history, list) else []) + [replaced]
+    update_task_entry(task_key, entry)
+    return entry
+
+
 def estimate_session(session_id: str, transcript_path: str) -> None:
     user_messages, assistant_messages = read_transcript(Path(transcript_path))
     # Count profanity first — local, never fails. Persist it even if oracle dies later.
@@ -714,23 +880,8 @@ def estimate_session(session_id: str, transcript_path: str) -> None:
     entry["chunk_estimation_expected"] = None
     update_task_entry(session_id, entry)
 
-    chunks: dict[str, list[tuple[dict, datetime]]] = {}
     try:
-        with Path(transcript_path).open("r", encoding="utf-8") as source:
-            for line in source:
-                if not line.strip():
-                    continue
-                try:
-                    event = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if not isinstance(event, dict):
-                    continue
-
-                ts = parse_transcript_ts(event.get("timestamp") or event.get("ts"))
-                if ts is None:
-                    continue
-                chunks.setdefault(chunk_date(ts), []).append((event, ts))
+        chunks = read_day_chunks(transcript_path)
     except (OSError, UnicodeDecodeError) as exc:
         print(f"chunk-estimate-failed\t{session_id}\t<read>\t{exc}", file=sys.stderr)
         return
@@ -770,66 +921,7 @@ def estimate_session(session_id: str, transcript_path: str) -> None:
             continue
 
         try:
-            event_pairs = chunks[date_key]
-            events = [item[0] for item in event_pairs]
-            timestamps = [item[1] for item in event_pairs]
-            chunk_user_messages: list[str] = []
-            chunk_assistant_messages: list[str] = []
-            chunk_metrics = {
-                "event_count": len(events),
-                "user_message_count": 0,
-                "assistant_message_count": 0,
-                "tool_call_count": 0,
-                "span_hours": 0.0,
-                "active_hours": 0.0,
-            }
-
-            for event in events:
-                role, tool_calls = size_signal(event)
-                if role == "user":
-                    chunk_metrics["user_message_count"] += 1
-                elif role == "assistant":
-                    chunk_metrics["assistant_message_count"] += 1
-                chunk_metrics["tool_call_count"] += tool_calls
-
-                message = transcript_message(event)
-                if message is None:
-                    continue
-                role, text = message
-                if role == "user":
-                    chunk_user_messages.append(text)
-                elif role == "assistant":
-                    chunk_assistant_messages.append(text)
-
-            if timestamps:
-                ordered = sorted(timestamps)
-                chunk_metrics["span_hours"] = max(
-                    (ordered[-1] - ordered[0]).total_seconds(),
-                    0.0,
-                ) / 3600
-                chunk_metrics["active_hours"] = active_hours_for_timestamps(
-                    timestamps,
-                    SESSION_SIZE_GAP_MINUTES,
-                )
-
-            chunk_context = build_truncated_context_from_messages(
-                chunk_user_messages,
-                chunk_assistant_messages,
-            )
-            chunk_prompt = build_estimation_prompt(chunk_context, chunk_metrics)
-            chunk_entry = run_oracle(chunk_prompt)
-            for sentiment_key in (
-                "frustration_score",
-                "appreciation_score",
-                "mood_arc",
-                "sentiment_intensity",
-            ):
-                chunk_entry.pop(sentiment_key, None)
-            chunk_entry["transcript_path"] = transcript_path
-            chunk_entry["source_session_id"] = session_id
-            chunk_entry["chunk_date"] = date_key
-            chunk_entry["chunk_event_count"] = len(events)
-            chunk_entry["estimation_mode"] = "calendar-day-chunk-live"
+            chunk_entry = build_day_entry(session_id, transcript_path, date_key, chunks[date_key])
             update_task_entry(task_key, chunk_entry)
             tasks[task_key] = chunk_entry
         except Exception as exc:
@@ -856,8 +948,35 @@ def _safe_count_profanity(transcript_path: str) -> int | None:
         return None
 
 
+def main_day(args: argparse.Namespace) -> int:
+    """`--day`: a failure writes nothing and returns non-zero.
+
+    The whole-session path below records a failure entry under the session key
+    and clears the SessionStart in-flight lock. Neither fits one day: a failure
+    entry would replace a real session estimate, and the lock belongs to the
+    hook's run of the whole session. The caller counts failed attempts.
+    """
+    try:
+        day = date.fromisoformat(args.day).isoformat()
+    except ValueError:
+        print(f"estimation failed: --day expects YYYY-MM-DD, got {args.day!r}", file=sys.stderr)
+        return 2
+    try:
+        entry = estimate_day(args.session_id, args.transcript_path, day, reason=args.reason)
+    except subprocess.TimeoutExpired:
+        print("estimation failed: codex timed out", file=sys.stderr)
+        return 1
+    except Exception as exc:
+        print(f"estimation failed: {exc}", file=sys.stderr)
+        return 1
+    print(f"day-estimated\t{args.session_id}\t{day}\t{entry.get('ai_baseline_hours')}")
+    return 0
+
+
 def main(argv: list[str]) -> int:
     args = parse_args(argv)
+    if args.day is not None:
+        return main_day(args)
     try:
         estimate_session(args.session_id, args.transcript_path)
     except subprocess.TimeoutExpired:

@@ -114,7 +114,9 @@ Plain JSONL-файлы в `tracker/`. Без базы данных. Причин
 Обогащение по сессии живёт в `tasks.json`: оценка оракула
 `ai_baseline_hours`, опциональная коррекция пользователем
 `human_corrected_hours`, `profanity_count`, `mood_arc`. Пишется
-`estimate-task.py` после каждой сессии.
+`estimate-task.py`, когда хук SessionStart видит сессию без оценки. Рядом лежат
+дневные записи `<session_id>:<YYYY-MM-DD>`, по оценке оракула на каждый
+локальный календарный день, и окна продуктивности считают именно их.
 
 ## Слой 3 — Аналитика
 
@@ -125,15 +127,19 @@ read_events(start, end)
   → read_claude_events + read_codex_events + read_openclaw_events + read_opencode_events
   → размечены провайдером, отсортированы по ts
 
-events_for_task_metrics(events)  → только Claude (избегаем двойного учёта при делегировании)
+events_for_task_metrics(events)  → сессии Claude + сессии Codex, которые вёл человек (desktop/TUI), без запусков codex exec
 events_for_provider(events, "openai")  → отфильтрованный срез
 summarize_by_provider(events)  → {provider: stats}
-summarize_productivity(events)  → like-with-like: активные часы только по покрытым сессиям
+summarize_productivity(events)  → по умолчанию по сессиям; деплой считает закрытые локальные дни с дневной оценкой, покрытие в units_*
 ```
 
 `tracker/estimate-task.py` зовёт LLM (по умолчанию Codex CLI, fallback на
 Claude когда OAuth-refresh работает) чтобы оценить «человеческий
-эквивалент времени» по сессии. Результат идёт в `tasks.json`.
+эквивалент времени» по сессии и по каждому её календарному дню; `--day`
+оценивает один день. `tracker/estimate-closed-days.py`, шаг деплоя, ставит в
+очередь закрытые дни без дневной оценки или с подозрительной (сделанной на
+входе до 2026-09-11 или до конца дня) и отдаёт их в `--day` по нескольку за
+прогон. Результат идёт в `tasks.json`.
 
 ## Слой 4 — Бэкенд
 
