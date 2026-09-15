@@ -1,13 +1,9 @@
 import contextlib
 import io
 import json
-import os
-import shutil
 import sys
 import tempfile
 import unittest
-import uuid
-from contextlib import contextmanager
 from datetime import date
 from pathlib import Path
 
@@ -52,30 +48,11 @@ FAST_PATH_DEDUP_FIELDS = {
 }
 
 
-@contextmanager
 def temporary_events_dir():
-    temp = tempfile.TemporaryDirectory(dir=ROOT, ignore_cleanup_errors=True)
-    try:
-        probe = Path(temp.name) / ".probe"
-        try:
-            probe.write_text("ok", encoding="utf-8")
-            probe.unlink()
-            yield temp.name
-            return
-        except PermissionError:
-            pass
-    finally:
-        try:
-            temp.cleanup()
-        except PermissionError:
-            temp._finalizer.detach()
-
-    fallback = ROOT / f"tmpreadmodel{uuid.uuid4().hex[:8]}"
-    os.mkdir(fallback)
-    try:
-        yield str(fallback)
-    finally:
-        shutil.rmtree(fallback)
+    # System temp dir rather than the repo: mkdtemp directories that sandboxed
+    # agent runs leave in the repo cannot be opened by the owner, and each one
+    # aborts a root-level pytest collection.
+    return tempfile.TemporaryDirectory()
 
 
 def write_jsonl(directory, filename, rows):

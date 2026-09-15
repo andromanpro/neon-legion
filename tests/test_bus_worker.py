@@ -1,14 +1,11 @@
 import hashlib
 import json
-import os
 import re
-import shutil
 import sys
 import tempfile
 import threading
 import time
 import unittest
-import uuid
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -64,37 +61,17 @@ class FakeDone:
         self.set_called = True
 
 
-def temporary_project_root():
-    temp = tempfile.TemporaryDirectory(dir=ROOT / "tracker", ignore_cleanup_errors=True)
-    try:
-        probe = Path(temp.name) / ".probe"
-        try:
-            probe.write_text("ok", encoding="utf-8")
-            probe.unlink()
-            return Path(temp.name), temp.cleanup
-        except PermissionError:
-            pass
-    finally:
-        try:
-            temp.cleanup()
-        except PermissionError:
-            temp._finalizer.detach()
-
-    fallback = ROOT / "tracker" / f"tmpbusworker{uuid.uuid4().hex[:8]}"
-    os.mkdir(fallback)
-
-    def cleanup():
-        shutil.rmtree(fallback)
-
-    return fallback, cleanup
-
-
 class BusWorkerTests(unittest.TestCase):
     def setUp(self):
         self.original_handlers = dict(bus_worker.HANDLERS)
         self.comments = []
         self.updates = []
-        self.temp_project_path, cleanup_temp_project = temporary_project_root()
+        # Stand-in PROJECT_ROOT for tracker/bus-events.jsonl, in the system
+        # temp dir rather than the repo: sandboxed agent runs left 458 mkdtemp
+        # directories in tracker/ that the owner cannot open, and each one
+        # aborts a root-level pytest collection.
+        temp_project = tempfile.TemporaryDirectory()
+        self.temp_project_path = Path(temp_project.name)
         self.patchers = [
             patch("tools.bus_worker.PROJECT_ROOT", self.temp_project_path),
             patch("tools.bus_worker.bus_gitea.list_issues", return_value=[]),
@@ -106,7 +83,7 @@ class BusWorkerTests(unittest.TestCase):
         for patcher in self.patchers:
             patcher.start()
             self.addCleanup(patcher.stop)
-        self.addCleanup(cleanup_temp_project)
+        self.addCleanup(temp_project.cleanup)
         self.addCleanup(self.restore_handlers)
         bus_worker.clear_idempotency_cache()
         self.addCleanup(bus_worker.clear_idempotency_cache)
