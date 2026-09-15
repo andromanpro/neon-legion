@@ -72,12 +72,16 @@ def format_stats_block(snapshot: dict) -> str:
         productivity_line,
     ]
     if appreciation_total or profanity_total:
-        ratio_note = ""
-        if profanity_total > 0:
-            ratio = appreciation_total / profanity_total
-            ratio_note = f" — ratio {ratio:.0f}:1, mostly happy"
-        elif appreciation_total > 0:
+        # The note used to assume thanks outnumber swears: on 2026-09-15 the
+        # public README read "62 thanks / 285 swears — ratio 0:1, mostly happy".
+        if profanity_total == 0:
             ratio_note = " — zero profanity this window"
+        elif appreciation_total == 0:
+            ratio_note = " — not a single thank-you to offset them"
+        elif appreciation_total >= profanity_total:
+            ratio_note = f" — ratio {appreciation_total / profanity_total:.0f}:1, mostly happy"
+        else:
+            ratio_note = f" — {profanity_total / appreciation_total:.1f} swears per thank-you"
         lines.append(
             f"- **Sentiment markers:** {appreciation_total:,} thanks / "
             f"{profanity_total:,} swears{ratio_note}"

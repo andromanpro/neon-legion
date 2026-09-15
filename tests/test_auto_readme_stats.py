@@ -96,6 +96,33 @@ class FormatStatsBlockTests(unittest.TestCase):
 
         self.assertNotIn("Most stressed day", block)
 
+    def test_swears_outnumbering_thanks_are_not_called_happy(self) -> None:
+        # The public README read "62 thanks / 285 swears — ratio 0:1, mostly happy"
+        # on 2026-09-15: the ratio assumed thanks always outnumber swears.
+        snapshot = dict(SAMPLE_SNAPSHOT)
+        snapshot["sentiment"] = {"appreciation_total": 62, "profanity_total": 285}
+
+        block = format_stats_block(snapshot)
+
+        self.assertIn("62 thanks / 285 swears — 4.6 swears per thank-you", block)
+        self.assertNotIn("mostly happy", block)
+        self.assertNotIn("0:1", block)
+
+    def test_swears_without_a_single_thank_you(self) -> None:
+        snapshot = dict(SAMPLE_SNAPSHOT)
+        snapshot["sentiment"] = {"appreciation_total": 0, "profanity_total": 7}
+
+        block = format_stats_block(snapshot)
+
+        self.assertIn("0 thanks / 7 swears — not a single thank-you to offset them", block)
+        self.assertNotIn("mostly happy", block)
+
+    def test_thanks_outnumbering_swears_keep_the_happy_ratio(self) -> None:
+        snapshot = dict(SAMPLE_SNAPSHOT)
+        snapshot["sentiment"] = {"appreciation_total": 30, "profanity_total": 10}
+
+        self.assertIn("30 thanks / 10 swears — ratio 3:1, mostly happy", format_stats_block(snapshot))
+
     def test_format_is_pure_function(self) -> None:
         first = format_stats_block(SAMPLE_SNAPSHOT)
         second = format_stats_block(SAMPLE_SNAPSHOT)

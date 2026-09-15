@@ -32,7 +32,7 @@ This tool is what came out of that.
 - **440,453 AI calls** across Claude Code + Codex CLI + OpenClaw + OpenCode
 - **$162,713 saved** vs equivalent API rate (API would cost $165,260, subscriptions cost a fraction)
 - **productivity multiplier withheld** — 427 of 1,249 closed days estimated so far
-- **Sentiment markers:** 62 thanks / 285 swears — ratio 0:1, mostly happy
+- **Sentiment markers:** 62 thanks / 285 swears — 4.6 swears per thank-you
 - **Most stressed day:** 2026-05-09 (23 frustrated mentions — yes, we count them)
 - **Most grateful day:** 2026-08-24 (10 positive markers — we count those too)
 
