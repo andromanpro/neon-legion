@@ -168,17 +168,22 @@ def test_estimate_made_before_the_day_closed_is_partial(queue):
     assert queue.build_queue(events, {f"s:{day}": next_day}, today, placeholder) == []
 
 
-def test_order_is_category_priority_then_newest_day(queue, tmp_path):
+def test_order_is_newest_day_then_category_priority(queue, tmp_path):
+    # Owner's call (2026-09-15): the dashboard's 7- and 30-day windows complete
+    # first; within one day, a wrong value already counted beats an absent one.
     today = "2026-09-20"
     compacted = write(tmp_path / "cl2.jsonl", [
         claude("user", SUMMARY_TEXT, "2026-09-02T09:00:00Z", isCompactSummary=True, isVisibleInTranscriptOnly=True),
     ])
     plain = write(tmp_path / "cl1.jsonl", [claude("user", "Prompt", "2026-09-17T09:00:00Z")])
-    transcripts = {"cl1": plain, "cl2": compacted, "cx": plain}
+    transcripts = {"cl1": plain, "cl2": compacted, "cl3": plain, "cx": plain, "cx2": plain}
     events = (ledger("cl1", "2026-09-18") + ledger("cl1", "2026-09-17") + ledger("cl1", "2026-09-19")
+              + ledger("cl3", "2026-09-19")
               + ledger("cx", "2026-09-05", "openai", "desktop") + ledger("cx", "2026-09-06", "openai", "desktop")
+              + ledger("cx2", "2026-09-06", "openai", "desktop")
               + ledger("cl2", "2026-09-02"))
     tasks = {"cl1:2026-09-17": {"ai_baseline_hours": 2.0, "estimated_at": "2026-09-17T12:00:00+00:00"},
+             "cl3:2026-09-19": {"ai_baseline_hours": 4.0, "estimated_at": "2026-09-19T12:00:00+00:00"},
              "cx:2026-09-05": {"ai_baseline_hours": 1.0, "estimated_at": "2026-09-06T12:00:00+00:00"},
              "cx:2026-09-06": {"ai_baseline_hours": 1.0, "estimated_at": "2026-09-07T12:00:00+00:00"},
              "cl2:2026-09-02": {"ai_baseline_hours": 3.0, "estimated_at": "2026-09-03T12:00:00+00:00"}}
@@ -186,14 +191,20 @@ def test_order_is_category_priority_then_newest_day(queue, tmp_path):
     candidates = queue.build_queue(events, tasks, today, lambda sid, _provider: transcripts[sid])
 
     assert found(candidates) == [
-        ("cx", "2026-09-06", "codex_blind"),
-        ("cx", "2026-09-05", "codex_blind"),
-        ("cl2", "2026-09-02", "compaction_input"),
-        ("cl1", "2026-09-17", "partial_day"),
+        ("cl3", "2026-09-19", "partial_day"),
         ("cl1", "2026-09-19", "missing"),
         ("cl1", "2026-09-18", "missing"),
+        ("cl1", "2026-09-17", "partial_day"),
+        ("cx", "2026-09-06", "codex_blind"),
+        ("cx2", "2026-09-06", "missing"),
+        ("cx", "2026-09-05", "codex_blind"),
+        ("cl2", "2026-09-02", "compaction_input"),
     ]
-    assert found(queue.runnable(candidates, categories={"missing"})) == found(candidates)[-2:]
+    assert found(queue.runnable(candidates, categories={"missing"})) == [
+        ("cl1", "2026-09-19", "missing"),
+        ("cl1", "2026-09-18", "missing"),
+        ("cx2", "2026-09-06", "missing"),
+    ]
 
 
 def test_day_without_a_transcript_is_listed_but_never_run(queue):

@@ -71,7 +71,10 @@ OLD_INPUT_FIRST_USER_MESSAGES = 3
 # day the oracle can never handle does not block the queue behind it.
 MAX_DAY_ATTEMPTS = 3
 
-# Priority: wrong values already inside the numerator first, then absent ones.
+# Within one day: wrong values already inside the numerator first, then absent
+# ones. Across days the newest goes first (owner's call, 2026-09-15): the 7- and
+# 30-day windows the dashboard shows become complete and honest before old
+# history does.
 CATEGORIES = ("codex_blind", "compaction_input", "partial_day", "missing")
 
 _UUID_TAIL = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
@@ -192,7 +195,7 @@ def old_input_compaction_days(transcript: Path, days: set[str]) -> set[str]:
 
 
 def build_queue(events, tasks, today, find_transcript, attempts=None) -> list[Candidate]:
-    """Every closed day that needs an estimate, highest priority and newest first.
+    """Every closed day that needs an estimate: newest day first, then category.
 
     `find_transcript(session_id, provider)` returns an existing transcript path
     or None; `attempts` is the failure log read by read_attempts.
@@ -244,7 +247,7 @@ def build_queue(events, tasks, today, find_transcript, attempts=None) -> list[Ca
         ))
 
     rank = {name: index for index, name in enumerate(CATEGORIES)}
-    candidates.sort(key=lambda c: (rank[c.category], -date.fromisoformat(c.day).toordinal(), c.session_id))
+    candidates.sort(key=lambda c: (-date.fromisoformat(c.day).toordinal(), rank[c.category], c.session_id))
     return candidates
 
 
