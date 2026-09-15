@@ -27,14 +27,14 @@ This tool is what came out of that.
 
 <!-- START_STATS -->
 
-**Past 163 days from the author's local instance** (`2026-03-09` → `2026-08-18`)
+**Past 191 days from the author's local instance** (`2026-03-09` → `2026-09-15`)
 
-- **315,501 AI calls** across Claude Code + Codex CLI + OpenClaw + OpenCode
-- **$109,856 saved** vs equivalent API rate (API would cost $112,030, subscriptions cost a fraction)
-- **×5.67 productivity multiplier** — 4,281 human-hours of work compressed
-- **Sentiment markers:** 54 thanks / 266 swears — ratio 0:1, mostly happy
+- **440,453 AI calls** across Claude Code + Codex CLI + OpenClaw + OpenCode
+- **$162,713 saved** vs equivalent API rate (API would cost $165,260, subscriptions cost a fraction)
+- **productivity multiplier withheld** — 427 of 1,249 closed days estimated so far
+- **Sentiment markers:** 62 thanks / 285 swears — ratio 0:1, mostly happy
 - **Most stressed day:** 2026-05-09 (23 frustrated mentions — yes, we count them)
-- **Most grateful day:** 2026-05-02 (12 positive markers — we count those too)
+- **Most grateful day:** 2026-08-24 (10 positive markers — we count those too)
 
 _Numbers refresh whenever the snapshot writer runs. Your mileage will vary; see the [dashboard](docs/screenshots/hero.png) for what it looks like locally._
 
