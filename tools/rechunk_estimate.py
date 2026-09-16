@@ -229,7 +229,10 @@ def estimate_chunk(estimator, plan: ChunkPlan, samples: int) -> dict:
     entry["chunk_event_count"] = plan.event_count
     entry["estimation_mode"] = "calendar-day-chunk"
     entry["day_input_version"] = estimator.DAY_INPUT_VERSION
-    entry["day_input_read_at"] = plan.read_at or estimator.input_read_time()
+    # Only a time taken before the transcript was read says what the input saw;
+    # stamping now (after the oracle answered) would repeat the midnight bug.
+    if plan.read_at:
+        entry["day_input_read_at"] = plan.read_at
     entry["sample_count"] = len(entries)
     entry["sample_hours"] = [
         float(sample.get("ai_baseline_hours") or 0.0)

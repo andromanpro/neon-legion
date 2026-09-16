@@ -318,3 +318,26 @@ def test_rechunk_entries_carry_the_input_version_and_read_time(estimator, rechun
     assert entry["ai_baseline_hours"] == 5.0
     assert entry["day_input_version"] == estimator.DAY_INPUT_VERSION
     assert entry["day_input_read_at"] == "2026-05-16T23:57:00+03:00"
+
+
+def test_rechunk_entry_without_a_read_time_does_not_invent_one(estimator, rechunk, tmp_path):
+    # A time taken after the oracle answered would repeat the midnight bug; with
+    # no read time the queue falls back to estimated_at, as for old entries.
+    path = write(tmp_path / "long.jsonl", LONG_CODEX)
+    day_two = day_of(estimator, LONG_CODEX, "Day two task")
+    plan = rechunk.ChunkPlan(session_id="long", task_key=f"long:{day_two}", date=day_two,
+                             transcript_path=path, events=tuple(rechunk.transcript_chunks(path)[day_two]))
+    estimator.run_oracle = Oracle(4)
+
+    entry = rechunk.estimate_chunk(estimator, plan, samples=1)
+
+    assert "day_input_read_at" not in entry
+
+
+def test_rechunk_plans_record_when_the_transcript_was_read(rechunk, tmp_path):
+    path = write(tmp_path / "long.jsonl", LONG_CODEX)
+
+    plans, _stats = rechunk.covered_session_plans({"long": {"ai_baseline_hours": 5.0, "transcript_path": str(path)}})
+
+    assert len(plans) == 2
+    assert all(plan.read_at for plan in plans)
