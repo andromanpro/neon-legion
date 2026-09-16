@@ -10,6 +10,8 @@ import importlib.util
 import json
 from pathlib import Path
 import sys
+import threading
+import time
 
 import pytest
 
@@ -346,6 +348,55 @@ def test_attempt_journal_keeps_what_a_concurrent_run_recorded(queue, tmp_path):
     journal = queue.read_attempts(attempts)
     assert journal["other:2026-05-01"] == {"failures": 2}
     assert journal["s:2026-05-02"]["failures"] == 1
+
+
+def test_attempt_update_waits_for_a_held_journal_lock(queue, tmp_path):
+    # Re-audit 1c: the concurrent-run test above proves re-reading, not mutual
+    # exclusion. Here another run holds the lock and writes before releasing it.
+    attempts = tmp_path / "attempts.json"
+    lock = tmp_path / "attempts.json.lock"
+    lock.write_text("held by another run", encoding="utf-8")
+
+    def other_run_writes_then_releases():
+        time.sleep(0.3)
+        attempts.write_text(json.dumps({"other:2026-05-01": {"failures": 2}}), encoding="utf-8")
+        lock.unlink()
+
+    other = threading.Thread(target=other_run_writes_then_releases)
+    other.start()
+    try:
+        assert queue.record_attempt(attempts, "s:2026-05-02", "estimation failed") is True
+    finally:
+        other.join()
+
+    journal = queue.read_attempts(attempts)
+    assert journal["other:2026-05-01"] == {"failures": 2}
+    assert journal["s:2026-05-02"]["failures"] == 1
+    assert not lock.exists()
+
+
+def test_run_stops_when_an_attempt_cannot_be_recorded(queue, tmp_path, monkeypatch):
+    # Re-audit 1c, P2: a failure that is not counted lets a broken day take more
+    # oracle calls than the attempt limit allows, so the run must not go on.
+    transcript = write(tmp_path / "s.jsonl", [])
+    candidates = queue.build_queue(ledger("s", "2026-05-02") + ledger("s", "2026-05-03"), {}, TODAY,
+                                   lambda *_: transcript)
+    assert [c.day for c in candidates] == ["2026-05-03", "2026-05-02"]
+    monkeypatch.setattr(queue, "_acquire_lock", lambda *args, **kwargs: None)
+    estimated, lines = [], []
+
+    def failing(candidate, timeout):
+        estimated.append(candidate.day)
+        return 1, "estimation failed: codex exited with 1"
+
+    counts = queue.run_queue(candidates, failing, lambda: {}, tmp_path / "attempts.json", timeout=5,
+                             out=lines.append)
+
+    assert estimated == ["2026-05-03"]
+    assert counts == {"ok": 0, "partial": 0, "failed": 1}
+    assert any("журнал попыток" in line for line in lines)
+    # A lock left by a dead run is evicted before the wait gives up.
+    assert queue.ATTEMPTS_LOCK_WAIT_MARGIN_SECONDS > 0
 
 
 def test_failed_day_is_retried_until_the_attempt_limit(queue, tmp_path):

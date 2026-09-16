@@ -334,6 +334,61 @@ def test_rechunk_entry_without_a_read_time_does_not_invent_one(estimator, rechun
     assert "day_input_read_at" not in entry
 
 
+def test_rechunk_splits_days_exactly_like_the_day_loop(estimator, rechunk, tmp_path):
+    # Re-audit 1c, P1: rechunk split days with summary.parse_event_ts, which keeps
+    # an offset-less timestamp on its own date, while the day loop reads it as UTC.
+    # On a machine running at UTC both readings agree and this cannot fail.
+    events = [
+        claude("user", "Z-stamped prompt", "2026-05-16T10:00:00Z"),
+        claude("user", "offset-less late prompt", "2026-05-16T23:30:00"),
+        claude("user", "offset-less early prompt", "2026-05-17T00:30:00"),
+        claude("assistant", "done", "2026-05-17T12:00:00Z"),
+    ]
+    path = write(tmp_path / "naive.jsonl", events)
+    loop_days = {day: [event for event, _ts in pairs]
+                 for day, pairs in estimator.read_day_chunks(str(path)).items()}
+
+    plans, _stats = rechunk.covered_session_plans({"naive": {"ai_baseline_hours": 3.0, "transcript_path": str(path)}})
+
+    assert {plan.date: list(plan.events) for plan in plans} == loop_days
+
+
+def test_read_time_is_taken_before_the_transcript_is_read(estimator, rechunk, tmp_path, monkeypatch):
+    # Re-audit 1c, P3: a stamp taken after the read would date a read that
+    # crossed midnight into the closed day again.
+    path = write(tmp_path / "long.jsonl", LONG_CLAUDE)
+    day_two = day_of(estimator, LONG_CLAUDE, "Day two task")
+    calls = []
+    real_read = estimator.read_day_chunks
+
+    def stamp():
+        calls.append("stamp")
+        return "2026-05-16T23:57:00+03:00"
+
+    def read(*args, **kwargs):
+        calls.append("read")
+        return real_read(*args, **kwargs)
+
+    monkeypatch.setattr(estimator, "input_read_time", stamp)
+    monkeypatch.setattr(estimator, "read_day_chunks", read)
+
+    estimator.run_oracle = Oracle(10, 1, 2)
+    estimator.estimate_session("long", str(path))
+    assert calls == ["stamp", "read"]
+
+    calls.clear()
+    estimator.run_oracle = Oracle(3)
+    estimator.estimate_day("long", str(path), day_two)
+    assert calls == ["stamp", "read"]
+
+    calls.clear()
+    plans, _stats = rechunk.covered_session_plans(
+        {"long": {"ai_baseline_hours": 5.0, "transcript_path": str(path)}}, estimator=estimator
+    )
+    assert calls == ["stamp", "read"]
+    assert {plan.read_at for plan in plans} == {"2026-05-16T23:57:00+03:00"}
+
+
 def test_rechunk_plans_record_when_the_transcript_was_read(rechunk, tmp_path):
     path = write(tmp_path / "long.jsonl", LONG_CODEX)
 

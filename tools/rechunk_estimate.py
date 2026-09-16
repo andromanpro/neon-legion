@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
-import json
 import sys
 from dataclasses import dataclass
 from datetime import datetime
@@ -118,32 +117,24 @@ def resolve_transcript_path(value: object) -> Path | None:
         return None
 
 
-def transcript_event_ts(event: dict) -> datetime | None:
-    return summary.parse_event_ts(event.get("timestamp") or event.get("ts"))
+def transcript_chunks(transcript_path: Path, estimator=None) -> dict[str, list[dict]]:
+    """Events per local calendar day, split by estimate-task.py::read_day_chunks.
 
-
-def transcript_chunks(transcript_path: Path) -> dict[str, list[dict]]:
-    chunks: dict[str, list[dict]] = {}
-    with transcript_path.open("r", encoding="utf-8") as source:
-        for line in source:
-            if not line.strip():
-                continue
-            try:
-                event = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if not isinstance(event, dict):
-                continue
-            ts = transcript_event_ts(event)
-            if ts is None:
-                continue
-            chunks.setdefault(summary.chunk_date(ts), []).append(event)
-    return chunks
+    The tool used to split days itself with summary.parse_event_ts, which keeps an
+    offset-less timestamp on its own date while the day loop reads it as UTC, so
+    one date could get different events here and in the loop (1c re-audit, P1).
+    """
+    estimator = estimator or load_estimator_module()
+    return {
+        day: [event for event, _ts in pairs]
+        for day, pairs in estimator.read_day_chunks(str(transcript_path)).items()
+    }
 
 
 def covered_session_plans(
-    tasks: dict, multi_day_only: bool = False
+    tasks: dict, multi_day_only: bool = False, estimator=None
 ) -> tuple[list[ChunkPlan], dict[str, int]]:
+    estimator = estimator or load_estimator_module()
     stats = {
         "sessions_seen": 0,
         "covered_sessions": 0,
@@ -166,9 +157,9 @@ def covered_session_plans(
         if transcript_path is None:
             stats["missing_transcript"] += 1
             continue
-        read_at = datetime.now().astimezone().isoformat(timespec="seconds")
+        read_at = estimator.input_read_time()
         try:
-            chunks = transcript_chunks(transcript_path)
+            chunks = transcript_chunks(transcript_path, estimator)
         except (OSError, UnicodeDecodeError):
             stats["unreadable_transcript"] += 1
             continue
@@ -272,7 +263,8 @@ def main(argv: list[str]) -> int:
         raise SystemExit("--samples must be >= 1")
 
     tasks = summary.read_tasks()
-    plans, stats = covered_session_plans(tasks, multi_day_only=args.multi_day_only)
+    estimator = load_estimator_module()
+    plans, stats = covered_session_plans(tasks, multi_day_only=args.multi_day_only, estimator=estimator)
 
     if args.limit_worst and args.limit_worst > 0:
         by_session: dict[str, list[ChunkPlan]] = {}
@@ -301,7 +293,6 @@ def main(argv: list[str]) -> int:
         print_summary(stats, written=0, skipped_existing=stats["chunks_existing"], failed=0)
         return 0
 
-    estimator = load_estimator_module()
     written = 0
     skipped_existing = 0
     failed = 0

@@ -71,8 +71,13 @@ DAY_INPUT_FIXED_AT = datetime.fromisoformat("2026-09-11T08:58:20+03:00")
 RECHUNK_ESTIMATION_MODE = "calendar-day-chunk"
 
 # The attempt journal's read-modify-write takes milliseconds; a lock older than
-# this was left by a process that died inside it.
+# this was left by a process that died inside it. A live holder keeps the lock
+# open, and Windows refuses to delete an open file to any process (probed
+# 2026-09-16), so eviction cannot remove a lock that is really held.
 ATTEMPTS_LOCK_STALE_SECONDS = 60
+# The wait outlasts the stale threshold, so a dead run's lock is always evicted
+# before giving up (1c re-audit, P2).
+ATTEMPTS_LOCK_WAIT_MARGIN_SECONDS = 15
 
 # The old input gave the oracle the first three user messages of the day.
 OLD_INPUT_FIRST_USER_MESSAGES = 3
@@ -323,24 +328,23 @@ def _acquire_lock(lock_path: Path, timeout_seconds: float = 10.0) -> int | None:
             return None
 
 
-def record_attempt(path: Path, task_key: str, error: str | None) -> None:
+def record_attempt(path: Path, task_key: str, error: str | None) -> bool:
     """Count a failed attempt (error given) or clear the day after a success.
 
     One key per read-modify-write, under a lock file. The journal used to be
     read once per run and written back whole, dropping what an overlapping run
-    had recorded (1c audit, P2).
+    had recorded (1c audit, P2). False when the journal lock could not be taken.
     """
     path = Path(path)
     lock_path = path.with_name(path.name + ".lock")
-    fd = _acquire_lock(lock_path)
+    fd = _acquire_lock(lock_path, ATTEMPTS_LOCK_STALE_SECONDS + ATTEMPTS_LOCK_WAIT_MARGIN_SECONDS)
     if fd is None:
-        print(f"[closed-days] журнал попыток занят, отметка {task_key} пропущена", file=sys.stderr)
-        return
+        return False
     try:
         attempts = read_attempts(path)
         if error is None:
             if attempts.pop(task_key, None) is None:
-                return
+                return True
         else:
             previous = attempts.get(task_key)
             failures = previous.get("failures") if isinstance(previous, dict) else 0
@@ -350,6 +354,7 @@ def record_attempt(path: Path, task_key: str, error: str | None) -> None:
                 "last_error": error[-160:],
             }
         write_attempts(path, attempts)
+        return True
     finally:
         os.close(fd)
         try:
@@ -414,7 +419,7 @@ def run_queue(candidates, runner, read_tasks, attempts_path, timeout, out=print)
         was = f" (было {candidate.hours} ч)" if candidate.hours is not None else ""
 
         if landed_now(entry, started):
-            record_attempt(attempts_path, candidate.task_key, None)
+            recorded = record_attempt(attempts_path, candidate.task_key, None)
             if interruption:
                 counts["partial"] += 1
                 out(f"{label} ⚠ {entry['ai_baseline_hours']} ч{was}, прогон прерван{suffix}")
@@ -423,8 +428,13 @@ def run_queue(candidates, runner, read_tasks, attempts_path, timeout, out=print)
                 out(f"{label} ✓ {entry['ai_baseline_hours']} ч{was}")
         else:
             counts["failed"] += 1
-            record_attempt(attempts_path, candidate.task_key, interruption or "оценка не записана")
+            recorded = record_attempt(attempts_path, candidate.task_key, interruption or "оценка не записана")
             out(f"{label} ✗ оценка не записана{suffix}")
+        if not recorded:
+            # An uncounted failure would let a broken day take more oracle calls
+            # than MAX_DAY_ATTEMPTS allows (1c re-audit, P2): stop the run here.
+            out("[closed-days] журнал попыток недоступен — прогон остановлен")
+            break
     return counts
 
 
