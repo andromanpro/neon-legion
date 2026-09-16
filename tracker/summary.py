@@ -1252,6 +1252,13 @@ def summarize_productivity(events: list[dict], gap_minutes: int = 2) -> dict | N
     human_hours, human_fallbacks = _human_attention_hours_for_units(
         human_units, tasks, session_timestamps
     )
+    # Activity over the whole window, the open day included. The ratio needs
+    # estimated closed days only, but the dashboard's active-time panel reads
+    # these: measured over estimated days it showed 0.0 h on a working day and
+    # 8.3 h for a week (2026-09-16).
+    window_human_hours, _window_fallbacks = _human_attention_hours_for_units(
+        list(chunk_timestamps), tasks, session_timestamps
+    )
 
     return {
         "active_hours_with_ai": active_time_hours_merged(covered_events, gap_minutes),
@@ -1259,6 +1266,8 @@ def summarize_productivity(events: list[dict], gap_minutes: int = 2) -> dict | N
         "human_attention_hours_with_ai": human_hours,
         "human_attention_fallbacks": human_fallbacks,
         "calendar_hours_with_ai": merged_interval_hours(covered_ranges),
+        "window_human_attention_hours": window_human_hours,
+        "window_calendar_hours": merged_interval_hours(list(chunk_ranges.values())),
         "gap_minutes": gap_minutes,
         "hours_without_ai": hours_without_ai,
         "baseline_floor_clamped": baseline_floor_clamped,

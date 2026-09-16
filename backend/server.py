@@ -357,6 +357,8 @@ def productivity_payload(events, gap_minutes):
         human_attention_fallbacks = 0
         distinct_sessions_covered = 0
         sessions_total = len(session_ranges(events))
+        window_attention_hours = active_hours
+        window_calendar_hours = calendar_hours
     else:
         active_hours = summary.as_float(productivity.get("active_hours_with_ai"))
         active_hours_per_session_sum = summary.as_float(productivity.get("active_hours_per_session_sum"))
@@ -378,6 +380,10 @@ def productivity_payload(events, gap_minutes):
         )
         sessions_total = summary.as_int(productivity.get("sessions_total"))
         unit = productivity.get("unit") or unit
+        # Chunk mode measures the window's activity separately from the ratio
+        # (estimated closed days only); session mode has no such split.
+        window_attention_hours = productivity.get("window_human_attention_hours")
+        window_calendar_hours = productivity.get("window_calendar_hours")
 
     # Headline multiplier uses HUMAN-ATTENTION time (denominator = time the human
     # spent, not time the AI was busy). Falls back to AI-active wall-clock only if
@@ -406,9 +412,15 @@ def productivity_payload(events, gap_minutes):
     # consumers can suppress the number instead of printing a fake record.
     floor_driven = distinct_sessions_covered > 0 and floor_hours > human_attention_hours
     coverage = productivity or {}
+    if window_attention_hours is None:
+        window_attention_hours = denom_hours
+    if window_calendar_hours is None:
+        window_calendar_hours = calendar_hours
 
     return {
         "active_hours": rounded(denom_hours),
+        "window_active_hours": rounded(summary.as_float(window_attention_hours)),
+        "window_calendar_hours": rounded(summary.as_float(window_calendar_hours)),
         "denominator_is_floor": floor_driven,
         "human_attention_hours": rounded(human_attention_hours),
         "human_attention_fallbacks": human_attention_fallbacks,
@@ -992,11 +1004,20 @@ def _productivity_block(productivity_data):
     Partial-window ratios remain available to consumers; the theme decides
     whether to display them using multiplier_complete.
     """
+    # Two different hours: `active` is the ratio's denominator (estimated days
+    # only in chunk mode) and feeds "with AI" and the estimate; `window_active`
+    # is everything the window holds and feeds the active-time panel.
     active = productivity_data.get("active_hours") or 0
+    window_active = productivity_data.get("window_active_hours")
+    if window_active is None:
+        window_active = active
     active_per_session_sum = productivity_data.get("active_hours_per_session_sum")
     if active_per_session_sum is None:
         active_per_session_sum = active
     calendar = productivity_data.get("calendar_span_hours") or 0
+    window_calendar = productivity_data.get("window_calendar_hours")
+    if window_calendar is None:
+        window_calendar = calendar
     multiplier_raw = productivity_data.get("multiplier") or 0
     saved_raw = productivity_data.get("hours_saved") or 0
 
@@ -1016,10 +1037,10 @@ def _productivity_block(productivity_data):
         saved = rounded(saved_raw, 1)
 
     return {
-        "active_hours": rounded(active, 1),
+        "active_hours": rounded(window_active, 1),
         "estimate_active_hours": rounded(active, 1),
         "active_hours_per_session_sum": rounded(active_per_session_sum, 1),
-        "calendar_hours": rounded(calendar, 1),
+        "calendar_hours": rounded(window_calendar, 1),
         "multiplier": multiplier,
         "multiplier_complete": bool(productivity_data.get("window_complete")) and multiplier >= 1,
         "hours_saved": saved,
@@ -1062,12 +1083,21 @@ def _today_productivity_block(day_productivity):
     block = _productivity_block(day_productivity)
     block["days"] = 1
     block["calendar_hours"] = 24.0
-    attention = block.get("active_hours") or 0
+    attention = block.get("estimate_active_hours") or 0
     if block["multiplier"] > 50 or attention < 0.5:
         block["multiplier"] = 0.0
         block["multiplier_complete"] = False
         block["hours_saved"] = 0.0
         block["estimated_hours"] = block["estimate_active_hours"]
+    if block["units_open"] > 0 and block["units_eligible"] == 0:
+        # Chunk mode, open day: nothing is estimated before the day closes. Show
+        # the day's hours with AI and leave the estimate pending (the theme draws
+        # None as a dash) instead of zeros that read as "nothing happened"
+        # (2026-09-16).
+        block["estimate_active_hours"] = block["active_hours"]
+        block["estimated_hours"] = None
+        block["hours_saved"] = None
+        block["sessions_total"] = block["units_open"]
     return block
 
 

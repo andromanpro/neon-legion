@@ -160,15 +160,47 @@ class DailyAccountingTests(unittest.TestCase):
                     "units_eligible": 1, "units_estimated": 1, "units_unknown": 0, "units_open": 0})
                 self.assertEqual(block["multiplier_complete"], expected)
 
-    def test_today_is_empty_with_open_count_with_or_without_estimate(self):
+    def test_window_attention_covers_every_day_including_the_open_one(self):
+        # 2026-09-16: the active-time panel read 0.0 h on a working day and 8.3 h
+        # for a week, because attention was measured over estimated days only.
+        events = self.early + self.late + day_events("long", "2026-05-03")
+        result = summary.summarize_productivity(events)
+        covered = summary.summarize_productivity(self.early)["human_attention_hours_with_ai"]
+
+        self.assertGreater(covered, 0.0)
+        self.assertAlmostEqual(result["human_attention_hours_with_ai"], covered)
+        self.assertAlmostEqual(result.get("window_human_attention_hours") or 0.0, 3 * covered)
+        self.assertAlmostEqual(result.get("window_calendar_hours") or 0.0, 3 * result["calendar_hours_with_ai"])
+
+    def test_period_block_shows_window_hours_but_keeps_the_ratio_on_estimated_days(self):
+        hours_per_unit = lambda units, *args, **kwargs: (float(len(units)), 0)  # noqa: E731
+        with patch.object(summary, "_human_attention_hours_for_units", side_effect=hours_per_unit):
+            payload = server.productivity_payload(self.early + self.late, 2)
+        block = server._productivity_block(payload)
+
+        self.assertEqual(block["estimate_active_hours"], 1.0)
+        self.assertEqual(block["active_hours"], 2.0)
+        self.assertEqual(block["estimated_hours"], 3.0)
+        self.assertEqual(block["multiplier"], 3.0)
+        self.assertEqual(block["hours_saved"], 2.0)
+
+    def test_open_day_shows_its_hours_and_leaves_the_estimate_pending(self):
+        # The open day cannot be estimated yet; zeros read as "nothing happened".
         today = day_events("long", "2026-05-03")
+        hours_per_unit = lambda units, *args, **kwargs: (1.5 * len(units), 0)  # noqa: E731
         for tasks in ({}, {"long:2026-05-03": {"ai_baseline_hours": 4.0}}):
             with self.subTest(estimated=bool(tasks)):
                 self.tasks = tasks
-                payload = server.productivity_payload(today, 2)
+                with patch.object(summary, "_human_attention_hours_for_units", side_effect=hours_per_unit):
+                    payload = server.productivity_payload(today, 2)
                 block = server._today_productivity_block(payload)
-                self.assertEqual(block["estimated_hours"], 0.0)
+                self.assertEqual(block["active_hours"], 1.5)
+                self.assertEqual(block["estimate_active_hours"], 1.5)
+                self.assertIsNone(block["estimated_hours"])
+                self.assertIsNone(block["hours_saved"])
                 self.assertEqual(block["multiplier"], 0.0)
+                self.assertEqual(block["sessions_covered"], 0)
+                self.assertEqual(block["sessions_total"], 1)
                 self.assertEqual(block["units_open"], 1)
                 self.assertEqual(block["units_eligible"], 0)
                 self.assertEqual(block["units_estimated"], 0)
