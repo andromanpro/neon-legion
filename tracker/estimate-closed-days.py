@@ -124,6 +124,10 @@ def closed_units(events: list[dict], today: str) -> dict[tuple[str, str], str]:
         ts = summary.parse_event_ts(event.get("ts"))
         if ts is None:
             continue
+        # Assumes ledger times carry a zone. summary reads an offset-less ts as
+        # local time, the estimator reads transcript times without one as UTC, so
+        # such a unit could fall on a day the estimator finds empty (1c third
+        # audit). Measured 2026-09-16: 0 of 532,000 ledger times lacked a zone.
         day = summary.chunk_date(ts)
         if day >= today:
             continue

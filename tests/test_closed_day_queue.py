@@ -8,6 +8,7 @@ estimate, and the day loop inside estimate_session runs only from there.
 from datetime import datetime
 import importlib.util
 import json
+import os
 from pathlib import Path
 import sys
 import threading
@@ -350,29 +351,87 @@ def test_attempt_journal_keeps_what_a_concurrent_run_recorded(queue, tmp_path):
     assert journal["s:2026-05-02"]["failures"] == 1
 
 
-def test_attempt_update_waits_for_a_held_journal_lock(queue, tmp_path):
+def hold_journal_lock_until_updater_waits(queue, monkeypatch, attempts, lock, handle=None):
+    """Thread that keeps the journal lock until record_attempt is seen waiting on it,
+    then writes another run's record and releases. The wait is observed through the
+    queue's sleep, so the two updates really overlap instead of racing a timer."""
+    updater_waiting = threading.Event()
+    saw_wait = []
+    real_sleep = time.sleep
+
+    def sleep_while_waiting(seconds):
+        updater_waiting.set()
+        real_sleep(seconds)
+
+    def holder():
+        saw_wait.append(updater_waiting.wait(timeout=10))
+        attempts.write_text(json.dumps({"other:2026-05-01": {"failures": 2}}), encoding="utf-8")
+        if handle is not None:
+            os.close(handle)
+        lock.unlink()
+
+    monkeypatch.setattr(queue.time, "sleep", sleep_while_waiting)
+    thread = threading.Thread(target=holder)
+    thread.start()
+    return thread, saw_wait
+
+
+def test_attempt_update_waits_for_a_held_journal_lock(queue, tmp_path, monkeypatch):
     # Re-audit 1c: the concurrent-run test above proves re-reading, not mutual
     # exclusion. Here another run holds the lock and writes before releasing it.
     attempts = tmp_path / "attempts.json"
     lock = tmp_path / "attempts.json.lock"
     lock.write_text("held by another run", encoding="utf-8")
 
-    def other_run_writes_then_releases():
-        time.sleep(0.3)
-        attempts.write_text(json.dumps({"other:2026-05-01": {"failures": 2}}), encoding="utf-8")
-        lock.unlink()
-
-    other = threading.Thread(target=other_run_writes_then_releases)
-    other.start()
+    other, saw_wait = hold_journal_lock_until_updater_waits(queue, monkeypatch, attempts, lock)
     try:
         assert queue.record_attempt(attempts, "s:2026-05-02", "estimation failed") is True
     finally:
         other.join()
 
+    assert saw_wait == [True]
     journal = queue.read_attempts(attempts)
     assert journal["other:2026-05-01"] == {"failures": 2}
     assert journal["s:2026-05-02"]["failures"] == 1
     assert not lock.exists()
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="relies on Windows refusing to delete a file another handle holds open")
+def test_live_holder_keeps_a_lock_that_looks_stale(queue, tmp_path, monkeypatch):
+    # Third audit 1c: nothing pinned that a lock whose holder is alive survives the
+    # stale check. Its mtime is past the threshold, but the holder keeps a handle.
+    attempts = tmp_path / "attempts.json"
+    lock = tmp_path / "attempts.json.lock"
+    lock.write_text("held by a long run", encoding="utf-8")
+    old = time.time() - queue.ATTEMPTS_LOCK_STALE_SECONDS - 30
+    os.utime(lock, (old, old))
+    handle = os.open(str(lock), os.O_WRONLY)
+
+    other, saw_wait = hold_journal_lock_until_updater_waits(queue, monkeypatch, attempts, lock, handle)
+    try:
+        assert queue.record_attempt(attempts, "s:2026-05-02", "estimation failed") is True
+    finally:
+        other.join()
+
+    assert saw_wait == [True]
+    journal = queue.read_attempts(attempts)
+    assert journal["other:2026-05-01"] == {"failures": 2}
+    assert journal["s:2026-05-02"]["failures"] == 1
+
+
+def test_journal_lock_wait_outlasts_the_stale_threshold(queue, tmp_path, monkeypatch):
+    # Third audit 1c: the stop test below stubs _acquire_lock and ignores its
+    # timeout, so a return to the old 10-second wait went unnoticed.
+    waits = []
+
+    def no_lock(lock_path, timeout_seconds=10.0):
+        waits.append(timeout_seconds)
+        return None
+
+    monkeypatch.setattr(queue, "_acquire_lock", no_lock)
+
+    assert queue.record_attempt(tmp_path / "attempts.json", "s:2026-05-02", "estimation failed") is False
+    assert len(waits) == 1 and waits[0] > queue.ATTEMPTS_LOCK_STALE_SECONDS
 
 
 def test_run_stops_when_an_attempt_cannot_be_recorded(queue, tmp_path, monkeypatch):
@@ -395,8 +454,6 @@ def test_run_stops_when_an_attempt_cannot_be_recorded(queue, tmp_path, monkeypat
     assert estimated == ["2026-05-03"]
     assert counts == {"ok": 0, "partial": 0, "failed": 1}
     assert any("журнал попыток" in line for line in lines)
-    # A lock left by a dead run is evicted before the wait gives up.
-    assert queue.ATTEMPTS_LOCK_WAIT_MARGIN_SECONDS > 0
 
 
 def test_failed_day_is_retried_until_the_attempt_limit(queue, tmp_path):

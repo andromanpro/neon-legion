@@ -5,6 +5,7 @@ session, then one per day, and only for sessions the SessionStart hook still
 considered unestimated. `--day` estimates a single day with the same input code
 and no whole-session call, so the closed-day queue can drive it one day at a time.
 """
+from datetime import datetime
 import importlib.util
 import json
 from pathlib import Path
@@ -337,7 +338,8 @@ def test_rechunk_entry_without_a_read_time_does_not_invent_one(estimator, rechun
 def test_rechunk_splits_days_exactly_like_the_day_loop(estimator, rechunk, tmp_path):
     # Re-audit 1c, P1: rechunk split days with summary.parse_event_ts, which keeps
     # an offset-less timestamp on its own date, while the day loop reads it as UTC.
-    # On a machine running at UTC both readings agree and this cannot fail.
+    if not datetime(2026, 5, 16, 23, 30).astimezone().utcoffset():
+        pytest.skip("the machine runs at UTC: both readings of an offset-less time agree")
     events = [
         claude("user", "Z-stamped prompt", "2026-05-16T10:00:00Z"),
         claude("user", "offset-less late prompt", "2026-05-16T23:30:00"),
