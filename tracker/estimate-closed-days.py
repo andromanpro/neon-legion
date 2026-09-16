@@ -294,6 +294,25 @@ def runnable(candidates: list[Candidate], categories=None, retry_failed: bool = 
     ]
 
 
+def select_for_run(queue: list[Candidate], today: str, limit, complete_last_day: bool = False) -> list[Candidate]:
+    """The part of the runnable queue this run estimates, in queue order.
+
+    With complete_last_day every runnable pair of the last closed day (the day
+    before today) goes first whatever the limit, and the limit applies to the
+    rest. Owner, 2026-09-16: the dashboard shows single days, and with the
+    newest day first and three pairs a deploy no day would ever be complete.
+    """
+    if limit is None:
+        return list(queue)
+    limit = max(limit, 0)
+    if not complete_last_day:
+        return queue[:limit]
+    last_day = (date.fromisoformat(today) - timedelta(days=1)).isoformat()
+    whole_day = [c for c in queue if c.day == last_day]
+    rest = [c for c in queue if c.day != last_day]
+    return whole_day + rest[:limit]
+
+
 def read_attempts(path: Path) -> dict:
     try:
         data = json.loads(Path(path).read_text(encoding="utf-8"))
@@ -535,6 +554,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--list", action="store_true", help="Show the queue; estimate and write nothing.")
     parser.add_argument("--limit", type=int, help="Estimate at most N days in this run.")
+    parser.add_argument("--complete-last-day", action="store_true",
+                        help="Estimate every pair of the last closed day first; --limit applies to the rest.")
     parser.add_argument("--timeout", type=int, default=600, help="Per-day timeout, seconds.")
     parser.add_argument("--category", action="append", choices=CATEGORIES,
                         help="Only this category (repeatable).")
@@ -553,8 +574,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.list:
         print_details(candidates, queue, today, args.show)
         return 0
-    if args.limit is not None:
-        queue = queue[: max(args.limit, 0)]
+    queue = select_for_run(queue, today, args.limit, complete_last_day=args.complete_last_day)
     if not queue:
         print("[closed-days] нечего оценивать")
         return 0

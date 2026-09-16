@@ -4,6 +4,7 @@ import json
 import math
 import os
 import sys
+from contextlib import contextmanager
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
@@ -921,6 +922,34 @@ def read_human_message_timestamps(transcript_path) -> list[datetime]:
     return timestamps
 
 
+# Prompt timestamps per transcript, shared inside one snapshot build: every
+# period window and every day block reads the same transcripts, some of them
+# hundreds of megabytes. None outside human_timestamp_memo(), so tests and the
+# long-running API always read from disk.
+_HUMAN_TIMESTAMP_MEMO: dict | None = None
+
+
+@contextmanager
+def human_timestamp_memo():
+    global _HUMAN_TIMESTAMP_MEMO
+    previous = _HUMAN_TIMESTAMP_MEMO
+    _HUMAN_TIMESTAMP_MEMO = {}
+    try:
+        yield
+    finally:
+        _HUMAN_TIMESTAMP_MEMO = previous
+
+
+def human_message_timestamps(transcript_path) -> list[datetime]:
+    """read_human_message_timestamps, reused within human_timestamp_memo()."""
+    if _HUMAN_TIMESTAMP_MEMO is None:
+        return read_human_message_timestamps(transcript_path)
+    key = str(transcript_path)
+    if key not in _HUMAN_TIMESTAMP_MEMO:
+        _HUMAN_TIMESTAMP_MEMO[key] = read_human_message_timestamps(transcript_path)
+    return _HUMAN_TIMESTAMP_MEMO[key]
+
+
 def resolve_transcript_path(value: object):
     """Return an existing Path for a stored transcript_path, else None."""
     if not isinstance(value, str) or not value:
@@ -1009,7 +1038,7 @@ def _human_attention_hours_for_units(
         if sid not in transcript_cache:
             entry = tasks.get(sid)
             tpath = resolve_transcript_path(entry.get("transcript_path")) if isinstance(entry, dict) else None
-            stamps = read_human_message_timestamps(tpath) if tpath is not None else []
+            stamps = human_message_timestamps(tpath) if tpath is not None else []
             if not stamps:
                 stamps = frozen.get(sid, [])
             transcript_cache[sid] = stamps

@@ -1101,6 +1101,42 @@ def _today_productivity_block(day_productivity):
     return block
 
 
+# Days with their own productivity block in the snapshot (the dashboard's day
+# view: click a timeline bar).
+PRODUCTIVITY_DAYS = 30
+
+
+def _productivity_days(events_window, end_date, gap_minutes=2, days=PRODUCTIVITY_DAYS):
+    """{local date: productivity block} for the last `days` days of the window.
+
+    Owner, 2026-09-16: the dashboard must show how a given day went. Each block
+    comes from the same pipeline as the periods, so a day's multiplier appears
+    once every session of that day is estimated, and the open day shows its
+    hours with the estimate pending. Chunk mode only: a session estimate cannot
+    be split by day, so session mode has no day blocks.
+    """
+    if summary.productivity_unit() != "chunk":
+        return {}
+    first_day = (end_date - timedelta(days=days - 1)).isoformat()
+    by_day: dict[str, list] = {}
+    for event in events_window:
+        ts = summary.parse_event_ts(event.get("ts"))
+        if ts is None:
+            continue
+        day = summary.chunk_date(ts)
+        if first_day <= day <= end_date.isoformat():
+            by_day.setdefault(day, []).append(event)
+
+    today = summary.current_local_date()
+    blocks = {}
+    for day in sorted(by_day):
+        payload = productivity_payload(by_day[day], gap_minutes)
+        block = _today_productivity_block(payload) if day == today else _productivity_block(payload)
+        block["days"] = 1
+        blocks[day] = block
+    return blocks
+
+
 def _productivity_periods(total_days, base_productivity):
     """Precompute period-specific productivity.
 
@@ -1459,7 +1495,16 @@ def build_wp_snapshot(
     salt=None,
     customer_pattern=None,
 ):
-    """Build a composite payload matching page-multi-agent.php data shape."""
+    """Build a composite payload matching page-multi-agent.php data shape.
+
+    Every period and day block reads the same transcripts; one snapshot build
+    reads each of them once.
+    """
+    with summary.human_timestamp_memo():
+        return _build_wp_snapshot(days, sessions_limit, public_mode, salt, customer_pattern)
+
+
+def _build_wp_snapshot(days, sessions_limit, public_mode, salt, customer_pattern):
     query = {"days": [str(days)]}
 
     summary_data = build_summary(query)
@@ -1538,6 +1583,7 @@ def build_wp_snapshot(
         "providers": providers,
         "productivity": _productivity_block(productivity_data),
         "productivity_periods": _productivity_periods(period["days"], productivity_data),
+        "productivity_days": _productivity_days(events_window, end_date),
         "budget": {
             "tokens_used": int(budget_data["window_5h"].get("tokens_used") or 0),
             "limit_5h": ESTIMATED_LIMIT_MAX5X,

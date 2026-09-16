@@ -490,6 +490,40 @@ def test_failed_day_is_retried_until_the_attempt_limit(queue, tmp_path):
     assert queue.read_attempts(attempts) == {}
 
 
+def test_complete_last_day_takes_all_of_yesterday_then_the_limit(queue, tmp_path):
+    # 2026-09-16, owner: a day view needs whole days estimated; with newest-first
+    # and three pairs per deploy, no day would ever be complete.
+    today = "2026-09-17"
+    transcript = write(tmp_path / "t.jsonl", [])
+    events = (ledger("a", "2026-09-16") + ledger("b", "2026-09-16") + ledger("c", "2026-09-16")
+              + ledger("d", "2026-09-16") + ledger("e", "2026-09-15") + ledger("f", "2026-09-14")
+              + ledger("g", "2026-09-13") + ledger("h", "2026-09-12") + ledger("a", today))
+    candidates = queue.runnable(queue.build_queue(events, {}, today, lambda *_: transcript))
+    pairs = lambda selected: [(c.session_id, c.day) for c in selected]  # noqa: E731
+
+    assert pairs(queue.select_for_run(candidates, today, 3)) == [
+        ("a", "2026-09-16"), ("b", "2026-09-16"), ("c", "2026-09-16")]
+    assert pairs(queue.select_for_run(candidates, today, 3, complete_last_day=True)) == [
+        ("a", "2026-09-16"), ("b", "2026-09-16"), ("c", "2026-09-16"), ("d", "2026-09-16"),
+        ("e", "2026-09-15"), ("f", "2026-09-14"), ("g", "2026-09-13")]
+    assert queue.select_for_run(candidates, today, None) == candidates
+
+
+def test_main_passes_the_whole_last_day_to_the_run(queue, monkeypatch, tmp_path):
+    today = "2026-09-17"
+    transcript = write(tmp_path / "t.jsonl", [])
+    events = ledger("a", "2026-09-16") + ledger("b", "2026-09-16") + ledger("c", "2026-09-10")
+    taken = []
+    monkeypatch.setattr(queue, "ATTEMPTS_FILE", tmp_path / "attempts.json")
+    monkeypatch.setattr(queue, "collect", lambda args: (events, {}, today, lambda *_: transcript))
+    monkeypatch.setattr(queue, "run_queue", lambda selected, *args, **kwargs: taken.extend(selected)
+                        or {"ok": 0, "partial": 0, "failed": 0})
+
+    assert queue.main(["--complete-last-day", "--limit", "0"]) == 0
+
+    assert [(c.session_id, c.day) for c in taken] == [("a", "2026-09-16"), ("b", "2026-09-16")]
+
+
 def test_list_mode_reports_categories_and_runs_nothing(queue, monkeypatch, tmp_path, capsys):
     events = ledger("s", "2026-05-02") + ledger("s", "2026-05-03", count=1)
     tasks = {"s:2026-05-03": {"ai_baseline_hours": 1.5, "estimated_at": "2026-05-03T12:00:00+00:00"}}

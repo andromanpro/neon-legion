@@ -4,7 +4,7 @@ import json
 import sys
 import tempfile
 import unittest
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
@@ -183,6 +183,59 @@ class DailyAccountingTests(unittest.TestCase):
         self.assertEqual(block["estimated_hours"], 3.0)
         self.assertEqual(block["multiplier"], 3.0)
         self.assertEqual(block["hours_saved"], 2.0)
+
+    def test_day_blocks_give_each_day_its_own_numbers(self):
+        # 2026-09-16, owner: the dashboard must show how a given day went.
+        self.tasks["long:2026-05-02"] = {"ai_baseline_hours": None}
+        events = (self.early + self.late + day_events("long", "2026-05-03")
+                  + day_events("long", "2026-04-02"))
+        hours_per_unit = lambda units, *args, **kwargs: (float(len(units)), 0)  # noqa: E731
+        with patch.object(summary, "_human_attention_hours_for_units", side_effect=hours_per_unit):
+            days = server._productivity_days(events, date(2026, 5, 3), 2, days=30)
+
+        self.assertEqual(sorted(days), ["2026-05-01", "2026-05-02", "2026-05-03"])
+        estimated = days["2026-05-01"]
+        self.assertTrue(estimated["multiplier_complete"])
+        self.assertEqual(estimated["multiplier"], 3.0)
+        self.assertEqual((estimated["units_estimated"], estimated["units_eligible"]), (1, 1))
+        self.assertEqual(estimated["days"], 1)
+        pending = days["2026-05-02"]
+        self.assertFalse(pending["multiplier_complete"])
+        self.assertEqual((pending["units_estimated"], pending["units_eligible"]), (0, 1))
+        self.assertEqual(pending["active_hours"], 1.0)
+        open_day = days["2026-05-03"]
+        self.assertEqual(open_day["units_open"], 1)
+        self.assertEqual(open_day["active_hours"], 1.0)
+        self.assertIsNone(open_day["estimated_hours"])
+
+    def test_day_blocks_exist_only_in_chunk_mode(self):
+        with patch.object(summary, "PRODUCTIVITY_UNIT", "session"):
+            self.assertEqual(server._productivity_days(self.early, date(2026, 5, 3), 2), {})
+
+    def test_prompt_timestamps_are_read_once_per_snapshot_build(self):
+        # Day blocks multiply transcript reads; within one build each transcript
+        # is read once, outside a build always from disk.
+        with tempfile.TemporaryDirectory() as directory:
+            transcript = Path(directory) / "t.jsonl"
+            transcript.write_text("", encoding="utf-8")
+            tasks = {"s": {"transcript_path": str(transcript)}}
+            units = [("s", "2026-05-01"), ("s", "2026-05-02")]
+            reads = []
+
+            def reader(path):
+                reads.append(str(path))
+                return []
+
+            with patch.object(summary, "read_human_message_timestamps", side_effect=reader):
+                summary._human_attention_hours_for_units(units, tasks, {})
+                summary._human_attention_hours_for_units(units, tasks, {})
+                self.assertEqual(len(reads), 2)
+                with summary.human_timestamp_memo():
+                    summary._human_attention_hours_for_units(units, tasks, {})
+                    summary._human_attention_hours_for_units(units, tasks, {})
+                self.assertEqual(len(reads), 3)
+                summary._human_attention_hours_for_units(units, tasks, {})
+                self.assertEqual(len(reads), 4)
 
     def test_open_day_shows_its_hours_and_leaves_the_estimate_pending(self):
         # The open day cannot be estimated yet; zeros read as "nothing happened".
