@@ -442,6 +442,10 @@ def productivity_payload(events, gap_minutes):
         "units_unknown": summary.as_int(coverage.get("units_unknown")),
         "units_open": summary.as_int(coverage.get("units_open")),
         "window_complete": bool(coverage.get("window_complete")),
+        "open_units_estimated": summary.as_int(coverage.get("open_units_estimated")),
+        "open_hours_without_ai": rounded(summary.as_float(coverage.get("open_hours_without_ai"))),
+        "open_human_attention_hours": rounded(summary.as_float(coverage.get("open_human_attention_hours"))),
+        "open_distinct_sessions": summary.as_int(coverage.get("open_distinct_sessions")),
         "unit": unit,
     }
 
@@ -1090,14 +1094,36 @@ def _today_productivity_block(day_productivity):
         block["hours_saved"] = 0.0
         block["estimated_hours"] = block["estimate_active_hours"]
     if block["units_open"] > 0 and block["units_eligible"] == 0:
-        # Chunk mode, open day: nothing is estimated before the day closes. Show
-        # the day's hours with AI and leave the estimate pending (the theme draws
-        # None as a dash) instead of zeros that read as "nothing happened"
-        # (2026-09-16).
-        block["estimate_active_hours"] = block["active_hours"]
-        block["estimated_hours"] = None
-        block["hours_saved"] = None
+        # Chunk mode, open day (2026-09-16). The closed-day accounting has nothing
+        # for it, so show the day's hours with AI, and an approximate multiplier
+        # from the provisional estimates of today's sessions when there are any
+        # (owner: "at least an approximate multiplier for today"). Without them
+        # the estimate stays pending: the theme draws None as a dash.
+        open_estimated = int(day_productivity.get("open_units_estimated") or 0)
+        block["open_units_estimated"] = open_estimated
+        block["sessions_covered"] = open_estimated
         block["sessions_total"] = block["units_open"]
+        block["multiplier"] = 0.0
+        block["multiplier_complete"] = False
+        if open_estimated:
+            without_ai = float(day_productivity.get("open_hours_without_ai") or 0)
+            attention = float(day_productivity.get("open_human_attention_hours") or 0)
+            floor = int(day_productivity.get("open_distinct_sessions") or 0) * (
+                summary.HUMAN_ATTENTION_FLOOR_MIN_PER_SESSION / 60.0
+            )
+            denominator = max(attention, floor)
+            ratio = without_ai / denominator if denominator > 0 else 0.0
+            # Same guards as the closed windows and the old intraday widget: no
+            # ratio off a floor, under half an hour of attention, below 1 or above 50.
+            plausible = attention >= floor and attention >= 0.5 and 1 <= ratio <= 50
+            block["estimate_active_hours"] = rounded(denominator, 1)
+            block["estimated_hours"] = rounded(without_ai, 1)
+            block["hours_saved"] = rounded(without_ai - denominator, 1) if plausible else None
+            block["multiplier"] = rounded(ratio, 3) if plausible else 0.0
+        else:
+            block["estimate_active_hours"] = block["active_hours"]
+            block["estimated_hours"] = None
+            block["hours_saved"] = None
     return block
 
 

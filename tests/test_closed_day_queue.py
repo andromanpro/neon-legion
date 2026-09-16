@@ -509,6 +509,41 @@ def test_complete_last_day_takes_all_of_yesterday_then_the_limit(queue, tmp_path
     assert queue.select_for_run(candidates, today, None) == candidates
 
 
+def test_open_day_pairs_get_a_provisional_estimate_once_and_again_when_stale(queue, tmp_path):
+    # Owner, 2026-09-16: show at least an approximate multiplier for today.
+    today = "2026-09-17"
+    now = datetime.fromisoformat("2026-09-17T18:00:00+03:00")
+    transcript = write(tmp_path / "t.jsonl", [])
+    events = (ledger("fresh", today) + ledger("stale", today) + ledger("none", today)
+              + ledger("closed", "2026-09-16"))
+    tasks = {f"fresh:{today}": {"ai_baseline_hours": 2.0, "day_input_version": 2,
+                                "day_input_read_at": "2026-09-17T16:30:00+03:00"},
+             f"stale:{today}": {"ai_baseline_hours": 1.0, "day_input_version": 2,
+                                "day_input_read_at": "2026-09-17T10:00:00+03:00"}}
+
+    candidates = queue.build_open_day_queue(events, tasks, today, lambda *_: transcript, now)
+
+    assert [(c.session_id, c.category, c.hours) for c in candidates] == [
+        ("none", "open_day", None), ("stale", "open_day", 1.0)]
+    closed = queue.runnable(queue.build_queue(events, tasks, today, lambda *_: transcript))
+    assert [c.session_id for c in closed] == ["closed"]
+    selected = queue.select_for_run(closed, today, 0, complete_last_day=True, open_day=candidates)
+    assert [(c.session_id, c.day) for c in selected] == [
+        ("closed", "2026-09-16"), ("none", today), ("stale", today)]
+
+
+def test_collect_reads_the_ledger_through_today(queue, monkeypatch):
+    # The open day's pairs exist only in today's events; closed_units skips them.
+    windows = []
+    monkeypatch.setattr(summary, "current_local_date", lambda: "2026-09-17")
+    monkeypatch.setattr(summary, "read_tasks", lambda: {})
+    monkeypatch.setattr(summary, "read_events", lambda start, end: windows.append((start, end)) or [])
+
+    queue.collect(type("Args", (), {"since": None})())
+
+    assert [end.isoformat() for _start, end in windows] == ["2026-09-17"]
+
+
 def test_main_passes_the_whole_last_day_to_the_run(queue, monkeypatch, tmp_path):
     today = "2026-09-17"
     transcript = write(tmp_path / "t.jsonl", [])
@@ -522,6 +557,13 @@ def test_main_passes_the_whole_last_day_to_the_run(queue, monkeypatch, tmp_path)
     assert queue.main(["--complete-last-day", "--limit", "0"]) == 0
 
     assert [(c.session_id, c.day) for c in taken] == [("a", "2026-09-16"), ("b", "2026-09-16")]
+
+    taken.clear()
+    events.extend(ledger("t", today))
+    assert queue.main(["--complete-last-day", "--include-open-day", "--limit", "0"]) == 0
+
+    assert [(c.session_id, c.day, c.category) for c in taken] == [
+        ("a", "2026-09-16", "missing"), ("b", "2026-09-16", "missing"), ("t", today, "open_day")]
 
 
 def test_list_mode_reports_categories_and_runs_nothing(queue, monkeypatch, tmp_path, capsys):

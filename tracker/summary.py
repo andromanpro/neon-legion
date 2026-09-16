@@ -1288,6 +1288,28 @@ def summarize_productivity(events: list[dict], gap_minutes: int = 2) -> dict | N
     window_human_hours, _window_fallbacks = _human_attention_hours_for_units(
         list(chunk_timestamps), tasks, session_timestamps
     )
+    # Provisional figures for the open day (owner, 2026-09-16: show at least an
+    # approximate multiplier for today). An estimate of an open day saw only part
+    # of it, so these never enter the closed-day accounting above.
+    open_hours_without_ai = 0.0
+    open_estimated_keys: list[tuple[str, str]] = []
+    for key, timestamps in chunk_timestamps.items():
+        if key[1] != today:
+            continue
+        entry = tasks.get(f"{key[0]}:{key[1]}")
+        hours = effective_task_hours(entry) if isinstance(entry, dict) else None
+        if hours is None:
+            continue
+        effective_hours, _kind = effective_session_hours(
+            hours,
+            _active_time_hours_for_timestamps(timestamps, gap_minutes),
+            len(timestamps),
+        )
+        open_hours_without_ai += effective_hours
+        open_estimated_keys.append(key)
+    open_human_hours, _open_fallbacks = _human_attention_hours_for_units(
+        open_estimated_keys, tasks, session_timestamps
+    )
 
     return {
         "active_hours_with_ai": active_time_hours_merged(covered_events, gap_minutes),
@@ -1297,6 +1319,10 @@ def summarize_productivity(events: list[dict], gap_minutes: int = 2) -> dict | N
         "calendar_hours_with_ai": merged_interval_hours(covered_ranges),
         "window_human_attention_hours": window_human_hours,
         "window_calendar_hours": merged_interval_hours(list(chunk_ranges.values())),
+        "open_units_estimated": len(open_estimated_keys),
+        "open_hours_without_ai": open_hours_without_ai,
+        "open_human_attention_hours": open_human_hours,
+        "open_distinct_sessions": len({key[0] for key in open_estimated_keys}),
         "gap_minutes": gap_minutes,
         "hours_without_ai": hours_without_ai,
         "baseline_floor_clamped": baseline_floor_clamped,

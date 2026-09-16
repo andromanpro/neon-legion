@@ -86,6 +86,11 @@ OLD_INPUT_FIRST_USER_MESSAGES = 3
 # day the oracle can never handle does not block the queue behind it.
 MAX_DAY_ATTEMPTS = 3
 
+# A provisional estimate of the open day older than this is refreshed at the next
+# run: the day keeps growing (owner, 2026-09-16: show at least an approximate
+# multiplier for today).
+OPEN_DAY_REFRESH_HOURS = 3
+
 # Within one day: wrong values already inside the numerator first, then absent
 # ones. Across days the newest goes first (owner's call, 2026-09-15): the 7- and
 # 30-day windows the dashboard shows become complete and honest before old
@@ -144,6 +149,21 @@ def parse_time(value: object) -> datetime | None:
     except ValueError:
         return None
     return parsed if parsed.tzinfo is not None else parsed.astimezone()
+
+
+def open_units(events: list[dict], today: str) -> dict[tuple[str, str], str]:
+    """(session_id, today) -> "claude"/"codex" for the open day's pairs."""
+    units: dict[tuple[str, str], str] = {}
+    for event in summary.events_for_task_metrics(events):
+        session_id = event.get("session_id")
+        if not isinstance(session_id, str) or not session_id:
+            continue
+        ts = summary.parse_event_ts(event.get("ts"))
+        if ts is None or summary.chunk_date(ts) != today:
+            continue
+        provider = "codex" if summary.event_provider(event) == "openai" else "claude"
+        units.setdefault((session_id, today), provider)
+    return units
 
 
 def estimated_at(entry: dict) -> datetime | None:
@@ -285,6 +305,39 @@ def build_queue(events, tasks, today, find_transcript, attempts=None) -> list[Ca
     return candidates
 
 
+def build_open_day_queue(events, tasks, today, find_transcript, now, attempts=None) -> list[Candidate]:
+    """Today's pairs due for a provisional estimate: none yet, or one whose input
+    was read more than OPEN_DAY_REFRESH_HOURS before `now`.
+
+    A provisional estimate never enters the closed-day accounting; after midnight
+    the day is estimated again as partial_day.
+    """
+    attempts = attempts or {}
+    stale_before = now - timedelta(hours=OPEN_DAY_REFRESH_HOURS)
+    candidates = []
+    for (session_id, day), provider in open_units(events, today).items():
+        key = f"{session_id}:{day}"
+        entry = tasks.get(key)
+        hours = summary.effective_task_hours(entry) if isinstance(entry, dict) else None
+        if hours is not None:
+            taken = input_taken_at(entry)
+            if taken is None or taken >= stale_before:
+                continue
+        attempt = attempts.get(key)
+        failures = attempt.get("failures") if isinstance(attempt, dict) else 0
+        candidates.append(Candidate(
+            session_id=session_id,
+            day=day,
+            provider=provider,
+            category="open_day",
+            transcript=find_transcript(session_id, provider),
+            hours=hours,
+            failures=int(failures or 0),
+        ))
+    candidates.sort(key=lambda c: c.session_id)
+    return candidates
+
+
 def runnable(candidates: list[Candidate], categories=None, retry_failed: bool = False) -> list[Candidate]:
     return [
         c for c in candidates
@@ -294,23 +347,23 @@ def runnable(candidates: list[Candidate], categories=None, retry_failed: bool = 
     ]
 
 
-def select_for_run(queue: list[Candidate], today: str, limit, complete_last_day: bool = False) -> list[Candidate]:
-    """The part of the runnable queue this run estimates, in queue order.
+def select_for_run(
+    queue: list[Candidate], today: str, limit, complete_last_day: bool = False, open_day=()
+) -> list[Candidate]:
+    """What this run estimates: the last closed day in full (with
+    complete_last_day), then today's provisional pairs, then `limit` more of the
+    closed-day queue in queue order.
 
-    With complete_last_day every runnable pair of the last closed day (the day
-    before today) goes first whatever the limit, and the limit applies to the
-    rest. Owner, 2026-09-16: the dashboard shows single days, and with the
-    newest day first and three pairs a deploy no day would ever be complete.
+    Owner, 2026-09-16: the dashboard shows single days, and with the newest day
+    first and three pairs a deploy no day would ever be complete; today should
+    show at least an approximate multiplier.
     """
-    if limit is None:
-        return list(queue)
-    limit = max(limit, 0)
-    if not complete_last_day:
-        return queue[:limit]
     last_day = (date.fromisoformat(today) - timedelta(days=1)).isoformat()
-    whole_day = [c for c in queue if c.day == last_day]
-    rest = [c for c in queue if c.day != last_day]
-    return whole_day + rest[:limit]
+    whole_day = [c for c in queue if complete_last_day and c.day == last_day]
+    rest = [c for c in queue if not (complete_last_day and c.day == last_day)]
+    if limit is not None:
+        rest = rest[: max(limit, 0)]
+    return whole_day + list(open_day) + rest
 
 
 def read_attempts(path: Path) -> dict:
@@ -498,7 +551,8 @@ def collect(args: argparse.Namespace):
     """(ledger events, tasks, today, transcript finder) from the live tracker."""
     today = summary.current_local_date()
     start = date.fromisoformat(args.since) if args.since else date(2000, 1, 1)
-    end = date.fromisoformat(today) - timedelta(days=1)
+    # Up to today: the open day's pairs need today's events; closed_units skips them.
+    end = date.fromisoformat(today)
     tasks = summary.read_tasks()
     return summary.read_events(start, end), tasks, today, transcript_finder(tasks)
 
@@ -556,6 +610,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--limit", type=int, help="Estimate at most N days in this run.")
     parser.add_argument("--complete-last-day", action="store_true",
                         help="Estimate every pair of the last closed day first; --limit applies to the rest.")
+    parser.add_argument("--include-open-day", action="store_true",
+                        help="Also give today's pairs a provisional estimate (none yet, or read "
+                             f"more than {OPEN_DAY_REFRESH_HOURS} h ago).")
     parser.add_argument("--timeout", type=int, default=600, help="Per-day timeout, seconds.")
     parser.add_argument("--category", action="append", choices=CATEGORIES,
                         help="Only this category (repeatable).")
@@ -566,15 +623,26 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     events, tasks, today, find_transcript = collect(args)
-    candidates = build_queue(events, tasks, today, find_transcript, attempts=read_attempts(ATTEMPTS_FILE))
+    attempts = read_attempts(ATTEMPTS_FILE)
+    candidates = build_queue(events, tasks, today, find_transcript, attempts=attempts)
     queue = runnable(candidates, categories=set(args.category) if args.category else None,
                      retry_failed=args.retry_failed)
+    open_day = []
+    if args.include_open_day:
+        open_day = runnable(
+            build_open_day_queue(events, tasks, today, find_transcript, datetime.now().astimezone(),
+                                 attempts=attempts),
+            retry_failed=args.retry_failed,
+        )
 
     print_overview(candidates, queue)
+    if args.include_open_day:
+        print(f"[closed-days] сегодня к предварительной оценке: {len(open_day)}")
     if args.list:
         print_details(candidates, queue, today, args.show)
         return 0
-    queue = select_for_run(queue, today, args.limit, complete_last_day=args.complete_last_day)
+    queue = select_for_run(queue, today, args.limit, complete_last_day=args.complete_last_day,
+                           open_day=open_day)
     if not queue:
         print("[closed-days] нечего оценивать")
         return 0

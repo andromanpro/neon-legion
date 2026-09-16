@@ -238,28 +238,61 @@ class DailyAccountingTests(unittest.TestCase):
                 self.assertEqual(len(reads), 4)
 
     def test_open_day_shows_its_hours_and_leaves_the_estimate_pending(self):
-        # The open day cannot be estimated yet; zeros read as "nothing happened".
-        today = day_events("long", "2026-05-03")
+        # With no estimate of today's sessions, zeros would read as "nothing happened".
+        self.tasks = {}
         hours_per_unit = lambda units, *args, **kwargs: (1.5 * len(units), 0)  # noqa: E731
-        for tasks in ({}, {"long:2026-05-03": {"ai_baseline_hours": 4.0}}):
-            with self.subTest(estimated=bool(tasks)):
-                self.tasks = tasks
-                with patch.object(summary, "_human_attention_hours_for_units", side_effect=hours_per_unit):
-                    payload = server.productivity_payload(today, 2)
-                block = server._today_productivity_block(payload)
-                self.assertEqual(block["active_hours"], 1.5)
-                self.assertEqual(block["estimate_active_hours"], 1.5)
-                self.assertIsNone(block["estimated_hours"])
-                self.assertIsNone(block["hours_saved"])
-                self.assertEqual(block["multiplier"], 0.0)
-                self.assertEqual(block["sessions_covered"], 0)
-                self.assertEqual(block["sessions_total"], 1)
-                self.assertEqual(block["units_open"], 1)
-                self.assertEqual(block["units_eligible"], 0)
-                self.assertEqual(block["units_estimated"], 0)
-                self.assertEqual(block["units_unknown"], 0)
-                self.assertFalse(block["window_complete"])
-                self.assertFalse(block["multiplier_complete"])
+        with patch.object(summary, "_human_attention_hours_for_units", side_effect=hours_per_unit):
+            payload = server.productivity_payload(day_events("long", "2026-05-03"), 2)
+        block = server._today_productivity_block(payload)
+        self.assertEqual(block["active_hours"], 1.5)
+        self.assertEqual(block["estimate_active_hours"], 1.5)
+        self.assertIsNone(block["estimated_hours"])
+        self.assertIsNone(block["hours_saved"])
+        self.assertEqual(block["multiplier"], 0.0)
+        self.assertEqual(block["open_units_estimated"], 0)
+        self.assertEqual(block["sessions_covered"], 0)
+        self.assertEqual(block["sessions_total"], 1)
+        self.assertEqual(block["units_open"], 1)
+        self.assertEqual(block["units_eligible"], 0)
+        self.assertEqual(block["units_estimated"], 0)
+        self.assertEqual(block["units_unknown"], 0)
+        self.assertFalse(block["window_complete"])
+        self.assertFalse(block["multiplier_complete"])
+
+    def test_open_day_estimates_give_an_approximate_multiplier(self):
+        # Owner, 2026-09-16: show at least an approximate multiplier for today.
+        # Provisional estimates stay out of the closed-day accounting.
+        self.tasks = {"long:2026-05-03": {"ai_baseline_hours": 3.0},
+                      "long:2026-05-01": {"ai_baseline_hours": 3.0}}
+        today = day_events("long", "2026-05-03") + day_events("other", "2026-05-03")
+        hours_per_unit = lambda units, *args, **kwargs: (1.5 * len(units), 0)  # noqa: E731
+        with patch.object(summary, "_human_attention_hours_for_units", side_effect=hours_per_unit):
+            result = summary.summarize_productivity(self.early + today)
+            payload = server.productivity_payload(today, 2)
+        block = server._today_productivity_block(payload)
+
+        self.assertAlmostEqual(result["hours_without_ai"], 3.0)
+        self.assertEqual(result.get("open_units_estimated"), 1)
+        self.assertAlmostEqual(result.get("open_hours_without_ai") or 0.0, 3.0)
+        self.assertAlmostEqual(result.get("open_human_attention_hours") or 0.0, 1.5)
+        self.assertEqual(block["multiplier"], 2.0)
+        self.assertFalse(block["multiplier_complete"])
+        self.assertEqual(block["estimated_hours"], 3.0)
+        self.assertEqual(block["estimate_active_hours"], 1.5)
+        self.assertEqual(block["hours_saved"], 1.5)
+        self.assertEqual(block["active_hours"], 3.0)
+        self.assertEqual(block["open_units_estimated"], 1)
+        self.assertEqual((block["sessions_covered"], block["sessions_total"]), (1, 2))
+
+    def test_implausible_open_day_ratio_is_not_shown(self):
+        self.tasks = {"long:2026-05-03": {"ai_baseline_hours": 30.0}}
+        tiny_attention = lambda units, *args, **kwargs: (0.2 * len(units), 0)  # noqa: E731
+        with patch.object(summary, "_human_attention_hours_for_units", side_effect=tiny_attention):
+            payload = server.productivity_payload(day_events("long", "2026-05-03"), 2)
+        block = server._today_productivity_block(payload)
+        self.assertEqual(block["multiplier"], 0.0)
+        self.assertIsNone(block["hours_saved"])
+        self.assertEqual(block["open_units_estimated"], 1)
 
     def test_today_guard_clears_multiplier_completeness(self):
         for active, multiplier in ((0.2, 3.0), (1.0, 60.0)):
