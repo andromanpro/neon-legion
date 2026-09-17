@@ -72,6 +72,17 @@ class OssSanitizeTests(unittest.TestCase):
         self.assertEqual((oss.BACKUP_DIR / "README.md").read_text(encoding="utf-8"), "customer-name-x\n")
         self.assertEqual(readme.read_text(encoding="utf-8"), "<client>\n")
 
+    def test_apply_keeps_each_file_line_endings(self):
+        # 2026-09-17: on Windows --apply rewrote LF files with CRLF, turning 21
+        # path substitutions into a 1,326-line diff across 13 files.
+        self.write_private_rule()
+        for name, eol in (("lf.md", b"\n"), ("crlf.md", b"\r\n")):
+            (self.root / name).write_bytes(b"customer-name-x" + eol + b"public" + eol)
+        code, _stdout, _stderr = self.run_main("--apply", "--globs", "lf.md", "crlf.md")
+        self.assertEqual(code, 0)
+        self.assertEqual((self.root / "lf.md").read_bytes(), b"<client>\npublic\n")
+        self.assertEqual((self.root / "crlf.md").read_bytes(), b"<client>\r\npublic\r\n")
+
     def test_apply_idempotent(self):
         self.write_private_rule()
         readme = self.root / "README.md"
