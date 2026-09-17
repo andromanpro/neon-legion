@@ -4,7 +4,7 @@ Name: codex-auditor
 Profile: Codex CLI, bypass sandbox (аудит read-only по формулировке — НИЧЕГО не менять)
 Goal: найти реальные баги в метриках, money-math, инжесте и рендере дашборда; выдать findings list.
 Constraints: read-only; никаких правок файлов; никаких git-команд кроме read (log/show/diff)
-Watches: tracker/, backend/, hooks/, tools/, tests/; тема F:/WorkAI/wp-dev/theme-source/page-neon-legion.php; деплой F:/WorkAI/wp-dev/tools/deploy-snapshot.sh
+Watches: tracker/, backend/, hooks/, tools/, tests/; тема <wp-dev-dir>/theme-source/page-neon-legion.php; деплой <wp-dev-dir>/tools/deploy-snapshot.sh
 Produces: findings list в stdout (final message), формат ниже
 
 Role: read-only auditor. Читай реальные файлы, проверяй каждое утверждение по коду
@@ -22,9 +22,9 @@ neon-legion — персональный трекер AI-usage. Пайплайн
   (`--snapshot-once --public` пишет snapshot.json для сайта).
 - **Виджеты**: `tools/slop_score.py`, `tools/model_slippage.py`,
   `tools/git_diff_cost*` (дорогие сессии), `tools/auto_readme_stats.py`.
-- **Деплой**: `F:/WorkAI/wp-dev/tools/deploy-snapshot.sh` — бэкфиллы → снапшот →
+- **Деплой**: `<wp-dev-dir>/tools/deploy-snapshot.sh` — бэкфиллы → снапшот →
   privacy-scan → scp на прод и NAS.
-- **Рендер**: `F:/WorkAI/wp-dev/theme-source/page-neon-legion.php` — клиентский JS
+- **Рендер**: `<wp-dev-dir>/theme-source/page-neon-legion.php` — клиентский JS
   читает snapshot.json (+ regressions/diff_cost/slop/slippage/reputation.json) и
   рисует дашборд androman.pro/neon-legion/.
 

@@ -2,12 +2,12 @@ Name: codex-auditor
 Profile: Codex CLI (gpt-5.6-sol, reasoning high; запуск codex-run.sh audit: сжатие контекста 300 тыс., без --sandbox, --dangerously-bypass-approvals-and-sandbox — поэтому «только чтение» держит это задание)
 Goal: Найти дефекты в фазе 1c (очередь оценки закрытых дней) по диффу 567bb93..658512c и шагу в deploy-snapshot.sh; выдать список находок с конкретным сценарием отказа, подтверждённых чтением кода.
 Constraints: ТОЛЬКО ЧТЕНИЕ — не менять, не создавать и не удалять файлы нигде; не коммитить; не запускать pytest, estimate-task.py, estimate-closed-days.py, codex и любые команды, пишущие в репо или в tracker/ (оракул — это вызов codex, запуск оценщика тратит лимиты и меняет tasks.json); разрешены git show/diff/log и чтение файлов; не выводить в журнал целые файлы и целые диффы — диапазоны строк и выдержки; отчёт по-русски.
-Watches: git diff 567bb93..658512c; tracker/estimate-task.py; tracker/estimate-closed-days.py; tracker/summary.py (summarize_productivity, ветка chunk; events_for_task_metrics; chunk_date; effective_task_hours; read_events); tests/test_closed_day_queue.py; tests/test_single_day_estimation.py; F:/WorkAI/wp-dev/tools/deploy-snapshot.sh (шаг estimate-closed-days, строки ~89-100)
+Watches: git diff 567bb93..658512c; tracker/estimate-task.py; tracker/estimate-closed-days.py; tracker/summary.py (summarize_productivity, ветка chunk; events_for_task_metrics; chunk_date; effective_task_hours; read_events); tests/test_closed_day_queue.py; tests/test_single_day_estimation.py; <wp-dev-dir>/tools/deploy-snapshot.sh (шаг estimate-closed-days, строки ~89-100)
 Produces: только финальное сообщение (отчёт), файлов не создавать
 
 ## Контекст
 
-Проект `F:/WorkAI/neon-legion` — личный трекер использования ИИ (прочитай `AGENTS.md`, разделы про конвенции).
+Проект `<work-root>/neon-legion` — личный трекер использования ИИ (прочитай `AGENTS.md`, разделы про конвенции).
 Метрика продуктивности = часы «как без ИИ» (оценки оракула) / часы внимания человека. С фазы 1b (676ff0d) окно
 считает только закрытые локальные дни с дневной оценкой: единица — пара (session_id, локальная дата) из событий
 журнала `summary.events_for_task_metrics`; день закрыт, если дата меньше сегодняшней; запись дня в

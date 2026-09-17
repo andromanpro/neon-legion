@@ -1,7 +1,7 @@
 Name: codex-consultant
 Profile: Codex CLI (gpt-5.6-sol, xhigh reasoning; --sandbox не передаётся). Задача ТОЛЬКО НА ЧТЕНИЕ.
 Goal: Предложить правильную методику подсчёта продуктивности для режима, в котором человек не создаёт новые сессии, а неделями работает в старых со сжатием контекста; выдать проектный документ с рекомендацией, миграцией, тестами и замером эффекта на текущих данных.
-Constraints: не изменять ни одного файла в F:/WorkAI/neon-legion; не запускать оракул оценки (estimate-task.py, codex exec внутри него); не коммитить; черновые скрипты и выводы — только в F:/temp/codex-work/long-session-design/; утверждения о данных — только проверенные запуском, с числами.
+Constraints: не изменять ни одного файла в <work-root>/neon-legion; не запускать оракул оценки (estimate-task.py, codex exec внутри него); не коммитить; черновые скрипты и выводы — только в F:/temp/codex-work/long-session-design/; утверждения о данных — только проверенные запуском, с числами.
 Watches: tracker/summary.py (summarize_productivity, chunk-ветка, read_lifetime_session_event_counts, _human_attention_hours_for_units, is_human_prompt), tracker/estimate-task.py (estimate_session, build_truncated_context_from_messages, чанковая нарезка), hooks/claude-session-start.py (needs_estimation, dispatch), tracker/codex_transcript.py, tracker/tasks.json, tracker/*-events.jsonl, ~/.claude/projects/*/*.jsonl
 Produces: F:/temp/codex-work/long-session-design/design.md, F:/temp/codex-work/long-session-design/result.json
 

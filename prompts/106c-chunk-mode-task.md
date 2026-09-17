@@ -9,7 +9,7 @@ Produces: tracker/summary.py, backend/server.py, tools/rechunk_estimate.py (scri
 
 ## Operational backstory
 
-workspace-write sandbox in `F:/WorkAI/neon-legion` (ASCII). Python stdlib only, git, ChatGPT-auth. PowerShell may be policy-blocked — do NOT loop; **architect runs pytest + the backfill (LLM) + before/after on host**. You write deterministic code + tests and self-verify by reading. The per-day re-estimation makes many oracle calls — that is an architect/host step, NOT sandbox. MCP stderr noise is harmless.
+workspace-write sandbox in `<work-root>/neon-legion` (ASCII). Python stdlib only, git, ChatGPT-auth. PowerShell may be policy-blocked — do NOT loop; **architect runs pytest + the backfill (LLM) + before/after on host**. You write deterministic code + tests and self-verify by reading. The per-day re-estimation makes many oracle calls — that is an architect/host step, NOT sandbox. MCP stderr noise is harmless.
 
 ## Read first (exact regions)
 

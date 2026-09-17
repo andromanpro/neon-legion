@@ -8,7 +8,7 @@ Produces: правки в tracker/summary.py, новый tests/test_chunk_baseli
 ## Operational backstory
 
 Windows 10, Git Bash как оболочка, Python вызывается строго `py -3.14`. Рабочий каталог
-проекта — `F:/WorkAI/neon-legion`. Тесты: `py -3.14 -m pytest tests/ -q` (сейчас 434
+проекта — `<work-root>/neon-legion`. Тесты: `py -3.14 -m pytest tests/ -q` (сейчас 434
 проходят, ни одного падения — это базовая линия, ронять её нельзя). Сеть не нужна.
 Оракул оценки (`codex exec` внутри estimate-task.py) в этой задаче не запускать: он
 тратит минуты и деньги, а проверять правку надо на уже существующих данных.
@@ -115,7 +115,7 @@ if not present_chunk_keys:
 ## Как проверить пересчёт
 
 ```bash
-cd F:/WorkAI/neon-legion
+cd <work-root>/neon-legion
 PRODUCTIVITY_UNIT=chunk py -3.14 -c "
 import importlib.util, sys
 from datetime import date, timedelta

@@ -9,7 +9,7 @@ Produces: tracker/estimate-task.py, tracker/oracle-prompt.txt, tools/eval-oracle
 
 ## Operational backstory
 
-workspace-write sandbox in `F:/WorkAI/neon-legion` (ASCII path). Python stdlib only, git, ChatGPT-auth. On Windows your shell may be PowerShell-wrapped/policy-blocked — do NOT loop on blocked commands; **the architect runs the eval harness + pytest on host** (the eval makes many `codex exec` oracle calls — that is an architect/human validation gate, not a sandbox step). You statically write code + the prompt + tests and self-verify by reading. MCP stderr noise is harmless.
+workspace-write sandbox in `<work-root>/neon-legion` (ASCII path). Python stdlib only, git, ChatGPT-auth. On Windows your shell may be PowerShell-wrapped/policy-blocked — do NOT loop on blocked commands; **the architect runs the eval harness + pytest on host** (the eval makes many `codex exec` oracle calls — that is an architect/human validation gate, not a sandbox step). You statically write code + the prompt + tests and self-verify by reading. MCP stderr noise is harmless.
 
 ## Project context (read first)
 

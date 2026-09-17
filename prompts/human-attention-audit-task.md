@@ -61,7 +61,7 @@ Read and audit these:
 - **Fallback double-application**: when a session falls back to AI timestamps
   AND is also date-restricted, is the day-filter applied consistently so the
   fallback isn't silently emptied or over-counted?
-- **all-time window** (`F:/WorkAI/wp-dev/tools/deploy-snapshot.sh`, if readable):
+- **all-time window** (`<wp-dev-dir>/tools/deploy-snapshot.sh`, if readable):
   now computes `--snapshot-days` from the earliest event across all provider
   jsonl. Sanity-check: does a 130-day window break the 60d/30d/7d period
   sub-windows or the timeline weights list length? Any off-by-one on the

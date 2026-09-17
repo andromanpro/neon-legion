@@ -2,12 +2,12 @@ Name: codex-developer
 Profile: Codex CLI (gpt-5.6-sol, xhigh reasoning; --sandbox не передаётся; запуск с -c model_auto_compact_token_limit=300000)
 Goal: Сделать очередь оценки закрытых дней, не зависящую от оценки сессии целиком: одиночная оценка дня тем же входом, отбор дней на оценку и переоценку, ограниченный шаг в деплое; закрыть тестами без вызова оракула и показать размер очереди сухим прогоном.
 Constraints: только stdlib в tracker/; оракул в тестах — только заглушкой, живой вызов в этой задаче запрещён (разрешён только сухой прогон `--list`); не менять tracker/*-events.jsonl; tasks.json менять только через существующий update_task_entry и только в коде, не руками и не в этой задаче; не коммитить; не выводить в журнал целые файлы и диффы; английский в коде, отчёт по-русски.
-Watches: tracker/estimate-task.py (estimate_session, дневной цикл, main), tracker/backfill-codex-estimates.py, F:/WorkAI/wp-dev/tools/deploy-snapshot.sh (стр. ~72), tracker/codex_transcript.py (is_human_driven, is_rollout)
+Watches: tracker/estimate-task.py (estimate_session, дневной цикл, main), tracker/backfill-codex-estimates.py, <wp-dev-dir>/tools/deploy-snapshot.sh (стр. ~72), tracker/codex_transcript.py (is_human_driven, is_rollout)
 Produces: правки tracker/estimate-task.py, новый tracker/estimate-closed-days.py, шаг в deploy-snapshot.sh, тесты в tests/, F:/temp/codex-work/phase1c/result.json
 
 ## Контекст
 
-Проект `F:/WorkAI/neon-legion`, прочитай `AGENTS.md`. Метрика = часы «как без ИИ»
+Проект `<work-root>/neon-legion`, прочитай `AGENTS.md`. Метрика = часы «как без ИИ»
 (оценки оракула) / часы внимания. Владелец неделями работает в старых сессиях со
 сжатием контекста. Решение: истина — дневные оценки закрытых дней; сессия — оболочка.
 
@@ -79,7 +79,7 @@ Produces: правки tracker/estimate-task.py, новый tracker/estimate-clo
 
 ### 3. Деплой
 
-В `F:/WorkAI/wp-dev/tools/deploy-snapshot.sh` после шага `backfill-codex-estimates.py`
+В `<wp-dev-dir>/tools/deploy-snapshot.sh` после шага `backfill-codex-estimates.py`
 (стр. ~72) добавить шаг `estimate-closed-days.py --limit 3 --timeout 600` в том же
 стиле: сбой шага не валит деплой, вывод укорочен. Владелец согласен, что очередь
 разбирается медленно.

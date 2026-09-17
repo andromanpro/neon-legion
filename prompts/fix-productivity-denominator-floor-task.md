@@ -9,11 +9,11 @@ Produces: tracker/summary.py, backend/server.py, tests/<new+updated>, schemas/<i
 
 ## Operational backstory
 
-workspace-write sandbox in `F:/WorkAI/neon-legion` (ASCII path). Python stdlib only, git, ChatGPT-auth. On Windows your shell commands may be wrapped in PowerShell and blocked by policy — do NOT loop trying to run pytest; **the architect runs the test suite on host**. You statically write code + tests and verify by reading. Network is blocked (no pip install). MCP stderr noise is harmless.
+workspace-write sandbox in `<work-root>/neon-legion` (ASCII path). Python stdlib only, git, ChatGPT-auth. On Windows your shell commands may be wrapped in PowerShell and blocked by policy — do NOT loop trying to run pytest; **the architect runs the test suite on host**. You statically write code + tests and verify by reading. Network is blocked (no pip install). MCP stderr noise is harmless.
 
 ## Working directory
 
-`F:/WorkAI/neon-legion` (your `--cd`).
+`<work-root>/neon-legion` (your `--cd`).
 
 ## Project context (read first)
 

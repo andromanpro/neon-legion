@@ -9,7 +9,7 @@ Produces: tracker/estimate-task.py, tests/test_live_chunk_estimation.py
 
 ## Operational backstory
 
-workspace-write sandbox in `F:/WorkAI/neon-legion` (ASCII). Python stdlib only, git, ChatGPT-auth. PowerShell may be policy-blocked — do NOT loop; **the architect runs pytest on host**. You write code + tests and self-verify by reading. No real Codex/oracle calls in sandbox (unit tests mock `run_oracle`). MCP stderr noise harmless.
+workspace-write sandbox in `<work-root>/neon-legion` (ASCII). Python stdlib only, git, ChatGPT-auth. PowerShell may be policy-blocked — do NOT loop; **the architect runs pytest on host**. You write code + tests and self-verify by reading. No real Codex/oracle calls in sandbox (unit tests mock `run_oracle`). MCP stderr noise harmless.
 
 ## Read first (exact)
 
