@@ -1,5 +1,7 @@
 # neon-legion
 
+![Tests](https://github.com/andromanpro/neon-legion/actions/workflows/check.yml/badge.svg)
+
 ![neon-legion local AI command banner](docs/branding/hero-banner.svg)
 
 > **Your personal AI legion. Almost no fucking swearing. _(Yes, we count yours.)_**
@@ -67,7 +69,7 @@ across tracker JSONL, orchestrator state, and dashboard snapshots.
 polls the OpenCode SQLite database and reuses the idempotent backfill importer.
 It logs only non-empty ticks unless `--verbose` is set.
 
-**Tests.** The core suite is 53 stdlib `unittest` cases across orchestrator,
+**Tests.** The suite currently runs 544 stdlib `unittest` cases across orchestrator,
 adapter, hindsight, and sanitizer behavior. Run it with
 `python -m unittest discover -s tests -v`; see [tests/README.md](tests/README.md).
 

@@ -63,15 +63,19 @@ third opinion through OpenCode + OpenRouter. See
 
 ## Testing
 
-There is no formal test suite yet. Before submitting a change:
+Run the isolated stdlib suite from the repository root:
 
-1. `python -m py_compile <touched files>` — must pass.
-2. `python tracker/summary.py --days 30` — must run without errors against
-   a representative `tracker/claude-events.jsonl`.
-3. `python backend/server.py --snapshot-once --snapshot-path /tmp/test.json` —
-   must produce a valid JSON snapshot.
-4. If you touch the dashboard, render it locally and verify period filter +
-   language switch still work.
+    python -m unittest discover -s tests -v
+    python tools/oss-sanitize.py --check
+
+GitHub Actions runs these checks on Linux and Windows with Python 3.11 and 3.14.
+See [tests/README.md](tests/README.md) for fixture conventions. The tests use
+synthetic data and mock CLI calls; they do not need AI accounts or live tracker
+files. The generic sanitizer is an extra check, not a complete secret scanner.
+
+For dashboard changes, also render locally and verify the period filter and
+language switch. Live collection and cross-machine integrations need separate
+checks in an appropriate environment.
 
 ## Commit messages
 
