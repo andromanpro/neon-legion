@@ -63,9 +63,10 @@ third opinion through OpenCode + OpenRouter. See
 
 ## Testing
 
-Run the isolated stdlib suite from the repository root:
+Install the development test runner, then run the complete isolated suite:
 
-    python -m unittest discover -s tests -v
+    python -m pip install -r requirements-dev.txt
+    python -m pytest -q
     python tools/oss-sanitize.py --check
 
 GitHub Actions runs these checks on Linux and Windows with Python 3.11 and 3.14.

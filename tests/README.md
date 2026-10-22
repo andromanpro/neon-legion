@@ -1,8 +1,12 @@
 # Tests
 
-Run the suite from the repo root with `python -m unittest discover -s tests -v`.
+Install the test runner and run the complete suite from the repository root:
 
-The suite is stdlib `unittest`. It uses `tempfile` fixtures for isolated
+    python -m pip install -r requirements-dev.txt
+    python -m pytest -q
+
+The suite contains unittest classes and pytest functions. The tracker and backend
+remain stdlib-only; pytest is a development dependency. It uses `tempfile` fixtures for isolated
 worktrees and mocks subprocess calls instead of launching Claude, Codex,
 OpenCode, git, or release tooling.
 

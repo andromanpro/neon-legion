@@ -46,7 +46,10 @@ def _force_rmtree(path: Path) -> None:
         except OSError:
             pass
 
-    shutil.rmtree(path, onexc=_on_error)
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(path, onexc=_on_error)
+    else:
+        shutil.rmtree(path, onerror=_on_error)
 
 
 def event(session_id: str, ts: datetime, cost: float = 1.0) -> dict:

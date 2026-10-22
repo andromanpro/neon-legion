@@ -9,3 +9,8 @@ updates:
       compatible-updates:
         patterns: ["*"]
         update-types: [minor, patch]
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3

@@ -238,7 +238,8 @@ def main() -> int:
         # newline="" on both ends keeps each file's own line endings: the default
         # text mode wrote LF files back as CRLF on Windows, turning a handful of
         # substitutions into a whole-file diff (2026-09-17).
-        original = f.read_text(encoding="utf-8", newline="")
+        with f.open("r", encoding="utf-8", newline="") as stream:
+            original = stream.read()
         new, hits = sanitize_text(original)
         if not hits:
             continue
@@ -261,7 +262,8 @@ def main() -> int:
             sys.stdout.writelines(diff)
         elif args.apply:
             backup_file(f)
-            f.write_text(new, encoding="utf-8", newline="")
+            with f.open("w", encoding="utf-8", newline="") as stream:
+                stream.write(new)
             print(f"  → rewritten (backup in .oss-backup/{rel})")
 
     print()

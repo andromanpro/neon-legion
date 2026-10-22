@@ -69,9 +69,9 @@ across tracker JSONL, orchestrator state, and dashboard snapshots.
 polls the OpenCode SQLite database and reuses the idempotent backfill importer.
 It logs only non-empty ticks unless `--verbose` is set.
 
-**Tests.** The suite currently runs 544 stdlib `unittest` cases across orchestrator,
-adapter, hindsight, and sanitizer behavior. Run it with
-`python -m unittest discover -s tests -v`; see [tests/README.md](tests/README.md).
+**Tests.** The complete suite currently runs 611 tests, including tracker, orchestrator,
+adapter, hindsight, and sanitizer behavior. Install `requirements-dev.txt` and
+run `python -m pytest -q`; see [tests/README.md](tests/README.md).
 
 **Config as TOML.** [`tools/config.py`](tools/config.py) merges
 `config.example.toml`, ignored `config.toml`, and explicit env-var overrides.

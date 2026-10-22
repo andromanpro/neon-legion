@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import sys
 import tempfile
 import time
 import unittest
@@ -133,13 +134,13 @@ class SupervisorTests(unittest.TestCase):
         ]
 
     def test_a_run_that_finishes_releases_its_lock(self) -> None:
-        supervisor.estimator_command = lambda *_a: ["py", "-3.14", "-c", "pass"]
+        supervisor.estimator_command = lambda *_a: [sys.executable, "-c", "pass"]
         (self.root / "s1.lock").write_text("0", encoding="ascii")
         self.assertEqual(supervisor.main(["s1", "transcript.jsonl", "60"]), 0)
         self.assertFalse((self.root / "s1.lock").exists())
 
     def test_a_run_past_its_deadline_is_killed_and_reported(self) -> None:
-        supervisor.estimator_command = lambda *_a: ["py", "-3.14", "-c", "import time; time.sleep(120)"]
+        supervisor.estimator_command = lambda *_a: [sys.executable, "-c", "import time; time.sleep(120)"]
         (self.root / "s1.lock").write_text("0", encoding="ascii")
         started = time.monotonic()
         code = supervisor.main(["s1", "transcript.jsonl", "1"])
@@ -150,7 +151,7 @@ class SupervisorTests(unittest.TestCase):
         self.assertIn("estimator_deadline_exceeded", self.ops_codes())
 
     def test_a_failing_run_is_reported_not_swallowed(self) -> None:
-        supervisor.estimator_command = lambda *_a: ["py", "-3.14", "-c", "raise SystemExit(3)"]
+        supervisor.estimator_command = lambda *_a: [sys.executable, "-c", "raise SystemExit(3)"]
         (self.root / "s1.lock").write_text("0", encoding="ascii")
         supervisor.main(["s1", "transcript.jsonl", "60"])
         self.assertIn("estimator_failed", self.ops_codes())
