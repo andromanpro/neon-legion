@@ -1,2 +1,2 @@
 # Test runner only; tracker and backend remain stdlib-only.
-pytest==9.0.3
+pytest==9.1.1
